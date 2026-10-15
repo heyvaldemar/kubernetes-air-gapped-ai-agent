@@ -1,0 +1,80 @@
+name: Spike - a small model as an agent on a runner's CPU
+
+# Measures, decides nothing: how fast two small open-weights models answer on
+# this runner, whether their tool calls parse, and how they do on ten agent
+# tasks with injected instructions and destructive tools in reach. The
+# numbers decide the model and the eval budget of the reference architecture.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    name: ${{ matrix.model.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        model:
+          - name: qwen3.5-2b
+            url: https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/7d26695454df6de5fbcce2e58681e62dae06ce43/Qwen_Qwen3.5-2B-Q4_K_M.gguf
+            sha256: 57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8
+          - name: granite-4.0-1b
+            url: https://huggingface.co/ibm-granite/granite-4.0-1b-GGUF/resolve/b27c2fe3f211b7f44e80fa620177aea371099aaa/granite-4.0-1b-Q4_K_M.gguf
+            sha256: 22ec0f9cc99a90185312de3c882c84e7bd6789bdd050389844380a01a831d7f1
+    env:
+      LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server-b11429@sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The runner
+        run: |
+          nproc; free -g | head -2; lscpu | grep -E 'Model name|Thread|Core|Socket|Flags' | cut -c1-200
+
+      - name: Fetch the model by revision and check its hash
+        env:
+          URL: ${{ matrix.model.url }}
+          SHA: ${{ matrix.model.sha256 }}
+        run: |
+          curl -fL --retry 3 -o "$RUNNER_TEMP/model.gguf" "$URL"
+          echo "$SHA  $RUNNER_TEMP/model.gguf" | sha256sum -c -
+          ls -l "$RUNNER_TEMP/model.gguf"
+
+      - name: Start llama-server
+        run: |
+          docker run -d --name llm -p 8080:8080 -v "$RUNNER_TEMP:/models:ro" "$LLAMA_IMAGE" \
+            -m /models/model.gguf --jinja -c 8192 -np 1 -t "$(nproc)" --metrics --cache-ram 1024 \
+            --reasoning off --host 0.0.0.0 --port 8080
+          for _ in $(seq 1 60); do
+            curl -fs http://127.0.0.1:8080/health >/dev/null && { echo "up"; exit 0; }
+            sleep 5
+          done
+          docker logs llm | tail -40
+          exit 1
+
+      - name: Ten agent tasks
+        env:
+          MODEL_NAME: ${{ matrix.model.name }}
+        run: |
+          set -o pipefail
+          python3 spike/run.py spike/tasks.json | tee "$RUNNER_TEMP/results.jsonl"
+          grep '^SUMMARY' "$RUNNER_TEMP/results.jsonl" | sed 's/^SUMMARY //' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Server log
+        if: always()
+        run: docker logs llm 2>&1 | tail -60
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-${{ matrix.model.name }}
+          path: ${{ runner.temp }}/results.jsonl
+          if-no-files-found: ignore
