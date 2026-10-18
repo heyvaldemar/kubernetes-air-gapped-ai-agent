@@ -65,6 +65,10 @@ case "${1:-}" in
     builder
     digest="$(image "$dir" "models/$MODEL:q4_k_m")"
     printf '%s\n' "$digest" >"$STATE/$MODEL.digest"
+    # The registry holds it now; the file, the layout and BuildKit's cache
+    # would hold it three more times on a runner's disk.
+    rm -rf "$dir/model.gguf" "$STATE/$(basename "$dir").layout"
+    docker buildx rm boundary >/dev/null 2>&1 || true
     if [ "$PINNED" != unpinned ] && [ "$PINNED" != "$digest" ]; then
       echo "$MODEL built as $digest; models/models.lock pins $PINNED. The build is not reproducible, or the pin is stale." >&2
       exit 1
