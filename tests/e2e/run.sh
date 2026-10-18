@@ -129,7 +129,7 @@ refused() {  # refused <what> <image reference> <expected message>
 model="$(kubectl -n inference get deployment llama -o jsonpath='{.spec.template.spec.volumes[0].image.reference}')"
 refused "weights nobody signed" "$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")" unsigned "signed with the operator's key"
 refused "weights signed by a key the cluster does not trust" "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" stranger "signed with the operator's key"
-refused "the signed model named by tag, not digest" "$REG/models/granite-4.0-1b:q4_k_m" bytag "by digest"
+refused "the signed model named by tag, not digest" "${model%@*}:q4_k_m" bytag "by digest"
 refused "an image volume from outside the models path" "$BUSYBOX" elsewhere "only from registry.boundary.internal:5000/models"
 if out="$(mount_pod control "$model")"; then pass "admitted: the signed model, by digest"; else fail "the signed model was refused: $(head -c 300 <<<"$out")"; fi
 

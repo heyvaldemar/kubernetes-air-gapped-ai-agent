@@ -25,7 +25,8 @@ CA="$STATE/ca.crt"
 BUILDKIT=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 say() { printf '== %s\n' "$*"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-read -r MODEL URL SHA _license PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | head -n 1)
+# MODEL picks a line of models/models.lock; the first is the default.
+read -r MODEL URL SHA _license PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
 
 # cosign and oras read the registry's CA from the bundle they are given.
 bundle() {

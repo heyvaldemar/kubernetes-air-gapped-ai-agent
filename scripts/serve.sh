@@ -5,7 +5,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
-read -r MODEL _ _ _ PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | head -n 1)
+# MODEL picks a line of models/models.lock; the first is the default.
+read -r MODEL _ _ _ PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
 digest="$PINNED"; [ "$digest" = unpinned ] && digest="$(cat "$STATE/$MODEL.digest")"
 ref="registry.boundary.internal:5000/models/$MODEL@$digest"
 sed "s#@MODEL@#$ref#" "$ROOT/manifests/inference/llama.yaml" | kubectl apply -f - >/dev/null
