@@ -1,0 +1,32 @@
+# Where model weights may come from, checked by the API server itself: an
+# image volume in a verified namespace names an image under the models path
+# inside the boundary, by digest. Kyverno checks who signed it; this checks
+# the shape without Kyverno, so the rule holds while Kyverno is down.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: model-volumes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        boundary.heyvaldemar.com/models: verified
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  validations:
+    - expression: >-
+        object.spec.?volumes.orValue([]).all(v, !has(v.image) ||
+          (v.image.reference.startsWith('registry.boundary.internal:5000/models/') && v.image.reference.contains('@sha256:')))
+      message: model weights come only from registry.boundary.internal:5000/models, by digest
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: model-volumes
+spec:
+  policyName: model-volumes
+  validationActions: [Deny]

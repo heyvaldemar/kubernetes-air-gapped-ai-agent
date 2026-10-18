@@ -3,3 +3,13 @@
 # signatures and attestations refer to it, into the registry inside the
 # boundary, under its original host and path, before the boundary closes.
 docker.io/library/busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+# llama.cpp's server, CPU build b11429 (v0.6.0)
+ghcr.io/ggml-org/llama.cpp:server-b11429@sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1
+# Kyverno 1.19.1, as admission/kyverno-images.yaml pins it
+ghcr.io/kyverno/readiness-checker:v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf
+reg.kyverno.io/kyverno/background-controller:v1.19.1@sha256:8f1e9143373a27578cafc2d28d2c66ba0926c63b4c77e63de8d2fdd4a122859f
+reg.kyverno.io/kyverno/cleanup-controller:v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e
+reg.kyverno.io/kyverno/kyverno-cli:v1.19.1@sha256:ced7b2be0b04250cabfe695f15307f69eb715fe23234816388af4f3812915b2a
+reg.kyverno.io/kyverno/kyverno:v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb
+reg.kyverno.io/kyverno/kyvernopre:v1.19.1@sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09
+reg.kyverno.io/kyverno/reports-controller:v1.19.1@sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c

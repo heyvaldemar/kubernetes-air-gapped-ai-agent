@@ -21,7 +21,7 @@ jobs:
   e2e:
     name: The boundary holds
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,8 +40,25 @@ jobs:
           ./scripts/airgap.sh seed
           ./scripts/airgap.sh mirror
 
+      - name: The model, built reproducibly, signed, and two plants
+        run: |
+          ./scripts/model.sh build
+          ./scripts/model.sh sign
+          ./scripts/model.sh plants
+
+      - name: The admission chart, fetched and checked
+        run: ./scripts/admission.sh fetch
+
       - name: Close the boundary
         run: ./scripts/airgap.sh close
+
+      - name: Kyverno and the model policies, from inside
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: The model server, serving the signed model
+        run: ./scripts/serve.sh
 
       - name: Prove it
         env:
@@ -52,6 +69,8 @@ jobs:
         if: failure()
         run: |
           kubectl get pods -A -o wide || true
+          kubectl -n inference describe pod -l app=llama | tail -30 || true
+          kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=40 || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
           node="$(kind get nodes --name air-gapped | head -1)"
           docker exec "$node" sh -c 'cat /etc/resolv.conf; ls /etc/containerd/certs.d; cat /etc/containerd/certs.d/docker.io/hosts.toml' || true

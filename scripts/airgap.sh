@@ -58,9 +58,12 @@ case "${1:-}" in
     docker rm -f "$REGISTRY" >/dev/null 2>&1 || true
     docker run -d --name "$REGISTRY" --network kind --restart=always \
       -v "$ROOT/airgap/zot.json:/etc/zot/config.json:ro" -v "$STATE:/etc/zot/tls:ro" \
-      -p 127.0.0.1:5001:5000 "$ref" >/dev/null
-    for _ in $(seq 1 30); do curl -fs --cacert "$CA" https://127.0.0.1:5001/v2/ >/dev/null && break; sleep 1; done
-    curl -fs --cacert "$CA" https://127.0.0.1:5001/v2/ >/dev/null || { docker logs "$REGISTRY" | tail -20; exit 1; }
+      -p 127.0.0.1:5000:5000 "$ref" >/dev/null
+    # The host reaches it by the same name the cluster does, so a signature
+    # names the image exactly as the admission policy will look it up.
+    grep -q " $NAME$" /etc/hosts || echo "127.0.0.1 $NAME" | sudo tee -a /etc/hosts >/dev/null
+    for _ in $(seq 1 30); do curl -fs --cacert "$CA" "https://$NAME:5000/v2/" >/dev/null && break; sleep 1; done
+    curl -fs --cacert "$CA" "https://$NAME:5000/v2/" >/dev/null || { docker logs "$REGISTRY" | tail -20; exit 1; }
     say "zot is up as https://$NAME:5000 ($(registry_ip) on kind's network)"
     ;;
   seed)
@@ -69,8 +72,8 @@ case "${1:-}" in
       name="${ref%@*}"; digest="${ref#*@}"; repo="${name%:*}"; tag="${name##*:}"
       # Both the digest and the tag: a pod names the image by both, and the
       # copy keeps the digest because it copies the whole index.
-      oras cp -r --to-ca-file "$CA" "$repo@$digest" "127.0.0.1:5001/$repo:$tag" >/dev/null
-      got="$(oras manifest fetch --ca-file "$CA" --descriptor "127.0.0.1:5001/$repo:$tag" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')"
+      oras cp -r --to-ca-file "$CA" "$repo@$digest" "$NAME:5000/$repo:$tag" >/dev/null
+      got="$(oras manifest fetch --ca-file "$CA" --descriptor "$NAME:5000/$repo:$tag" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')"
       [ "$got" = "$digest" ] || { echo "seeded $repo:$tag as $got, wanted $digest" >&2; exit 1; }
       say "seeded $repo:$tag@${digest:0:19}"
     done <"$ROOT/airgap/images.txt"

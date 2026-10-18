@@ -1,0 +1,25 @@
+# Kyverno for one kind node: one replica of each controller, with requests
+# and limits. On a real cluster the admission controller runs three replicas
+# (see aws-eks-reference-platform): image verification is a webhook, and a
+# webhook that is down is either an outage or a hole (docs/threat-model.md).
+admissionController:
+  replicas: 1
+  container:
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {memory: 512Mi}
+backgroundController:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+cleanupController:
+  replicas: 1
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}
+reportsController:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}

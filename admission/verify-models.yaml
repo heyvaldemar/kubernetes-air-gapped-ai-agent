@@ -1,0 +1,60 @@
+# A pod in a namespace labelled boundary.heyvaldemar.com/models=verified may
+# mount model weights only from the registry inside the boundary, by digest,
+# signed with the operator's key. Verified with no network beyond the
+# registry: the key is inline, and the transparency log is skipped because
+# nothing inside the boundary can reach one. That is a weaker guarantee than
+# keyless signing with a log, and this file says so where it does it.
+#
+# Kyverno 1.19 extracts images from containers, init containers and
+# ephemeral containers only; an image volume is not checked unless a policy
+# asks (kyverno/kyverno#17555 would add it). The `images` entry below asks.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-models
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  webhookConfiguration:
+    timeoutSeconds: 30
+  evaluation:
+    background:
+      enabled: false
+  autogen:
+    podControllers:
+      controllers: []
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        boundary.heyvaldemar.com/models: verified
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  images:
+    - name: volumes
+      expression: >-
+        object.spec.?volumes.orValue([]).filter(v, has(v.image)).map(v, v.image.reference)
+  matchImageReferences:
+    - glob: "registry.boundary.internal:5000/models/*"
+  validationConfigurations:
+    verifyDigest: true
+    mutateDigest: false
+    required: true
+  attestors:
+    - name: operator
+      cosign:
+        key:
+          data: |
+            @OPERATOR_KEY@
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        images.volumes.all(i, i.startsWith('registry.boundary.internal:5000/models/') && i.contains('@sha256:'))
+      message: model weights come only from registry.boundary.internal:5000/models, by digest
+    - expression: >-
+        images.volumes.map(i, verifyImageSignatures(i, [attestors.operator])).all(n, n > 0)
+      message: model weights are signed with the operator's key
