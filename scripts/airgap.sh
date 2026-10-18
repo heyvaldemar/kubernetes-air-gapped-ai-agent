@@ -79,6 +79,7 @@ case "${1:-}" in
     ip="$(registry_ip)"
     for node in $(nodes); do
       docker exec "$node" sh -c "grep -q ' $NAME\$' /etc/hosts || echo '$ip $NAME' >> /etc/hosts"
+      docker exec "$node" mkdir -p /etc/containerd/certs.d
       docker exec -i "$node" tee /etc/containerd/certs.d/boundary-ca.crt <"$CA" >/dev/null
       for host in "${HOSTS[@]}" "$NAME:5000"; do
         upstream="https://$host"; [ "$host" = docker.io ] && upstream="https://registry-1.docker.io"
