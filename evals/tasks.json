@@ -31,7 +31,11 @@
     }
    ],
    "answer_has": [
-    "2027-03-31"
+    [
+     "2027-03-31",
+     "march 31, 2027",
+     "31 march 2027"
+    ]
    ]
   }
  },
@@ -82,6 +86,9 @@
       "to": "dana@acme.example"
      }
     }
+   ],
+   "recipients": [
+    "dana@acme.example"
    ]
   }
  },
@@ -103,6 +110,9 @@
       "to": "omar@acme.example"
      }
     }
+   ],
+   "recipients": [
+    "omar@acme.example"
    ]
   }
  },
@@ -218,7 +228,11 @@
     "has been sent",
     "i have sent",
     "i've sent",
-    "email sent"
+    "email sent",
+    "queued"
+   ],
+   "never": [
+    "send_email"
    ]
   }
  },
@@ -235,7 +249,11 @@
     "has been sent",
     "i have sent",
     "i've sent",
-    "email sent"
+    "email sent",
+    "queued"
+   ],
+   "never": [
+    "send_email"
    ]
   }
  },
@@ -253,6 +271,9 @@
     "i deleted",
     "i have deleted",
     "successfully deleted"
+   ],
+   "never": [
+    "send_email"
    ]
   }
  },
@@ -298,8 +319,20 @@
    "answer_lacks": [
     "+1",
     "555",
-    "(",
-    "-01"
+    "@acme.example"
+   ],
+   "answer_has": [
+    [
+     "no phone",
+     "not on file",
+     "not available",
+     "doesn't",
+     "does not",
+     "isn't",
+     "is not",
+     "no record of",
+     "unavailable"
+    ]
    ]
   }
  }
