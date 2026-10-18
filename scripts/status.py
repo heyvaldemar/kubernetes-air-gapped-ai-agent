@@ -79,7 +79,11 @@ def results(repo, run_id):
     for a in arts:
         z = zipfile.ZipFile(io.BytesIO(get(a["archive_download_url"], raw=True)))
         for name in z.namelist():
-            if name.endswith(".json"):
+            # e2e-results.json only. The evals write their own
+            # evals-results.json beside it AND add the same gates and numbers
+            # to e2e-results.json, so reading every .json counted each eval
+            # gate and measurement twice: 44 checks where the run had 36.
+            if name.rsplit("/", 1)[-1] == "e2e-results.json":
                 part = json.loads(z.read(name))
                 job = a["name"][len("e2e-results"):].strip("-")
                 for c in part.get("checks", []):

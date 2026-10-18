@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Fixed
+
+- The status branch counted every eval gate and measurement twice: each model's artifact carries the evals' own `evals-results.json` beside `e2e-results.json`, which already holds the same lines, and `scripts/status.py` read both. The first release run read as 44 checks where it had 36. It reads `e2e-results.json` only.
 
 ## [1.0.0] - 2026-10-18
 
