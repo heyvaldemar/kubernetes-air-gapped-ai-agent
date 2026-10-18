@@ -1,0 +1,8 @@
+# One node is enough for what this proves: everything the cluster runs comes
+# from a registry inside the boundary, and nothing leaves it.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: air-gapped
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5

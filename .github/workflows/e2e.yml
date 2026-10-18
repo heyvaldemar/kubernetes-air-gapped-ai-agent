@@ -1,0 +1,67 @@
+name: Air-gapped e2e
+
+# Builds the boundary and proves it: a kind cluster whose images come from a
+# registry inside, with the runner's firewall, the node's DNS and CoreDNS
+# closed, then checks that nothing gets out and that what is inside still
+# comes up. See scripts/airgap.sh and tests/e2e/run.sh.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: The boundary holds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Create the cluster
+        run: kind create cluster --config kind/cluster.yaml --wait 120s
+
+      - name: The registry inside, seeded, and the node pointed at it
+        run: |
+          ./scripts/airgap.sh registry
+          ./scripts/airgap.sh seed
+          ./scripts/airgap.sh mirror
+
+      - name: Close the boundary
+        run: ./scripts/airgap.sh close
+
+      - name: Prove it
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/run.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
+          node="$(kind get nodes --name air-gapped | head -1)"
+          docker exec "$node" sh -c 'cat /etc/resolv.conf; ls /etc/containerd/certs.d; cat /etc/containerd/certs.d/docker.io/hosts.toml' || true
+          sudo iptables -S DOCKER-USER || true
+          docker logs kind-registry 2>&1 | tail -20 || true
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore

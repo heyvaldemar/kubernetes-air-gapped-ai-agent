@@ -1,0 +1,5 @@
+# Every image the cluster runs that its node image does not already carry,
+# by tag and digest. scripts/airgap.sh seed copies each, with whatever
+# signatures and attestations refer to it, into the registry inside the
+# boundary, under its original host and path, before the boundary closes.
+docker.io/library/busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
