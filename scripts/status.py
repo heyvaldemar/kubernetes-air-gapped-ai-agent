@@ -14,7 +14,8 @@ when E2E_RESULTS is set). Writes:
                             and measurements
     badge-days.json         shields.io endpoint: green days in the window
     badge-checks.json       shields.io endpoint: the latest run's checks
-    badge-<measure>.json    one per measurement the run printed
+    badge-<measure>.json    one per measurement the run printed; with one
+                            job per model, badge-<model>-<measure>.json
 
 A day counts as green when its last finished run passed; the run count beside
 it shows the failures that rule hides. The streak counts green days back from
@@ -83,8 +84,18 @@ def results(repo, run_id):
                 job = a["name"][len("e2e-results"):].strip("-")
                 for c in part.get("checks", []):
                     merged["checks"].append(dict(c, job=job) if job else c)
-                merged["measured"] += part.get("measured", [])
+                # One job per model: each measurement says whose it is, or
+                # the second model's badges would overwrite the first's.
+                merged["measured"] += ["%s · %s" % (job, m) if job else m for m in part.get("measured", [])]
     return merged
+
+
+def outcome(check):
+    """PASS or FAIL: tests/e2e/run.sh and scripts/evals.sh write "passed",
+    the sandbox's run.sh writes "state"; both are read the same."""
+    if "state" in check:
+        return check["state"]
+    return "PASS" if check.get("passed") else "FAIL"
 
 
 def badge(label, message, color):
@@ -114,8 +125,8 @@ def main(out):
     latest = finished[-1] if finished else None
     res = results(repo, latest["id"]) if latest else None
     checks = res["checks"] if res else []
-    passed = sum(1 for c in checks if c.get("state") == "PASS")
-    failed = sum(1 for c in checks if c.get("state") == "FAIL")
+    passed = sum(1 for c in checks if outcome(c) == "PASS")
+    failed = sum(1 for c in checks if outcome(c) == "FAIL")
 
     status = {
         "repository": repo,
@@ -126,7 +137,7 @@ def main(out):
         "green_days": len(green),
         "streak_days": streak,
         "runs": len(finished),
-    "runs_passed": sum(1 for r in finished if r["conclusion"] == "success"),
+        "runs_passed": sum(1 for r in finished if r["conclusion"] == "success"),
         "latest": None if not latest else {
             "conclusion": latest["conclusion"],
             "at": latest["created_at"],

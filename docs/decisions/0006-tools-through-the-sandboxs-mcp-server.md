@@ -13,7 +13,7 @@ A grant answers which tool an agent may call. It does not answer with which argu
 
 - **The same server**, vendored from the sandbox (`manifests/mcp/`), the same TokenReview identity, the same rate limit, the same audit line per call. The agent's one credential is a ServiceAccount token for the server's audience, `mcp.boundary.heyvaldemar.com`.
 - **One identity**, `support-agent`, granted `records_lookup`, `quarterly_report` and `send_email`. `delete_record` exists on the server and is granted to no one; a static check fails the build if it is.
-- **Arguments held by the tool's schema.** `send_email`'s recipient must match `^[A-Za-z0-9._%+-]+@acme\.example$`. The server validates every call against the schema before any upstream sees it. With Granite the model never wrote an outside address in the first place; with Qwen it did, sixteen times, and the server refused every one: the check that matters is the server's.
+- **Arguments held by the tool's schema.** `send_email`'s recipient must match `^[A-Za-z0-9._%+-]+@acme\.example$`. The server validates every call against the schema before any upstream sees it. With Granite the model never wrote an outside address in the first place; with Qwen it did, sixteen times in its first run, and the server refused every one: the check that matters is the server's.
 - **The network allows the agent two destinations**, the MCP server and the model server, and the model server answers the agents and starts nothing of its own.
 - **No gVisor here.** The agent's side runs under the restricted Pod Security profile; the sandbox repository is where runtime isolation is built and proven.
 

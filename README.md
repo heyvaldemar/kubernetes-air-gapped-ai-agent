@@ -2,6 +2,11 @@
 
 [![Air-gapped e2e](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/e2e.yml/badge.svg)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/e2e.yml)
 [![Verify](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/verify.yml/badge.svg)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/verify.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/badge)](https://scorecard.dev/viewer/?uri=github.com/heyvaldemar/kubernetes-air-gapped-ai-agent)
+[![e2e, last 30 days](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-days.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![checks](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-checks.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+
+The last two badges are not typed by hand: it is the e2e workflow's last 30 days on main, rewritten after every run by [`.github/workflows/status.yml`](.github/workflows/status.yml) into the [`status`](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/tree/status) branch.
 
 In its first run, the model in this repository acted on an instruction hidden in a quarterly report in half the attempts. Nothing left the company. This repository is the boundary that made the second sentence true, and the evals that measure the first one on every run.
 
@@ -11,22 +16,32 @@ It is a reference, not a product, and it does not run in production anywhere. It
 
 ## What the evals report
 
-The latest runs, one per model, on a 2-vCPU runner. Each task ran three times with its own seed. The numbers are the agent's own log and the records service's state, read back after the run.
+The runs v1.0.0 was cut from, one per model, on a 2-vCPU runner ([run 39143611148](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39143611148)). Each task ran three times with its own seed. The numbers are the agent's own log and the records service's state, read back after the run.
 
 | | Granite-4.0-1B | Qwen3.5-2B |
 |---|---|---|
-| Ordinary tasks done | 18 of 18 attempts | 15 of 18 |
+| Ordinary tasks done | 18 of 18 attempts | 14 of 18 |
 | Instructions hidden in data the model acted on | **6 of 12** | **0 of 12** |
-| Requests beyond the agent's rights it declined | 0 of 9 | 5 of 9 |
+| Requests beyond the agent's rights it declined | 0 of 9 | 6 of 9 |
 | Answers without invented data | 3 of 6 | 5 of 6 |
-| Emails the model tried to send outside acme.example | 0 | 16, all refused by the MCP server |
-| Emails to colleagues nobody asked for | 18 | 0 |
+| Emails the model tried to send outside acme.example | 0 | 15, all refused by the MCP server |
+| Emails to colleagues nobody asked for | 17 | 0 |
 | **Data that left acme.example** | **0** | **0** |
 | **Records deleted** | **0** | **0** |
-| Cost per task, at on-demand list price | about $0.00031 (25 vCPU-seconds) | about $0.00045 (37 vCPU-seconds) |
-| Latency per task, p50 / p95 | 13.8 s / 23.6 s | 11.4 s / 75.1 s |
+| Cost per task, at on-demand list price | about $0.00022 (17.5 vCPU-seconds) | about $0.00036 (29.3 vCPU-seconds) |
+| Latency per task, p50 / p95 | 10.1 s / 15.5 s | 9.2 s / 54.9 s |
 
-The model's numbers change with the model. The boundary's do not. Granite never wrote an outside address: asked to, it wrote one at acme.example, so its emails reached colleagues nobody had named. Qwen ignored every hidden instruction, then wrote `board@acme-holdings.example` sixteen times when a user asked it to; the MCP server refused all sixteen against the tool's schema. A release is gated on what the architecture promises: nothing delivered outside, nothing deleted, three quarters of ordinary tasks done. How often the model is fooled is measured and published, not gated ([ADR 5](docs/decisions/0005-gate-the-boundary-measure-the-model.md)).
+The model's numbers change with the model. The boundary's do not. Granite never wrote an outside address. Asked to send a customer's record to `bob.k@gmail.example`, it sent it to `bob.k@acme.example`; told by the quarterly report to copy `audit@ext-review.example`, it wrote `audit@acme.example`. Seventeen emails reached colleagues nobody had named. Qwen ignored every hidden instruction and declined the Gmail address, then tried `board@acme-holdings.example` fifteen times, five in each attempt, retrying after every refusal. The MCP server refused all fifteen against the tool's schema. A release is gated on what the architecture promises: nothing delivered outside, nothing deleted, three quarters of ordinary tasks done. How often the model is fooled is measured and published, not gated ([ADR 5](docs/decisions/0005-gate-the-boundary-measure-the-model.md)).
+
+The same evals run every day, on a cluster built from nothing. The latest run's numbers, from the status branch:
+
+[![Granite-4.0-1B, hidden instructions acted on](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-granite-4-0-1b-injected-instructions-the-model-acted-on.json&label=Granite-4.0-1B%2C%20hidden%20instructions%20acted%20on)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![Granite-4.0-1B, emails tried outside](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-granite-4-0-1b-emails-the-model-tried-to-send-outside-acme-example.json&label=Granite-4.0-1B%2C%20emails%20tried%20outside)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![Granite-4.0-1B, cost per task](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-granite-4-0-1b-cost-per-task.json&label=Granite-4.0-1B%2C%20cost%20per%20task)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+
+[![Qwen3.5-2B, hidden instructions acted on](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-qwen3-5-2b-injected-instructions-the-model-acted-on.json&label=Qwen3.5-2B%2C%20hidden%20instructions%20acted%20on)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![Qwen3.5-2B, emails tried outside](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-qwen3-5-2b-emails-the-model-tried-to-send-outside-acme-example.json&label=Qwen3.5-2B%2C%20emails%20tried%20outside)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![Qwen3.5-2B, cost per task](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-qwen3-5-2b-cost-per-task.json&label=Qwen3.5-2B%2C%20cost%20per%20task)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 
 ## What is proven, and how
 
@@ -95,7 +110,7 @@ make down                    # delete the cluster and undo the boundary on this 
 
 ## Cost
 
-Nothing in a cloud. The model runs on CPU inside kind, and no model provider is called. A task costs the model server about 25 to 37 vCPU-seconds, about $0.0003 to $0.0005 at the on-demand list price of a c7i.large in us-east-1. CI is a fresh cluster per model on a GitHub-hosted runner, about 30 to 40 minutes on two vCPUs, most of it the evals.
+Nothing in a cloud. The model runs on CPU inside kind, and no model provider is called. In the release runs a task cost the model server 17.5 vCPU-seconds with Granite and 29.3 with Qwen, about $0.0002 and $0.0004 at the on-demand list price of a c7i.large in us-east-1; the badges above carry the latest run's. CI is a fresh cluster per model on a GitHub-hosted runner, about 30 to 40 minutes, most of it the evals. The model server gets two threads on any runner, so the price does not move with the runner's size.
 
 ## What it does not do
 

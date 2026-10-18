@@ -8,6 +8,11 @@ name: Air-gapped e2e
 on:
   push:
     branches: [main]
+  # Every day, so a boundary that stops holding, a model that stops
+  # verifying or an eval that moves is seen within a day of upstream
+  # changing under it.
+  schedule:
+    - cron: "29 4 * * *"
   workflow_dispatch:
 
 permissions:
