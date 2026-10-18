@@ -18,6 +18,10 @@
 #   policies      the signature policy extracts image volumes and verifies
 #                 them, and the native policy holds them to the models path,
 #                 by digest
+#   mlbom         every model's AI-BOM, written from its line in
+#                 models/models.lock by scripts/mlbom.py, is a valid
+#                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
+#                 ci-images.pins; needs Docker)
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -147,8 +151,23 @@ check_policies() {
   return "$ok"
 }
 
+check_mlbom() {
+  local img ok=0 n=0 name url sha lic
+  img="$(sed -n 's/^CYCLONEDX_IMAGE=//p' ci-images.pins)"
+  mkdir -p out/mlbom
+  while read -r name url sha lic _; do
+    n=$((n + 1))
+    python3 scripts/mlbom.py "$name" "$url" "$sha" "$lic" >"out/mlbom/$name.json" || { echo "$name: no AI-BOM could be written"; ok=1; continue; }
+    docker run --rm -v "$PWD/out/mlbom:/b:ro" "$img" validate --input-file "/b/$name.json" \
+        --input-format json --input-version v1_6 --fail-on-errors >/dev/null 2>&1 \
+      || { echo "$name: its AI-BOM is not valid CycloneDX 1.6"; ok=1; }
+  done < <(grep -vE '^\s*(#|$)' models/models.lock)
+  [ "$ok" = 0 ] && echo "every model's AI-BOM is valid CycloneDX 1.6 ($n models)"
+  return "$ok"
+}
+
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

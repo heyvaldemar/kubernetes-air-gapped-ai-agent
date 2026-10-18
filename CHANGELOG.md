@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Added
+
+- Static check `mlbom`: every model's AI-BOM, written from its lock line, is validated against the CycloneDX 1.6 schema with `cyclonedx-cli` 0.33.1, pinned by digest in `ci-images.pins`, on every push. A planted violation, a model whose component type the schema does not know, shows the check can fail.
 
 ## [1.1.0] - 2026-10-18
 

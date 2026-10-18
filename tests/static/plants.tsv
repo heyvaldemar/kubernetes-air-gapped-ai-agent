@@ -6,3 +6,4 @@
 "evals/tasks.json"	"\"category\": \"grounding\""	"\"category\": \"grounded\""	"evals"	"a task in a category nobody scores"
 "admission/verify-models.yaml"	"object.spec.?volumes.orValue([]).filter(v, has(v.image)).map(v, v.image.reference)"	"object.spec.containers.map(c, c.image)"	"policies"	"a signature policy that no longer looks at image volumes"
 "admission/verify-models.yaml"	"c.licenses.exists(l, l.license.id in ['Apache-2.0', 'MIT'])"	"c.licenses.exists(l, true)"	"policies"	"a model policy that no longer reads the AI-BOM's licence"
+"scripts/mlbom.py"	"            \"type\": \"machine-learning-model\",\n"	"            \"type\": \"model\",\n"	"mlbom"	"an AI-BOM whose model is not a CycloneDX component type"
