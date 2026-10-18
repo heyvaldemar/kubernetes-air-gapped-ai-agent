@@ -1,0 +1,53 @@
+# The agent, run through the evals: one Job, as the support-agent identity,
+# with a token for the MCP server's audience only and no Kubernetes API
+# token. It reaches the MCP server and the model server, and nothing else
+# (network-policies.yaml).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: evals
+  namespace: agents
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 2700
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: evals
+    spec:
+      restartPolicy: Never
+      serviceAccountName: support-agent
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: agent
+          image: docker.io/library/python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
+          command: [python3, /evals/harness.py]
+          env:
+            - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+            - {name: ATTEMPTS, value: "3"}
+            - {name: MODEL_THREADS, value: "2"}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 250m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: evals, mountPath: /evals, readOnly: true}
+            - {name: mcp-token, mountPath: /var/run/secrets/mcp, readOnly: true}
+      volumes:
+        - name: evals
+          configMap: {name: evals}
+        - name: mcp-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: mcp.boundary.heyvaldemar.com
+                  expirationSeconds: 3600

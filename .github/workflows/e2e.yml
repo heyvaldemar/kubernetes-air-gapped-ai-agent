@@ -21,7 +21,7 @@ jobs:
   e2e:
     name: The boundary holds
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,10 +70,18 @@ jobs:
       - name: The model server, serving the signed model
         run: ./scripts/serve.sh
 
-      - name: Prove it
+      - name: The tool side, inside
+        run: ./scripts/tools.sh
+
+      - name: Prove the boundary and the model's way in
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/run.sh
+
+      - name: Run the agent through the evals
+        env:
+          EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+        run: ./scripts/evals.sh
 
       - name: What the cluster looked like
         if: failure()
@@ -81,6 +89,8 @@ jobs:
           kubectl get pods -A -o wide || true
           kubectl -n inference describe pod -l app=llama | tail -30 || true
           kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=40 || true
+          kubectl -n agents logs job/evals --tail=20 || true
+          kubectl -n mcp logs deploy/mcp-server --tail=20 || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
           node="$(kind get nodes --name air-gapped | head -1)"
           docker exec "$node" sh -c 'cat /etc/resolv.conf; ls /etc/containerd/certs.d; cat /etc/containerd/certs.d/docker.io/hosts.toml' || true
@@ -92,5 +102,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-results
-          path: ${{ runner.temp }}/e2e-results.json
+          path: |
+            ${{ runner.temp }}/e2e-results.json
+            ${{ runner.temp }}/evals-results.json
+            .cache/airgap/evals.jsonl
+            .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore

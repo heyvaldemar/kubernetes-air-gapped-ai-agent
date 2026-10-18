@@ -1,0 +1,17 @@
+{
+ "audience": "mcp.boundary.heyvaldemar.com",
+ "rate_limit": {
+  "calls": 30,
+  "seconds": 10
+ },
+ "identities": {
+  "system:serviceaccount:agents:support-agent": {
+   "tools": [
+    "records_lookup",
+    "quarterly_report",
+    "send_email"
+   ],
+   "resources": []
+  }
+ }
+}

@@ -17,11 +17,12 @@
 #      cluster that reads a registry itself (an admission controller fetching
 #      a signature) finds it
 #   8. the registry speaks only TLS: a plain-HTTP request is refused
-#   9. the model server serves the signed model, mounted from its image
-#      volume, and answers an OpenAI-style request with a tool call
-#  10. admission refuses a pod that mounts model weights nobody signed, or
+#   9. admission refuses a pod that mounts model weights nobody signed, or
 #      signed by a key the cluster does not trust, or named by tag, or from
 #      anywhere but the models path inside; and admits the signed model
+#
+# The model's own answers are judged by scripts/evals.sh, from the agent's
+# side of the network policies.
 #
 # Writes $E2E_RESULTS (one JSON document) when set, for the status workflow.
 set -uo pipefail
@@ -101,17 +102,7 @@ else
   pass "the registry refuses plain HTTP (got ${code:-no answer})"
 fi
 
-step "9. the model server answers with a tool call"
-model="$(kubectl -n inference get deployment llama -o jsonpath='{.spec.template.spec.volumes[0].image.reference}')"
-req='{"messages":[{"role":"user","content":"What is the email address of customer C-1001?"}],"temperature":0,"max_tokens":200,"tools":[{"type":"function","function":{"name":"records_lookup","description":"One customer record by customer ID.","parameters":{"type":"object","properties":{"customer_id":{"type":"string"}},"required":["customer_id"]}}}]}'
-out="$(kubectl exec probe -- wget -q -T 120 -O - --header 'Content-Type: application/json' --post-data "$req" http://llama.inference.svc:8080/v1/chat/completions 2>&1 || true)"
-if grep -q '"records_lookup"' <<<"$out" && grep -q 'C-1001' <<<"$out"; then
-  pass "llama-server, serving $model, called records_lookup for C-1001"
-else
-  fail "no tool call from the model server: $(head -c 300 <<<"$out")"
-fi
-
-step "10. admission refuses model weights it cannot vouch for"
+step "9. admission refuses model weights it cannot vouch for"
 mount_pod() {  # mount_pod <name> <image reference>: a pod that mounts it as an image volume, server-side dry run
   kubectl apply --dry-run=server -f - 2>&1 <<YAML
 apiVersion: v1
@@ -135,6 +126,7 @@ refused() {  # refused <what> <image reference> <expected message>
   local out; out="$(mount_pod "$3-x" "$2" || true)"
   if grep -q "denied" <<<"$out" && grep -q "$4" <<<"$out"; then pass "refused: $1"; else fail "not refused as expected: $1: $(head -c 300 <<<"$out")"; fi
 }
+model="$(kubectl -n inference get deployment llama -o jsonpath='{.spec.template.spec.volumes[0].image.reference}')"
 refused "weights nobody signed" "$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")" unsigned "signed with the operator's key"
 refused "weights signed by a key the cluster does not trust" "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" stranger "signed with the operator's key"
 refused "the signed model named by tag, not digest" "$REG/models/granite-4.0-1b:q4_k_m" bytag "by digest"

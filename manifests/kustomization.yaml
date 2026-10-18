@@ -1,0 +1,24 @@
+# The tool side of the boundary: the agent's namespace and identity, the MCP
+# server, the records service it fronts, the report service, and the network
+# policies between them. The model server is applied by scripts/serve.sh,
+# which names the model by digest.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - mcp/mcp.yaml
+  - tools/gateway.yaml
+  - records/records.yaml
+  - network-policies.yaml
+configMapGenerator:
+  - name: mcp-server
+    namespace: mcp
+    files:
+      - mcp/server.py
+      - mcp/policy.json
+  - name: records-api
+    namespace: corp
+    files:
+      - records/records_api.py
+generatorOptions:
+  disableNameSuffixHash: true
