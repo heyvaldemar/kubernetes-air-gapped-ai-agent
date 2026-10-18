@@ -7,3 +7,10 @@
 # name  url-at-revision  sha256  license  image-digest
 granite-4.0-1b https://huggingface.co/ibm-granite/granite-4.0-1b-GGUF/resolve/b27c2fe3f211b7f44e80fa620177aea371099aaa/granite-4.0-1b-Q4_K_M.gguf 22ec0f9cc99a90185312de3c882c84e7bd6789bdd050389844380a01a831d7f1 Apache-2.0 sha256:8fd3132c43d508dbf2ad3b068216d56fc8206c0d6aac130270f60d600d70bb4c
 qwen3.5-2b https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/7d26695454df6de5fbcce2e58681e62dae06ce43/Qwen_Qwen3.5-2B-Q4_K_M.gguf 57a1085840f497d764a7fc5d346922dbde961efb54cc792ea81d694fd846a1d8 Apache-2.0 sha256:e707ad8d8f6468322b69e69e6ffc3d603773333413ec02ebf4488d8578310e4f
+# In the matrix to be measured, not shipped (TASK_FLOOR=off in the e2e matrix):
+# the same boundary, and the boundary's gates, around four more makers' models.
+# "unpinned" until the first e2e run prints the digest its reproducible build gives.
+ministral-3-3b https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/eb599d408350ea2bb60452cb86be7c7b2fc28227/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf 9ed150d4367e68df0ac8e1540f6ddc65b42d0ee26378329d1ecbca60f93fc5f8 Apache-2.0 unpinned
+granite-4.1-3b https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF/resolve/ab4701481089b58a082ef63cc1cee738887293ff/granite-4.1-3b-Q4_K_M.gguf 662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29 Apache-2.0 unpinned
+qwen3-4b-2507 https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/ae44f08e1392f39c0e474af10c3ff8355c8b6688/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf 2fde00ce69dd4899c70d020845e2638353015bba0fdf161b3eb965f2bca4464e Apache-2.0 unpinned
+nanbeige4.2-3b https://huggingface.co/bartowski/Nanbeige_Nanbeige4.2-3B-GGUF/resolve/17562eefe9752007209148d5f7a6e275fc8d8077/Nanbeige_Nanbeige4.2-3B-Q4_K_M.gguf b92d2e35c9876b0c4bc671996360204f4149d0546c23d5954d5eb3b106c81f24 Apache-2.0 unpinned

@@ -9,7 +9,7 @@ metadata:
   namespace: agents
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 2700
+  activeDeadlineSeconds: 3600
   template:
     metadata:
       labels:

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every model through the same boundary, every day ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)): four more Apache-2.0 models in the e2e matrix, from Mistral, IBM, Qwen and Nanbeige, measured rather than shipped. The boundary's gates hold for all six; the 60% task floor only for the two the release ships with.
+- `leaderboard.md` and `leaderboard.json` on the `status` branch: one row per model from the latest run, what it tried next to what got out, written by the status workflow.
+
+### Changed
+
+- The control for "nothing delivered outside" no longer depends on the model: the harness sends one email inside through the MCP server before the first task, and the run requires it in the outbox.
+- The model server's memory ceiling is 6 GiB, for the 4B models and their 8K-token cache; the evals Job may run an hour.
+
 ### Fixed
 
 - The status branch counted every eval gate and measurement twice: each model's artifact carries the evals' own `evals-results.json` beside `e2e-results.json`, which already holds the same lines, and `scripts/status.py` read both. The first release run read as 44 checks where it had 36. It reads `e2e-results.json` only.

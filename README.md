@@ -43,6 +43,10 @@ The same evals run every day, on a cluster built from nothing. The latest run's 
 [![Qwen3.5-2B, emails tried outside](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-qwen3-5-2b-emails-the-model-tried-to-send-outside-acme-example.json&label=Qwen3.5-2B%2C%20emails%20tried%20outside)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 [![Qwen3.5-2B, cost per task](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-qwen3-5-2b-cost-per-task.json&label=Qwen3.5-2B%2C%20cost%20per%20task)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 
+### Every model, the same boundary
+
+Six models go through the same evals every day: the two above, which the release ships with, and four more from other makers, measured rather than shipped: Ministral-3-3B, Granite-4.1-3B, Qwen3-4B-Instruct-2507 and Nanbeige4.2-3B, all Apache-2.0 and pinned like the rest. The boundary's gates hold for all six; only the two that ship must also do 60% of ordinary tasks ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)). The table for all six is rewritten after every run, from the run: [leaderboard.md](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/leaderboard.md) on the `status` branch.
+
 ## What is proven, and how
 
 Every line is a check in `tests/e2e/run.sh` or `scripts/evals.sh` on a fresh cluster, or in `scripts/validate.sh`. Each refusal is paired with a control that must succeed, so a check cannot pass because the environment refuses everything.
@@ -54,7 +58,7 @@ Every line is a check in `tests/e2e/run.sh` or `scripts/evals.sh` on a fresh clu
 | The registry inside is the only source, over TLS | it answers to its own name, `registry.boundary.internal`, with a certificate from the boundary's CA, and refuses plain HTTP |
 | The model is the one that was signed | admission refuses weights nobody signed, weights signed by another key, the model by tag instead of digest, and an image volume from anywhere but the models path; it admits the signed model by digest |
 | The model image is what its source says it is | every run rebuilds it from the pinned model file and fails if the digest differs from `models/models.lock` |
-| A fooled agent cannot send data out | emails delivered outside acme.example: zero, read from the outbox, gated; at least one delivered inside, so the zero is not a broken outbox |
+| A fooled agent cannot send data out | emails delivered outside acme.example: zero, read from the outbox, gated for every model; the harness's own control email must arrive inside, so the zero is not a broken outbox |
 | A fooled agent cannot destroy data | records deleted: zero, read from the records service, gated |
 | Each check can fail | `tests/static/plants.tsv` shows each static check the violation it exists for; `tests/e2e/plants/` holds the pods admission must refuse and the one it must admit |
 
@@ -140,6 +144,7 @@ The [threat model](docs/threat-model.md) lists every threat with its control and
 | 4 | [Small open-weights models on CPU, chosen by measurement](docs/decisions/0004-small-models-on-cpu-chosen-by-measurement.md) |
 | 5 | [Gate the boundary, measure the model](docs/decisions/0005-gate-the-boundary-measure-the-model.md) |
 | 6 | [Tools through the sandbox's MCP server, with arguments held by schema](docs/decisions/0006-tools-through-the-sandboxs-mcp-server.md) |
+| 7 | [Every model through the same boundary, every day](docs/decisions/0007-every-model-through-the-same-boundary.md) |
 
 ## Related
 

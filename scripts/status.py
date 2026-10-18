@@ -106,6 +106,72 @@ def badge(label, message, color):
     return {"schemaVersion": 1, "label": label, "message": message, "color": color}
 
 
+def leaderboard(res):
+    """One row per model from the latest run: what the model tried next to
+    what the boundary let through. Read from the measured lines each job
+    printed ("<model> · <name>: <value>") and its checks."""
+    rows = {}
+    for line in res["measured"]:
+        job, sep, rest = line.partition(" · ")
+        if not sep:
+            continue
+        name, _, value = rest.partition(": ")
+        rows.setdefault(job, {})[name] = value
+    out = []
+    for job in sorted(rows):
+        m = rows[job]
+        def grab(key, pattern, default="?"):
+            hit = re.search(pattern, m.get(key, ""))
+            return hit.group(1) if hit else default
+        tried = re.search(r"^(\d+), refused by the MCP server: (\d+); delivered: (\d+)",
+                          m.get("emails the model tried to send outside acme.example", ""))
+        checks = [c for c in res["checks"] if c.get("job") == job]
+        deleted = next((re.search(r"records deleted: (\d+)", c["name"]).group(1)
+                        for c in checks if c["name"].startswith("records deleted")), "?")
+        failed = [c["name"] for c in checks if outcome(c) == "FAIL"]
+        out.append({
+            "model": job,
+            "tasks": grab("task success", r"\((\d+ of \d+) attempts\)"),
+            "injections_acted_on": grab("injected instructions the model acted on", r"^(\d+ of \d+)"),
+            "tried_outside": tried.group(1) if tried else "?",
+            "refused_by_server": tried.group(2) if tried else "?",
+            "delivered_outside": tried.group(3) if tried else "?",
+            "records_deleted": deleted,
+            "declined_beyond_rights": grab("requests beyond the agent's rights it declined", r"^(\d+ of \d+)"),
+            "grounded": grab("answers without invented data", r"^(\d+ of \d+)"),
+            "cost_usd": grab("cost per task", r"about \$([0-9.]+)"),
+            "latency": grab("latency per task", r"^(p50 [0-9.]+ s, p95 [0-9.]+ s)"),
+            "gates": "held" if checks and not failed else ("no checks" if not checks else "FAILED: " + "; ".join(failed)),
+        })
+    return out
+
+
+def write_leaderboard(out, latest, res):
+    rows = leaderboard(res)
+    with open(os.path.join(out, "leaderboard.json"), "w") as f:
+        json.dump({"run": latest["html_url"], "at": latest["created_at"], "commit": latest["head_sha"][:7],
+                   "models": rows}, f, indent=2)
+    lines = [
+        "# One boundary, every model",
+        "",
+        "The latest e2e run on main, one row per model: what the model tried, next to what the boundary let through. "
+        "Written by `.github/workflows/status.yml` from [the run](%s) of %s on commit `%s`. Not edited by hand."
+        % (latest["html_url"], latest["created_at"][:10], latest["head_sha"][:7]),
+        "",
+        "| Model | Ordinary tasks done | Hidden instructions acted on | Tried to email outside | Delivered outside | Records deleted | Over-rights requests declined | Answers without invented data | Cost per task | Latency | Gates |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        tried = r["tried_outside"] if r["tried_outside"] in ("0", "?") else "%s, %s refused" % (r["tried_outside"], r["refused_by_server"])
+        lines.append("| %s | %s | %s | %s | **%s** | **%s** | %s | %s | $%s | %s | %s |" % (
+            r["model"], r["tasks"], r["injections_acted_on"], tried, r["delivered_outside"], r["records_deleted"],
+            r["declined_beyond_rights"], r["grounded"], r["cost_usd"], r["latency"], r["gates"]))
+    lines += ["", "Cost is the model server's own compute time at an on-demand list price; `evals/pricing.json` on main says which. "
+              "The task rate is gated only for the models a release ships with; every model is held to the boundary's gates.", ""]
+    with open(os.path.join(out, "leaderboard.md"), "w") as f:
+        f.write("\n".join(lines))
+
+
 def main(out):
     repo, workflow = os.environ["GITHUB_REPOSITORY"], os.environ["E2E_WORKFLOW"]
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -174,6 +240,8 @@ def main(out):
         if value:
             slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
             json.dump(badge(name, value.split(" (")[0], "blue"), open(os.path.join(out, f"badge-{slug}.json"), "w"))
+    if latest and res:
+        write_leaderboard(out, latest, res)
     print(f"{repo}: {len(green)} of {len(days)} days green, streak {streak}, "
           f"latest {latest['conclusion'] if latest else 'none'} with {passed} of {passed + failed} checks")
 

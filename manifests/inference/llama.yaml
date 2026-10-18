@@ -37,10 +37,12 @@ spec:
                  "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
           ports: [{name: http, containerPort: 8080}]
           # A small request so it schedules beside Kyverno on a 2-vCPU runner,
-          # and no CPU limit, so it takes whatever cores are idle.
+          # and no CPU limit, so it takes whatever cores are idle. The memory
+          # ceiling fits the largest model in the matrix: a 4B model at
+          # Q4_K_M is 2.5 GB, and its 8K-token KV cache about 1.2 GB more.
           resources:
             requests: {cpu: 250m, memory: 1536Mi}
-            limits: {memory: 3Gi}
+            limits: {memory: 6Gi}
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 5

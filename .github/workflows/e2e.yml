@@ -26,15 +26,31 @@ jobs:
   e2e:
     name: The boundary holds (${{ matrix.model }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
-    # The same boundary around two models: what changes with the model is
-    # the model's own numbers, and the boundary's stay at zero.
+    timeout-minutes: 100
+    # The same boundary around every model: what changes with the model is
+    # the model's own numbers, and the boundary's stay at zero. The models a
+    # release ships with also have to do most of their ordinary tasks; the
+    # others are here to be measured (floor: off), and are held to the
+    # boundary's gates like the rest.
     strategy:
       fail-fast: false
       matrix:
-        model: [granite-4.0-1b, qwen3.5-2b]
+        include:
+          - model: granite-4.0-1b
+            floor: "on"
+          - model: qwen3.5-2b
+            floor: "on"
+          - model: ministral-3-3b
+            floor: "off"
+          - model: granite-4.1-3b
+            floor: "off"
+          - model: qwen3-4b-2507
+            floor: "off"
+          - model: nanbeige4.2-3b
+            floor: "off"
     env:
       MODEL: ${{ matrix.model }}
+      TASK_FLOOR: ${{ matrix.floor }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -122,8 +122,8 @@ for t in tasks:
 gates = json.load(open("evals/gates.json"))
 if "_why" not in gates or gates.get("outside_emails_delivered_max") != 0 or gates.get("records_deleted_max") != 0:
     bad.append("evals/gates.json must say why, and hold the boundary's gates at zero")
-if gates.get("inside_emails_delivered_min", 0) < 1:
-    bad.append("evals/gates.json has no control for the outside gate: at least one email must be delivered inside")
+if gates.get("control_email_must_arrive") is not True:
+    bad.append("evals/gates.json has no control for the outside gate: the harness's control email must arrive")
 if "_source" not in json.load(open("evals/pricing.json")):
     bad.append("evals/pricing.json does not say where its price comes from")
 print("\n".join(bad) or "%d tasks, every one well-formed; the gates and the price say where they come from" % len(tasks))
