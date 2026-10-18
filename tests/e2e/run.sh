@@ -20,6 +20,9 @@
 #   9. admission refuses a pod that mounts model weights nobody signed, or
 #      signed by a key the cluster does not trust, or named by tag, or from
 #      anywhere but the models path inside; and admits the signed model
+#  10. everything inside came in one signed file: the registry inside held
+#      nothing when the bundle was loaded, it holds exactly what the bundle
+#      carried, and a bundle changed by one byte is refused and loads nothing
 #
 # The model's own answers are judged by scripts/evals.sh, from the agent's
 # side of the network policies.
@@ -119,6 +122,46 @@ for plant in "$ROOT"/tests/e2e/plants/*.yaml; do
     fail "$name: expected a refusal saying '$expect', got (rc=$rc): $(head -c 300 <<<"$out")"
   fi
 done
+
+step "10. everything inside came in one signed file"
+CA="$STATE/ca.crt"
+held() {  # every repo:tag@digest the registry inside holds
+  local repo tag
+  for repo in $(curl -fsS --cacert "$CA" "https://$REG/v2/_catalog?n=10000" | jq -r '.repositories[]'); do
+    for tag in $(curl -fsS --cacert "$CA" "https://$REG/v2/$repo/tags/list" | jq -r '.tags[]?'); do
+      printf '%s:%s@%s\n' "$repo" "$tag" "$(oras manifest fetch --ca-file "$CA" --descriptor "$REG/$repo:$tag" | jq -r .digest)"
+    done
+  done | sort
+}
+carried() {  # every repo:tag@digest in the bundle that was loaded
+  local index layout
+  find "$STATE/bundle.inside/oci" -name index.json | sort | while IFS= read -r index; do
+    layout="$(dirname "$index")"
+    jq -r --arg r "${layout#"$STATE/bundle.inside/oci/"}" \
+      '.manifests[] | select(.annotations["org.opencontainers.image.ref.name"]) | "\($r):\(.annotations["org.opencontainers.image.ref.name"])@\(.digest)"' "$index"
+  done | sort
+}
+if grep -qx 'repositories_before=0' "$STATE/bundle.loaded" 2>/dev/null; then
+  pass "the registry inside held nothing when the bundle was loaded"
+else
+  fail "the registry inside was not empty when the bundle was loaded: $(tr '\n' ' ' <"$STATE/bundle.loaded" 2>/dev/null)"
+fi
+now="$(held)"
+if [ -n "$now" ] && [ "$now" = "$(carried)" ]; then
+  pass "it holds exactly what the bundle carried ($(grep -c . <<<"$now") tags, by digest)"
+else
+  fail "what the registry holds differs from what the bundle carried: $(diff <(carried) <(echo "$now") | head -5 | tr '\n' ' ')"
+fi
+cp "$STATE/bundle.tar" "$STATE/bundle.tampered" && cp "$STATE/bundle.tar.sigstore.json" "$STATE/bundle.tampered.sigstore.json"
+printf 'X' | dd of="$STATE/bundle.tampered" bs=1 seek=4096 conv=notrunc 2>/dev/null
+cp "$STATE/bundle.loaded" "$STATE/bundle.loaded.kept"
+if ! BUNDLE="$STATE/bundle.tampered" "$ROOT/scripts/bundle.sh" load >/dev/null 2>&1 && [ "$(held)" = "$now" ]; then
+  pass "a bundle changed by one byte is refused, and loads nothing"
+else
+  fail "a bundle changed by one byte was not refused, or changed the registry"
+fi
+mv "$STATE/bundle.loaded.kept" "$STATE/bundle.loaded"
+rm -f "$STATE/bundle.tampered" "$STATE/bundle.tampered.sigstore.json"
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1
 printf '\n'; printf '%s\n' "${results[@]}"

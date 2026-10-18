@@ -1,5 +1,6 @@
 # The whole run, in the order CI runs it. `close` needs Linux (the host's
-# iptables); everything before it runs anywhere Docker does.
+# iptables), and the bundle GNU tar and coreutils; the steps before them run
+# anywhere Docker does.
 SHELL := /usr/bin/env bash
 CLUSTER ?= air-gapped
 MODEL ?= granite-4.0-1b
@@ -11,7 +12,7 @@ export PATH := $(BIN):$(PATH)
 
 help:
 	@echo "make check    the static checks, and each shown its planted violation"
-	@echo "make up       build the cluster and its boundary, seed it, close it, install inside"
+	@echo "make up       stage everything outside, carry it in as one signed file, close, install inside"
 	@echo "make test     prove the boundary and the model's way in"
 	@echo "make evals    run the agent through the evals and judge the run"
 	@echo "make down     delete the cluster and undo the boundary on this host"
@@ -32,7 +33,12 @@ up:
 	./scripts/model.sh sign
 	./scripts/model.sh plants
 	./scripts/admission.sh fetch
+	./scripts/bundle.sh create
+	./scripts/airgap.sh registry
+	rm -rf .cache/airgap/charts
+	./scripts/airgap.sh mirror
 	./scripts/airgap.sh close
+	./scripts/bundle.sh load
 	./scripts/admission.sh install
 	./scripts/admission.sh policy
 	./scripts/serve.sh

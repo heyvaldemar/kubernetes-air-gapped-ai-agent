@@ -89,7 +89,10 @@ case "${1:-}" in
   mirror)
     ip="$(registry_ip)"
     for node in $(nodes); do
-      docker exec "$node" sh -c "grep -q ' $NAME\$' /etc/hosts || echo '$ip $NAME' >> /etc/hosts"
+      # Replaced, not appended once: the registry inside may be a new container
+      # with a new address (bundle.sh's path replaces the staging one). The
+      # file is a bind mount, so it is rewritten in place, not renamed.
+      docker exec "$node" sh -c "grep -v ' $NAME\$' /etc/hosts > /tmp/hosts.new; echo '$ip $NAME' >> /tmp/hosts.new; cat /tmp/hosts.new > /etc/hosts"
       docker exec "$node" mkdir -p /etc/containerd/certs.d
       docker exec -i "$node" tee /etc/containerd/certs.d/boundary-ca.crt <"$CA" >/dev/null
       for host in "${HOSTS[@]}" "$NAME:5000"; do

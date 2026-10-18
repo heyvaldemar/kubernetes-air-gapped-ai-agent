@@ -88,8 +88,22 @@ jobs:
       - name: The admission chart, fetched and checked
         run: ./scripts/admission.sh fetch
 
-      - name: Close the boundary
-        run: ./scripts/airgap.sh close
+      # Everything above is the vendor's side: a connected machine with a
+      # staging registry. Everything the cluster runs leaves it as one
+      # signed file, and the staging registry is replaced by an empty one
+      # before the boundary closes, so nothing inside arrives any other way.
+      - name: Everything the cluster runs, in one signed file
+        run: ./scripts/bundle.sh create
+
+      - name: An empty registry inside, then close the boundary
+        run: |
+          ./scripts/airgap.sh registry
+          rm -rf .cache/airgap/charts
+          ./scripts/airgap.sh mirror
+          ./scripts/airgap.sh close
+
+      - name: Across the gap, the bundle verified and loaded
+        run: ./scripts/bundle.sh load
 
       - name: Kyverno and the model policies, from inside
         run: |
