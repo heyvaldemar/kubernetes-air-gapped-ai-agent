@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.1.0] - 2026-10-18
+
 ### Added
 
 - Every model through the same boundary, every day ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)): four more Apache-2.0 models in the e2e matrix, from Mistral, IBM, Qwen and OpenBMB, measured rather than shipped. The boundary's gates hold for all six; the 60% task floor only for the two the release ships with.
@@ -38,5 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/releases/tag/v1.0.0
