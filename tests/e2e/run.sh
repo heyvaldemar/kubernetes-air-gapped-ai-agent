@@ -13,6 +13,10 @@
 #      its original name: the mirror has nothing, and upstream is cut
 #   6. an image that is inside comes up by its original name and digest,
 #      served from the registry inside, and is the pod the checks above ran in
+#   7. a pod resolves the registry's own name, which is how anything in the
+#      cluster that reads a registry itself (an admission controller fetching
+#      a signature) finds it
+#   8. the registry speaks only TLS: a plain-HTTP request is refused
 #
 # Writes $E2E_RESULTS (one JSON document) when set, for the status workflow.
 set -uo pipefail
@@ -72,6 +76,22 @@ if docker exec "$NODE" timeout 60 crictl pull docker.io/library/alpine:3.20 >/de
   fail "the node pulled docker.io/library/alpine:3.20, which is not inside the boundary"
 else
   pass "the node cannot pull docker.io/library/alpine:3.20 (not inside the boundary)"
+fi
+
+step "7. a pod resolves the registry's own name"
+want="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' kind-registry)"
+if kubectl exec probe -- nslookup -timeout=3 registry.boundary.internal 2>/dev/null | sed -n '/^Name:/,$p' | grep -q "Address: $want"; then
+  pass "a pod resolves registry.boundary.internal to the registry inside ($want)"
+else
+  fail "a pod does not resolve registry.boundary.internal to $want"
+fi
+
+step "8. the registry speaks only TLS"
+code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:5001/v2/ || true)"
+if [ "$code" = 200 ]; then
+  fail "the registry answered plain HTTP with 200"
+else
+  pass "the registry refuses plain HTTP (got ${code:-no answer})"
 fi
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1
