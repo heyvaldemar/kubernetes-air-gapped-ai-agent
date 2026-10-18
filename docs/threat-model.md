@@ -32,7 +32,7 @@ What this reference architecture defends against, the control for each threat, a
 ## Residual risks
 
 - **The model is fooled, and oversteps.** In the first runs, Granite-4.0-1B acted on an instruction hidden in a report in half the injection attempts and declined none of the requests beyond its rights; Qwen3.5-2B ignored every hidden instruction and still tried to email outside when a user asked it to. The architecture is designed for both; a reader should know them.
-- **Misdirected email inside the company.** The schema holds recipients to the company's domain, not to the right person. A model that is fooled emails a colleague nobody named. A recipient allowlist per task, or a person approving each send, would close it.
+- **Misdirected email inside the company.** The schema holds recipients to the company's domain, not to the right person. A model that is fooled emails a colleague nobody named. In the run v1.1.0 was cut from, the four models that never wrote an outside address sent 47 such emails between them; the two that tried outside, and were refused, sent none. A recipient allowlist per task, or a person approving each send, would close it.
 - **No transparency log.** Signatures are checked by key alone. A stolen key signs anything, and nothing public records it. Keyless signing with a TUF mirror inside the boundary is the step after kyverno#17883.
 - **The keys are made per run.** In CI the operator's signing key and the boundary's CA are generated on the runner. In a real install they are the site's, kept off any build machine.
 - **No runtime isolation for the agent here.** The agent's side runs under the restricted Pod Security profile, not under gVisor; the sandbox repository is where that is built.
