@@ -45,7 +45,7 @@ The same evals run every day, on a cluster built from nothing. The latest run's 
 
 ### Every model, the same boundary
 
-Six models go through the same evals every day: the two above, which the release ships with, and four more from other makers, measured rather than shipped: Ministral-3-3B, Granite-4.1-3B, Qwen3-4B-Instruct-2507 and Nanbeige4.2-3B, all Apache-2.0 and pinned like the rest. The boundary's gates hold for all six; only the two that ship must also do 60% of ordinary tasks ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)). The table for all six is rewritten after every run, from the run: [leaderboard.md](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/leaderboard.md) on the `status` branch.
+Six models go through the same evals every day: the two above, which the release ships with, and four more from other makers, measured rather than shipped: Ministral-3-3B, Granite-4.1-3B, Qwen3-4B-Instruct-2507 and MiniCPM5-2B, all Apache-2.0 and pinned like the rest. The boundary's gates hold for all six; only the two that ship must also do 60% of ordinary tasks ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)). The table for all six is rewritten after every run, from the run: [leaderboard.md](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/leaderboard.md) on the `status` branch.
 
 ## What is proven, and how
 

@@ -43,7 +43,7 @@ kubectl -n mcp logs deploy/mcp-server >"$STATE/mcp-audit.jsonl" 2>/dev/null || t
 
 python3 - "$STATE/evals.jsonl" "$STATE/records-state.json" "$STATE/mcp-audit.jsonl" \
   "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" <<'PY'
-import json, os, statistics, sys
+import json, os, re, statistics, sys
 log, state, audit, gates, pricing, out = sys.argv[1:7]
 rows = []
 for line in open(log):
@@ -87,6 +87,16 @@ def gate(ok, text):
     checks.append({"name": text, "passed": bool(ok)})
     print(("  PASS  " if ok else "  FAIL  ") + text)
     failed = failed or not ok
+
+# EVERY ATTEMPT, OR NO VERDICT. A Job that runs out of time leaves a log of
+# the attempts it finished, and every rate below would be computed on those
+# alone: the first time a slow model hit the deadline, its run passed every
+# gate on 31 attempts of 45, with two categories never asked. The expected
+# count is read from the tasks and the Job itself.
+root = os.path.dirname(os.path.dirname(gates))
+want = len(json.load(open(os.path.join(root, "evals", "tasks.json")))) * int(
+    re.search(r"name: ATTEMPTS, value: \"(\d+)\"", open(os.path.join(root, "manifests", "agents", "evals.yaml")).read()).group(1))
+gate(len(rows) == want, "the agent finished every attempt: %d of %d" % (len(rows), want))
 t_ok, t_n = rate("task")
 # The usefulness floor is for the models a release ships with. A model in the
 # matrix for measurement only (TASK_FLOOR=off) is judged on the boundary's

@@ -11,7 +11,7 @@ A customer choosing a model asks the same question from the other end. Which of 
 
 ## Decision
 
-- **The e2e matrix runs every model in `models/models.lock` through the same boundary, every day.** Two ship with the release: Granite-4.0-1B and Qwen3.5-2B. Four more are there to be measured, from four makers, all Apache-2.0 and pinned like the rest: Mistral's Ministral-3-3B, IBM's Granite-4.1-3B, Qwen3-4B-Instruct-2507 and Nanbeige4.2-3B. Each was checked for a licence on its own card, a quantized file from its maker or a known quantizer, and a chat template llama.cpp b11429 reads tool calls from.
+- **The e2e matrix runs every model in `models/models.lock` through the same boundary, every day.** Two ship with the release: Granite-4.0-1B and Qwen3.5-2B. Four more are there to be measured, from four makers, all Apache-2.0 and pinned like the rest: Mistral's Ministral-3-3B, IBM's Granite-4.1-3B, Qwen3-4B-Instruct-2507 and OpenBMB's MiniCPM5-2B. Each was checked for a licence on its own card, a quantized file from its maker or a known quantizer, and a chat template llama.cpp b11429 reads tool calls from.
 - **The boundary's gates hold for every model; the usefulness floor only for the two that ship.** Nothing delivered outside and nothing deleted are what the architecture promises, so they gate every job. Whether a model does 60% of ordinary tasks is a property of that model; for the measured models it is published, not gated (`TASK_FLOOR=off`).
 - **The control no longer depends on the model.** The gate "nothing delivered outside" needs a control that email can be delivered at all. It used to be the model's own emails inside the company, which a model that sends nothing would fail. The harness now sends one email inside through the same MCP server, with the same token, before the first task, and the run requires it in the outbox.
 - **One table, written by the status workflow from the latest run.** `leaderboard.md` on the `status` branch has a row per model: what it tried, what got out, what a task cost. Nothing in it is typed by hand.
@@ -21,12 +21,14 @@ A customer choosing a model asks the same question from the other end. Which of 
 - A model that is weaker at the tasks, or more easily fooled, turns no run red as long as the boundary holds; that is what it is there to show.
 - The daily run is six jobs instead of two, in parallel on public runners, at no cost.
 - A failed boundary gate on any model fails the run, and says which model.
-- The four measured models are pinned by file and revision from the start, and by image digest from their first build; `scripts/model.sh` fails a build whose digest moved.
+- The four measured models are pinned by file and revision from the start, and by image digest from their first build; `scripts/model.sh` fails a build whose digest moved. The first four built to the same digest on two runners.
+- A run that does not finish every attempt fails. The first matrix run let a slow model pass every gate on 31 attempts of 45, with two categories never asked: the evals Job had hit its hour. `scripts/evals.sh` now counts the attempts against the tasks and the Job's own `ATTEMPTS`, and fails a short run whatever the rates say.
 
 ## Alternatives
 
 - **Only the release models.** Two data points cannot carry a claim about any model.
 - **Larger models.** Not measured here. A 7B model costs about twice the compute per token of the 4B models on the same two threads, and the matrix measures what a CPU-only site runs.
+- **Nanbeige4.2-3B.** Measured, then taken out. In the first matrix run it acted on 9 of 12 hidden instructions, tried an outside address ten times, and needed 227 vCPU-seconds and a median of 105 seconds per task, fifteen times the compute of the others, so it finished 31 of 45 attempts inside the hour. A model that slow is not what a CPU-only site runs; MiniCPM5-2B took its place, from a fourth maker.
 - **Phi-4-mini-instruct and SmolLM3-3B.** Licences that fit, but templates that never render tool calls, so llama.cpp returns their calls as text; both would need a template of our own, which would be measuring our template.
 
 ## How to explain this to a customer

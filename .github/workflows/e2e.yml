@@ -46,7 +46,7 @@ jobs:
             floor: "off"
           - model: qwen3-4b-2507
             floor: "off"
-          - model: nanbeige4.2-3b
+          - model: minicpm5-2b
             floor: "off"
     env:
       MODEL: ${{ matrix.model }}
