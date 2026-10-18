@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Every model through the same boundary, every day ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)): four more Apache-2.0 models in the e2e matrix, from Mistral, IBM, Qwen and OpenBMB, measured rather than shipped. The boundary's gates hold for all six; the 60% task floor only for the two the release ships with.
+- One signed file across the gap ([ADR 8](docs/decisions/0008-one-signed-file-across-the-gap.md)): `scripts/bundle.sh create` puts everything the cluster runs, with the model's signature and the admission chart, into one tar signed with the operator's key; `load` checks the signature, then every checksum, then loads. The e2e run replaces the staging registry with an empty one, closes the boundary and loads only the file; check 10 proves the registry held nothing before, holds exactly what the file carried, and refuses the file with one byte changed.
+- `docs/engagement.md`: the five days from a release tag to a signed-off install on a site with no route out, each ending with something the customer checks.
 - `leaderboard.md` and `leaderboard.json` on the `status` branch: one row per model from the latest run, what it tried next to what got out, written by the status workflow.
 
 ### Changed

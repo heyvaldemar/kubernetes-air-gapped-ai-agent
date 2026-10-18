@@ -11,3 +11,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 5 | [Gate the boundary, measure the model](0005-gate-the-boundary-measure-the-model.md) | accepted |
 | 6 | [Tools through the sandbox's MCP server, with arguments held by schema](0006-tools-through-the-sandboxs-mcp-server.md) | accepted |
 | 7 | [Every model through the same boundary, every day](0007-every-model-through-the-same-boundary.md) | accepted |
+| 8 | [One signed file across the gap](0008-one-signed-file-across-the-gap.md) | accepted |
