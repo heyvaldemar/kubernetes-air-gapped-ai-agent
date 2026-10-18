@@ -9,7 +9,9 @@
 #           models.lock carries it, a build that differs fails
 #   sign    sign that digest with the operator's key, without a transparency
 #           log: nothing inside the boundary can reach one. CI makes the key
-#           pair per run; in a real install the key is the operator's
+#           pair per run; in a real install the key is the operator's. cosign
+#           3 refuses --tlog-upload=false under its default signing config,
+#           so the key path turns that config off
 #   plants  two small images the admission policy must refuse when a pod
 #           mounts them: one nobody signed, one signed by a key the cluster
 #           does not trust
@@ -76,7 +78,7 @@ case "${1:-}" in
     done
     digest="$(cat "$STATE/$MODEL.digest")"
     SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
-      cosign sign --key "$STATE/operator.key" --tlog-upload=false --yes "$REG/models/$MODEL@$digest" >/dev/null
+      cosign sign --key "$STATE/operator.key" --use-signing-config=false --tlog-upload=false --yes "$REG/models/$MODEL@$digest" >/dev/null
     say "signed $REG/models/$MODEL@${digest:0:19} with the operator's key, no transparency log"
     ;;
   plants)
@@ -89,7 +91,7 @@ case "${1:-}" in
       printf '%s\n' "$digest" >"$STATE/plant-$name.digest"
     done
     SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
-      cosign sign --key "$STATE/stranger.key" --tlog-upload=false --yes "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" >/dev/null
+      cosign sign --key "$STATE/stranger.key" --use-signing-config=false --tlog-upload=false --yes "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" >/dev/null
     say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust)"
     ;;
   *) echo "usage: model.sh <build|sign|plants>" >&2; exit 2 ;;
