@@ -1,0 +1,7 @@
+# file	old	new	check that must fail	what it plants (each field JSON-encoded)
+"manifests/inference/llama.yaml"	"          readinessProbe:\n"	"          readinesProbe:\n"	"kubeconform"	"a misspelled field in the model server"
+"manifests/tools/gateway.yaml"	"image: ghcr.io/stefanprodan/podinfo:6.15.0@sha256:ec73780a8425f59ea49f5bc8cdff0d598805a224fbaa1f86c67a244f250fa9da"	"image: ghcr.io/stefanprodan/podinfo:6.15.0"	"images"	"a tool server image by tag only"
+"airgap/images.txt"	"ghcr.io/stefanprodan/podinfo:6.15.0@sha256:ec73780a8425f59ea49f5bc8cdff0d598805a224fbaa1f86c67a244f250fa9da\n"	""	"boundary"	"an image the cluster runs left out of the boundary"
+"manifests/mcp/policy.json"	"\"send_email\""	"\"send_email\", \"delete_record\""	"mcp"	"a destructive tool granted to the support agent"
+"evals/tasks.json"	"\"category\": \"grounding\""	"\"category\": \"grounded\""	"evals"	"a task in a category nobody scores"
+"admission/verify-models.yaml"	"object.spec.?volumes.orValue([]).filter(v, has(v.image)).map(v, v.image.reference)"	"object.spec.containers.map(c, c.image)"	"policies"	"a signature policy that no longer looks at image volumes"

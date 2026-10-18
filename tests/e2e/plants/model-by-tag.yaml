@@ -1,0 +1,19 @@
+# the signed model, named by tag instead of digest
+# expect: by digest
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-by-tag
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@MODEL_TAG@", pullPolicy: IfNotPresent}

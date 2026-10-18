@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# airgap.sh <registry|seed|mirror|close> - build the boundary around the
-# kind cluster, in that order.
+# airgap.sh <registry|seed|mirror|close|open> - build the boundary around
+# the kind cluster, in that order, and take it down again.
 #
 #   registry  start zot, the registry inside the boundary, on kind's network,
 #             under its own name, registry.boundary.internal, with TLS from a
@@ -17,6 +17,8 @@
 #             from kind's bridge that is not to kind's bridge, the node has
 #             no DNS server, and CoreDNS answers only for the cluster and the
 #             registry's name
+#   open      undo what close and registry did to the host: the firewall
+#             rules, the registry container and the host's /etc/hosts entry
 #
 # Why the firewall and not a Docker network with no route out: kind cannot
 # create a cluster on an --internal network today (kubernetes-sigs/kind#2776,
@@ -125,5 +127,19 @@ case "${1:-}" in
     kubectl -n kube-system rollout status deployment/coredns --timeout=120s >/dev/null
     say "closed: nothing from $br leaves it, the node has no DNS, CoreDNS answers only for the cluster and $NAME"
     ;;
-  *) echo "usage: airgap.sh <registry|seed|mirror|close>" >&2; exit 2 ;;
+  open)
+    if br="br-$(docker network inspect kind -f '{{.Id}}' 2>/dev/null | cut -c1-12)" && [ "$br" != "br-" ]; then
+      for t in iptables ip6tables; do
+        while sudo "$t" -C DOCKER-USER -i "$br" ! -o "$br" -j REJECT 2>/dev/null; do
+          sudo "$t" -D DOCKER-USER -i "$br" ! -o "$br" -j REJECT
+        done
+      done
+    fi
+    docker rm -f "$REGISTRY" >/dev/null 2>&1 || true
+    if grep -q " $NAME$" /etc/hosts; then
+      grep -v " $NAME$" /etc/hosts >"$STATE/hosts.new" && sudo cp "$STATE/hosts.new" /etc/hosts
+    fi
+    say "opened: the firewall rules, the registry and the host's entry for $NAME are gone"
+    ;;
+  *) echo "usage: airgap.sh <registry|seed|mirror|close|open>" >&2; exit 2 ;;
 esac

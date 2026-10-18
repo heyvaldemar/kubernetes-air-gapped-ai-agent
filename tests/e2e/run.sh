@@ -103,35 +103,22 @@ else
 fi
 
 step "9. admission refuses model weights it cannot vouch for"
-mount_pod() {  # mount_pod <name> <image reference>: a pod that mounts it as an image volume, server-side dry run
-  kubectl apply --dry-run=server -f - 2>&1 <<YAML
-apiVersion: v1
-kind: Pod
-metadata: {name: $1, namespace: inference}
-spec:
-  automountServiceAccountToken: false
-  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
-  containers:
-    - name: c
-      image: $BUSYBOX
-      command: [sleep, "3600"]
-      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
-  volumes:
-    - name: model
-      image: {reference: "$2", pullPolicy: IfNotPresent}
-YAML
-}
-refused() {  # refused <what> <image reference> <expected message>
-  local out; out="$(mount_pod "$3-x" "$2" || true)"
-  if grep -q "denied" <<<"$out" && grep -q "$4" <<<"$out"; then pass "refused: $1"; else fail "not refused as expected: $1: $(head -c 300 <<<"$out")"; fi
-}
 model="$(kubectl -n inference get deployment llama -o jsonpath='{.spec.template.spec.volumes[0].image.reference}')"
-refused "weights nobody signed" "$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")" unsigned "signed with the operator's key"
-refused "weights signed by a key the cluster does not trust" "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" stranger "signed with the operator's key"
-refused "the signed model named by tag, not digest" "${model%@*}:q4_k_m" bytag "by digest"
-refused "an image volume from outside the models path" "$BUSYBOX" elsewhere "only from registry.boundary.internal:5000/models"
-if out="$(mount_pod control "$model")"; then pass "admitted: the signed model, by digest"; else fail "the signed model was refused: $(head -c 300 <<<"$out")"; fi
+for plant in "$ROOT"/tests/e2e/plants/*.yaml; do
+  name="$(basename "$plant" .yaml)"
+  expect="$(sed -n 's/^# expect: //p' "$plant")"
+  out="$(sed -e "s#@BUSYBOX@#$BUSYBOX#g" -e "s#@MODEL@#$model#g" -e "s#@MODEL_TAG@#${model%@*}:q4_k_m#g" \
+             -e "s#@UNSIGNED@#$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")#g" \
+             -e "s#@STRANGER@#$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")#g" "$plant" \
+         | kubectl apply --dry-run=server -f - 2>&1)"; rc=$?
+  if [ "$expect" = admitted ]; then
+    if [ $rc -eq 0 ]; then pass "$name: admitted"; else fail "$name was refused: $(head -c 300 <<<"$out")"; fi
+  elif [ $rc -ne 0 ] && grep -qF "$expect" <<<"$out"; then
+    pass "$name: refused ($expect)"
+  else
+    fail "$name: expected a refusal saying '$expect', got (rc=$rc): $(head -c 300 <<<"$out")"
+  fi
+done
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1
 printf '\n'; printf '%s\n' "${results[@]}"

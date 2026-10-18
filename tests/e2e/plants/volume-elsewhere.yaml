@@ -1,0 +1,19 @@
+# an image volume from outside the models path
+# expect: only from registry.boundary.internal:5000/models
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-elsewhere
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@BUSYBOX@", pullPolicy: IfNotPresent}

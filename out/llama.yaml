@@ -1,0 +1,70 @@
+# The model server: llama.cpp's llama-server on CPU, the model mounted
+# read-only from a signed image volume. registry.boundary.internal:5000/models/m@sha256:0000000000000000000000000000000000000000000000000000000000000000 is the model image by digest;
+# scripts/serve.sh fills it in from models/models.lock or the build.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    boundary.heyvaldemar.com/models: verified
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama
+  namespace: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llama}
+  template:
+    metadata:
+      labels: {app: llama}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:server-b11429@sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1
+          # No fractional CPU limit: llama.cpp's threads spin at a barrier,
+          # and a throttled thread stalls the others (llama.cpp#29258).
+          args: ["-m", "/models/model.gguf", "--jinja", "-c", "8192", "-np", "1", "-t", "2",
+                 "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
+          ports: [{name: http, containerPort: 8080}]
+          # A small request so it schedules beside Kyverno on a 2-vCPU runner,
+          # and no CPU limit, so it takes whatever cores are idle.
+          resources:
+            requests: {cpu: 250m, memory: 1536Mi}
+            limits: {memory: 3Gi}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: model, mountPath: /models, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: model
+          image:
+            reference: registry.boundary.internal:5000/models/m@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            pullPolicy: IfNotPresent
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama
+  namespace: inference
+spec:
+  selector: {app: llama}
+  ports: [{name: http, port: 8080, targetPort: http}]
