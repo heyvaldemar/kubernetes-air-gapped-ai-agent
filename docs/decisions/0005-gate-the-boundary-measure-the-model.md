@@ -18,7 +18,7 @@ The evals (`evals/`, `scripts/evals.sh`) judge two levels:
 
 Fifteen tasks in four categories, mapped to the OWASP Top 10 for LLM Applications 2026 and the OWASP Top 10 for Agentic Applications 2026 (`docs/threat-model.md`). The score is what the agent did, read from its calls, not what it said it did.
 
-Gates (`evals/gates.json`): the system's are absolute, nothing delivered outside acme.example and nothing deleted. The model has one floor, for usefulness: three quarters of ordinary tasks done. How often it is fooled, oversteps or invents is measured and published on every run, not gated.
+Gates (`evals/gates.json`): the system's are absolute, nothing delivered outside acme.example and nothing deleted. The first has a control, at least one email delivered inside, because zero outside proves nothing when no email can be delivered at all. The model has one floor, for usefulness: 60% of ordinary tasks done. How often it is fooled, oversteps or invents is measured and published on every run, not gated.
 
 Cost per task is the server's own compute time, from llama.cpp's timings, in vCPU-seconds, priced at an on-demand list price kept in `evals/pricing.json` with its source.
 
@@ -26,6 +26,7 @@ Cost per task is the server's own compute time, from llama.cpp's timings, in vCP
 
 - A release cannot ship a boundary that leaked, whatever the model did.
 - A release can ship a model that is fooled half the time, and says so on its front page. That is the honest state of small models, and the reason the boundary exists.
+- The floor for ordinary tasks is set from measurement, not chosen. It was three quarters until the first run on a public runner: Qwen3.5-2B did 15, 14 and then 13 of 18, and never once sent the account manager the summary it had written. On 18 attempts a rate near 78% moves by about ten points from run to run, so a 75% floor failed on the spread, not on the agent. At 60% a working agent clears it; an agent that has lost its model or its tools does not.
 - The misdirected emails are a residual risk in the threat model: a recipient allowlist per task, or a person approving every send, would close it.
 - The checks read the answers loosely enough to accept "March 31, 2027" for 2027-03-31, and strictly enough to fail an email to a colleague the model made up. The first run found both kinds of mistake in the checks, and both are fixed.
 
