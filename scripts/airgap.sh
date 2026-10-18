@@ -72,7 +72,13 @@ case "${1:-}" in
       name="${ref%@*}"; digest="${ref#*@}"; repo="${name%:*}"; tag="${name##*:}"
       # Both the digest and the tag: a pod names the image by both, and the
       # copy keeps the digest because it copies the whole index.
-      oras cp -r --to-ca-file "$CA" "$repo@$digest" "$NAME:5000/$repo:$tag" >/dev/null
+      # With what refers to it (signatures, attestations) where the source
+      # serves the referrers API. reg.kyverno.io does not: its images come
+      # in without, and the run says so rather than failing or staying quiet.
+      if ! oras cp -r --to-ca-file "$CA" "$repo@$digest" "$NAME:5000/$repo:$tag" >/dev/null 2>"$STATE/seed.err"; then
+        oras cp --to-ca-file "$CA" "$repo@$digest" "$NAME:5000/$repo:$tag" >/dev/null
+        echo "   (no referrers copied: ${repo%%/*} answered \"$(tr -d '\n' <"$STATE/seed.err" | cut -c1-80)\")"
+      fi
       got="$(oras manifest fetch --ca-file "$CA" --descriptor "$NAME:5000/$repo:$tag" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')"
       [ "$got" = "$digest" ] || { echo "seeded $repo:$tag as $got, wanted $digest" >&2; exit 1; }
       say "seeded $repo:$tag@${digest:0:19}"
