@@ -19,7 +19,9 @@
 #   8. the registry speaks only TLS: a plain-HTTP request is refused
 #   9. admission refuses a pod that mounts model weights nobody signed, or
 #      signed by a key the cluster does not trust, or named by tag, or from
-#      anywhere but the models path inside; and admits the signed model
+#      anywhere but the models path inside, or with no AI-BOM, or with an
+#      AI-BOM whose licence the site does not allow; and admits the signed
+#      model with its AI-BOM
 #  10. everything inside came in one signed file: the registry inside held
 #      nothing when the bundle was loaded, it holds exactly what the bundle
 #      carried, and a bundle changed by one byte is refused and loads nothing
@@ -112,7 +114,9 @@ for plant in "$ROOT"/tests/e2e/plants/*.yaml; do
   expect="$(sed -n 's/^# expect: //p' "$plant")"
   out="$(sed -e "s#@BUSYBOX@#$BUSYBOX#g" -e "s#@MODEL@#$model#g" -e "s#@MODEL_TAG@#${model%@*}:q4_k_m#g" \
              -e "s#@UNSIGNED@#$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")#g" \
-             -e "s#@STRANGER@#$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")#g" "$plant" \
+             -e "s#@STRANGER@#$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")#g" \
+             -e "s#@UNLICENSED@#$REG/models/plant-unlicensed@$(cat "$STATE/plant-unlicensed.digest")#g" \
+             -e "s#@NOBOM@#$REG/models/plant-nobom@$(cat "$STATE/plant-nobom.digest")#g" "$plant" \
          | kubectl apply --dry-run=server -f - 2>&1)"; rc=$?
   if [ "$expect" = admitted ]; then
     if [ $rc -eq 0 ]; then pass "$name: admitted"; else fail "$name was refused: $(head -c 300 <<<"$out")"; fi

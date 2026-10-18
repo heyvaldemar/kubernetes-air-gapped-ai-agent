@@ -21,7 +21,8 @@ A reference architecture, not a hosted service. A vulnerability here is most lik
 ## Supply chain
 
 - Container images are pinned by digest, and CI fails on one that is not; every image the cluster runs must also be in `airgap/images.txt`, the list the registry inside is seeded from.
-- The model file is pinned by the publisher's revision and its sha256, and the model image by the digest its reproducible build gives (`models/models.lock`); every run rebuilds it and fails if the digest moved.
+- The model file is pinned by the publisher's revision and its sha256, and the model image by the digest its reproducible build gives (`models/models.lock`); every run rebuilds it and fails if the digest moved. Each model image carries an AI-BOM (CycloneDX ML-BOM) attested with the operator's key, and admission refuses a model without one or under a licence the site does not allow.
+- Everything the cluster runs crosses into the boundary as one file signed with the operator's key; `scripts/bundle.sh load` checks the signature and every checksum before it loads anything.
 - GitHub Actions are pinned by commit SHA; CLI tools by version and sha256 (`tools.lock`); CI images by digest (`ci-images.pins`); the admission chart by the sha256 of its archive (`admission/charts.lock`).
 
 ## Credentials

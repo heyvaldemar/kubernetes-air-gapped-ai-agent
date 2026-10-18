@@ -1,0 +1,19 @@
+# model weights signed by the operator, whose AI-BOM declares a licence the site does not allow
+# expect: the model's AI-BOM declares a licence the site allows
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-unlicensed
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@UNLICENSED@", pullPolicy: IfNotPresent}

@@ -40,6 +40,14 @@ builder() {
     || docker buildx create --name boundary --driver docker-container --driver-opt "image=$BUILDKIT" >/dev/null
 }
 
+# attest <ref@digest> <bom.json>: the AI-BOM as an in-toto attestation,
+# signed with the operator's key and no transparency log, like the signature.
+attest() {
+  SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
+    cosign attest --key "$STATE/operator.key" --type cyclonedx --predicate "$2" \
+      --use-signing-config=false --tlog-upload=false --yes "$1" >/dev/null 2>&1
+}
+
 # image <dir> <repo:tag>: build <dir> reproducibly, push it, print its digest
 image() {
   local dir="$1" ref="$2" layout digest
@@ -84,11 +92,17 @@ case "${1:-}" in
     digest="$(cat "$STATE/$MODEL.digest")"
     SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
       cosign sign --key "$STATE/operator.key" --use-signing-config=false --tlog-upload=false --yes "$REG/models/$MODEL@$digest" >/dev/null
-    say "signed $REG/models/$MODEL@${digest:0:19} with the operator's key, no transparency log"
+    # THE AI-BOM: what the model is, where its file came from at which
+    # revision, its sha256 and its licence, as a CycloneDX ML-BOM attested
+    # with the same key. Admission reads the licence before the model may
+    # be mounted (admission/verify-models.yaml).
+    python3 "$ROOT/scripts/mlbom.py" "$MODEL" "$URL" "$SHA" "$_license" >"$STATE/$MODEL.mlbom.json"
+    attest "$REG/models/$MODEL@$digest" "$STATE/$MODEL.mlbom.json"
+    say "signed $REG/models/$MODEL@${digest:0:19} with the operator's key, no transparency log, and attested its AI-BOM ($_license)"
     ;;
   plants)
     bundle; builder
-    for name in unsigned stranger; do
+    for name in unsigned stranger unlicensed nobom; do
       dir="$STATE/plant-$name"; mkdir -p "$dir"
       printf 'not a model: %s\n' "$name" >"$dir/model.gguf"
       cp "$ROOT/models/Dockerfile" "$dir/Dockerfile"
@@ -97,7 +111,16 @@ case "${1:-}" in
     done
     SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
       cosign sign --key "$STATE/stranger.key" --use-signing-config=false --tlog-upload=false --yes "$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")" >/dev/null
-    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust)"
+    # Signed by the operator, so only the AI-BOM can refuse them: one carries
+    # none, one declares a licence the site does not allow.
+    for name in unlicensed nobom; do
+      SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
+        cosign sign --key "$STATE/operator.key" --use-signing-config=false --tlog-upload=false --yes "$REG/models/plant-$name@$(cat "$STATE/plant-$name.digest")" >/dev/null
+    done
+    python3 "$ROOT/scripts/mlbom.py" plant-unlicensed "https://huggingface.co/plant/unlicensed/resolve/0000000000000000000000000000000000000000/model.gguf" \
+      "$(sha256 "$STATE/plant-unlicensed/model.gguf")" GPL-3.0-only >"$STATE/plant-unlicensed.mlbom.json"
+    attest "$REG/models/plant-unlicensed@$(cat "$STATE/plant-unlicensed.digest")" "$STATE/plant-unlicensed.mlbom.json"
+    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust), models/plant-unlicensed (signed, AI-BOM says GPL-3.0-only), models/plant-nobom (signed, no AI-BOM)"
     ;;
   *) echo "usage: model.sh <build|sign|plants>" >&2; exit 2 ;;
 esac

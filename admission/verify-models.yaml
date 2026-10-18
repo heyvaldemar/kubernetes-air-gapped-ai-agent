@@ -5,6 +5,10 @@
 # nothing inside the boundary can reach one. That is a weaker guarantee than
 # keyless signing with a log, and this file says so where it does it.
 #
+# The model also carries an AI-BOM, a CycloneDX ML-BOM attested with the same
+# key (scripts/mlbom.py, scripts/model.sh): what the model is, where its file
+# came from, its sha256, and its licence, which must be on the site's list.
+#
 # Kyverno 1.19 extracts images from containers, init containers and
 # ephemeral containers only; an image volume is not checked unless a policy
 # asks (kyverno/kyverno#17555 would add it). The `images` entry below asks.
@@ -42,6 +46,10 @@ spec:
     verifyDigest: true
     mutateDigest: false
     required: true
+  attestations:
+    - name: mlbom
+      intoto:
+        type: https://cyclonedx.org/bom
   attestors:
     - name: operator
       cosign:
@@ -58,3 +66,15 @@ spec:
     - expression: >-
         images.volumes.map(i, verifyImageSignatures(i, [attestors.operator])).all(n, n > 0)
       message: model weights are signed with the operator's key
+    # The AI-BOM. Each expression verifies the attestation's signature before
+    # it reads it: CEL's && makes a missing attestation false rather than an
+    # error, and extractPayload() returns the in-toto statement, so the BOM
+    # is under .predicate (Kyverno 1.19.1).
+    - expression: >-
+        images.volumes.map(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator])).all(n, n > 0)
+      message: model weights carry an AI-BOM signed with the operator's key
+    - expression: >-
+        images.volumes.all(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator]) > 0 &&
+          extractPayload(i, attestations.mlbom).predicate.components.exists(c, c.type == 'machine-learning-model' &&
+            c.licenses.exists(l, l.license.id in ['Apache-2.0', 'MIT'])))
+      message: the model's AI-BOM declares a licence the site allows (Apache-2.0, MIT)

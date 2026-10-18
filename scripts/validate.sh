@@ -139,7 +139,11 @@ check_policies() {
     || { echo "verify-models.yaml does not verify the image volumes' signatures"; ok=1; }
   grep -q "startsWith('registry.boundary.internal:5000/models/') && v.image.reference.contains('@sha256:')" admission/model-volumes.yaml \
     || { echo "model-volumes.yaml does not hold image volumes to the models path, by digest"; ok=1; }
-  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume"
+  grep -q "verifyAttestationSignatures(i, attestations.mlbom, \[attestors.operator\])" admission/verify-models.yaml \
+    || { echo "verify-models.yaml does not verify the model's AI-BOM"; ok=1; }
+  grep -q "c.licenses.exists(l, l.license.id in \['Apache-2.0', 'MIT'\])" admission/verify-models.yaml \
+    || { echo "verify-models.yaml does not hold the model's licence to the allowlist"; ok=1; }
+  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, and read its AI-BOM's licence"
   return "$ok"
 }
 
