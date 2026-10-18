@@ -36,8 +36,10 @@ spec:
           args: ["-m", "/models/model.gguf", "--jinja", "-c", "8192", "-np", "1", "-t", "2",
                  "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
           ports: [{name: http, containerPort: 8080}]
+          # A small request so it schedules beside Kyverno on a 2-vCPU runner,
+          # and no CPU limit, so it takes whatever cores are idle.
           resources:
-            requests: {cpu: "1", memory: 1536Mi}
+            requests: {cpu: 250m, memory: 1536Mi}
             limits: {memory: 3Gi}
           readinessProbe:
             httpGet: {path: /health, port: http}
