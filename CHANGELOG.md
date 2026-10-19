@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Each model job prints the runner's CPU model and count first. Cost and latency per task moved by up to about two times between runs of the same code (MiniCPM5-2B: 10.7 and 18.2 vCPU-seconds a task in runs 39199529930 and 39280471778), and the logs did not say what the runner was.
+
 ## [1.4.0] - 2026-10-19
 
 ### Added

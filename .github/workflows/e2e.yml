@@ -57,6 +57,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: The runner
+        # Cost and latency per task move by up to about two times between runs
+        # of the same code. The CPU a job ran on is the first thing to compare
+        # before calling a difference anything else.
+        run: |
+          cpu="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//' || true)"
+          [ -n "$cpu" ] || cpu="$(lscpu 2>/dev/null | sed -n 's/^Model name: *//p' | head -1)"
+          echo "cpu: ${cpu:-unknown}, $(nproc) vCPU"
+
       - name: Room for a model
         # The model goes through a GGUF file, an OCI layout, the registry and
         # the node's containerd before a pod mounts it: a 1 GB file needs
