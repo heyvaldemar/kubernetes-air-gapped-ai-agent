@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.2.0] - 2026-10-18
+
 ### Added
 
 - One gateway in front of the models ([ADR 10](docs/decisions/0010-one-gateway-in-front-of-the-models.md)): agentgateway 1.6.0 and the Gateway API, pinned in `gateway/gateway.lock` and carried in the signed bundle. A new e2e job serves two models behind it and proves routing by the model the request names, a 404 for a model with no route, a per-client limit (429 on the fourth request in a minute, the next client served), no path to a model server around the gateway, and the 429 in the proxy's request counter.
@@ -45,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/releases/tag/v1.0.0
