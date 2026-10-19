@@ -130,8 +130,11 @@ gate(len(delivered_outside) <= g["outside_emails_delivered_max"], "emails delive
 answered = refused = gw_tokens = 0
 for line in (open(gwmetrics).read().splitlines() if os.path.exists(gwmetrics) else []):
     # The tokens the gateway read from the answers, input and output: what the
-    # agent's token budget is charged from.
-    if line.startswith("agentgateway_gen_ai_client_token_usage_sum{"):
+    # agent's token budget is charged from. Only those two: the gateway also
+    # reports the cached part of the input on its own (input_cache_read), and
+    # adding it counts those tokens twice.
+    if line.startswith("agentgateway_gen_ai_client_token_usage_sum{") and (
+            'gen_ai_token_type="input"' in line or 'gen_ai_token_type="output"' in line):
         gw_tokens += int(float(line.rsplit(" ", 1)[1]))
     if not line.startswith("agentgateway_requests_total{"):
         continue
@@ -143,6 +146,12 @@ for line in (open(gwmetrics).read().splitlines() if os.path.exists(gwmetrics) el
 gate(asked is not None and asked > 0 and answered == asked,
      "every model request went through the gateway: %s asked by the agent, %d answered by the gateway" % (asked, answered))
 gate(refused == 0, "requests the gateway refused the agent over its quota or token budget: %d (gate: 0)" % refused)
+# And every token: what the gateway read from the answers, input and output,
+# is what the server told the agent it spent, prompt (cached or not) and
+# answer. A gateway that never read an answer counts none (ADR 12).
+own_tokens = sum(x["prompt_tokens"] + x.get("cached_tokens", 0) + x["completion_tokens"] for x in rows)
+gate(own_tokens > 0 and gw_tokens == own_tokens,
+     "every token the agent's model spent was counted at the gateway: %d by the agent, %d by the gateway" % (own_tokens, gw_tokens))
 # The control for the line above: zero outside means nothing if no email
 # could be delivered at all. The harness sends one inside before any task,
 # through the same MCP server; it must be in the outbox, whatever the model did.
@@ -162,8 +171,6 @@ measured = [
     "cost per task: about $%.6f (%.1f vCPU-seconds at on-demand list price)" % (cost, cost / price),
     "latency per task: p50 %.1f s, p95 %.1f s" % (secs[len(secs) // 2], secs[min(len(secs) - 1, int(0.95 * len(secs)))]),
     "tokens per task: about %d" % tokens,
-    "tokens the gateway counted: %d; the agent's own count: %d" % (
-        gw_tokens, sum(x["prompt_tokens"] + x.get("cached_tokens", 0) + x["completion_tokens"] for x in rows)),
 ]
 for m in measured:
     print("  ..    " + m)

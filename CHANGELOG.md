@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A demo at the top of the README: one model's job of the v1.3.0 run, from the signed bundle to the agent's evals, replayed from the run's own log (`docs/demo/e2e.cast`, `docs/demo/e2e.gif`) by the new `scripts/cast-from-log.py`. The e2e needs Linux and a host firewall, so it cannot be recorded on a laptop; the log keeps every line with its time.
 - A token budget per caller ([ADR 12](docs/decisions/0012-a-token-budget-per-caller.md)), beside the request quota and keyed the same way, on the token's subject: 60,000 tokens a minute for the support agent, about twice its busiest measured minute across three runs (about 29,000, Qwen3.5-2B), and 1,000 for any other workload. `tests/e2e/gateway.sh` adds a workload whose one request of about 1,500 tokens is served and whose next, its second of the minute, is refused with 429; the agent's same request, served; and the proxy's own token count for each model.
-- Each model job reports the tokens the gateway counted beside the agent's own count.
+- A gate in every model job: the tokens the gateway counted, input plus output, equal the agent's own count. In run 39335646130 they were equal to the token in all six jobs. The gateway also reports the cached part of the input on its own (`input_cache_read`); adding it to the rest counts cached tokens twice, which the first version of the comparison did.
 - Static check `gateway`: every caller with a request quota has a token budget, and every route goes to a model backend. Two plants: a route straight to the model's Service, a caller with a quota and no budget.
 
 ### Changed

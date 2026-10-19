@@ -168,10 +168,13 @@ refused="$(grep -E '^agentgateway_requests_total\{' <<<"$metrics" | grep 'status
 if [ -n "$refused" ]; then pass "the proxy's request counter records the 429: ${refused:0:160}"
 else fail "the proxy's request counter has no series for a 429"; fi
 grep -E '^agentgateway_requests_total\{' <<<"$metrics" | head -8 | cut -c1-200 | sed 's/^/   series: /'
-# The tokens it counted, per model: the series the token budget is charged
-# from. None for a model means the gateway never read its answers.
+# The tokens it counted, per model, input and output: the series the token
+# budget is charged from (the cached part of the input is reported apart, and
+# is already in the input). None for a model means the gateway never read its
+# answers.
 for m in granite-4.0-1b minicpm5-2b; do
   n="$(grep -E '^agentgateway_gen_ai_client_token_usage_sum\{' <<<"$metrics" | grep "gen_ai_request_model=\"$m\"" \
+       | grep -E 'gen_ai_token_type="(input|output)"' \
        | awk '{s += $NF} END {printf "%d", s}')"
   if [ "${n:-0}" -gt 0 ]; then pass "the proxy counted $n tokens in $m's requests and answers"
   else fail "the proxy counted no tokens for $m: it never read that model's answers"; fi
