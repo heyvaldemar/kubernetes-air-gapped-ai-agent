@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-19
+
 ### Added
 
 - A demo at the top of the README: one model's job of the v1.3.0 run, from the signed bundle to the agent's evals, replayed from the run's own log (`docs/demo/e2e.cast`, `docs/demo/e2e.gif`) by the new `scripts/cast-from-log.py`. The e2e needs Linux and a host firewall, so it cannot be recorded on a laptop; the log keeps every line with its time.
@@ -79,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.0.0...v1.1.0
