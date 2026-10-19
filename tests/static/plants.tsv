@@ -11,3 +11,5 @@
 "manifests/gateway/gateway.yaml"	"      mode: Strict\n"	"      mode: Optional\n"	"gateway"	"a gateway that lets a caller without a token through"
 "manifests/agents/evals.yaml"	"                  audience: models.boundary.heyvaldemar.com\n"	"                  audience: mcp.boundary.heyvaldemar.com\n"	"gateway"	"an agent whose model token is for another audience"
 "manifests/agents/evals.yaml"	"                  audience: mcp.boundary.heyvaldemar.com\n"	"                  audience: models.boundary.heyvaldemar.com\n"	"mcp"	"an agent whose MCP token is for the model gateway instead"
+"manifests/gateway/route.yaml"	"        - {group: agentgateway.dev, kind: AgentgatewayBackend, name: \"@SERVICE@\", namespace: inference}\n"	"        - {name: \"@SERVICE@\", namespace: inference, port: 8080}\n"	"gateway"	"a route straight to the model Service, where a token budget counts nothing"
+"manifests/gateway/gateway.yaml"	"              - {key: jwt.sub, tokens: 1000, unit: Minutes}\n"	""	"gateway"	"a caller with a request quota and no token budget"

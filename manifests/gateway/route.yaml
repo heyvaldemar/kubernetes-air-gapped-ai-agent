@@ -1,7 +1,28 @@
 # One route per model server: a request that names @MODEL@ goes to the
-# Service @SERVICE@ in inference, and nowhere else. scripts/gateway.sh install
-# applies one for each model it is told the cluster serves. The policies on
-# the Gateway (gateway.yaml) cover every route.
+# model server @SERVICE@ in inference, and nowhere else. scripts/gateway.sh
+# install applies one for each model it is told the cluster serves. The
+# policies on the Gateway (gateway.yaml) cover every route.
+#
+# The route points at an AgentgatewayBackend, never at the Service itself.
+# Only through a backend that says it is a model does the gateway read each
+# answer's usage and count its tokens. On a route straight to the Service, a
+# token budget is accepted, shows as attached, and refuses nothing (ADR 12).
+# The backend sits beside the Service in inference, the one namespace it may
+# name a Service in; the answer comes back as the server wrote it, timings
+# included.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: "@SERVICE@"
+  namespace: inference
+spec:
+  ai:
+    provider:
+      custom:
+        backendRef: {name: "@SERVICE@", port: 8080}
+        formats:
+          - type: Completions
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -16,4 +37,4 @@ spec:
           headers:
             - {name: x-gateway-model, value: "@MODEL@"}
       backendRefs:
-        - {name: "@SERVICE@", namespace: inference, port: 8080}
+        - {group: agentgateway.dev, kind: AgentgatewayBackend, name: "@SERVICE@", namespace: inference}

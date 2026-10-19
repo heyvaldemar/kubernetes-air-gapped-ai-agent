@@ -14,4 +14,5 @@ Each record states the context, the decision, what it costs, what was considered
 | 8 | [One signed file across the gap](0008-one-signed-file-across-the-gap.md) | accepted |
 | 9 | [An AI-BOM for every model, read at admission](0009-an-ai-bom-for-every-model.md) | accepted |
 | 10 | [One gateway in front of the models](0010-one-gateway-in-front-of-the-models.md) | accepted, amended by 11 |
-| 11 | [The gateway knows who is calling](0011-the-gateway-knows-who-is-calling.md) | accepted |
+| 11 | [The gateway knows who is calling](0011-the-gateway-knows-who-is-calling.md) | accepted, amended by 12 |
+| 12 | [A token budget per caller](0012-a-token-budget-per-caller.md) | accepted |

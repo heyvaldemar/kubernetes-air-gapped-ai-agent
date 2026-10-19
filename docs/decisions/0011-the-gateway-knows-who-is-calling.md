@@ -1,6 +1,6 @@
 # 11. The gateway knows who is calling
 
-- Status: accepted
+- Status: accepted; amended by [ADR 12](0012-a-token-budget-per-caller.md), which adds a token budget beside each quota and routes every model through a model backend
 - Date: 2026-10-19
 
 ## Context

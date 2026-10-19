@@ -53,7 +53,7 @@ Six models go through the same evals every day: the two above, which the release
 
 ### One gateway, and it knows who is calling
 
-Every model request goes through agentgateway, inside the same boundary and from the same signed bundle ([ADR 10](docs/decisions/0010-one-gateway-in-front-of-the-models.md), [ADR 11](docs/decisions/0011-the-gateway-knows-who-is-calling.md)). A caller shows a service account token made for the gateway's audience, checked against the cluster's own keys with nothing fetched at request time; no token, or a token for the Kubernetes API, is refused with 401. The quota follows the token, not a header: the support agent gets 60 requests a minute, about twice its busiest measured minute, and any other workload 3, refused with 429 on the fourth while the next workload is served; a workload that writes the agent's name into a header is still held to its own. The agent's six daily eval runs go through it too, and each must show the gateway's count equal to the agent's, request for request. A separate job runs two models behind it: a request names its model and goes to that model's server, and a model with no route is refused at the gateway. The agents reach the gateway and nothing that serves a model directly. The checks are in `tests/e2e/gateway.sh` and `scripts/evals.sh`, every day.
+Every model request goes through agentgateway, inside the same boundary and from the same signed bundle ([ADR 10](docs/decisions/0010-one-gateway-in-front-of-the-models.md), [ADR 11](docs/decisions/0011-the-gateway-knows-who-is-calling.md), [ADR 12](docs/decisions/0012-a-token-budget-per-caller.md)). A caller shows a service account token made for the gateway's audience, checked against the cluster's own keys with nothing fetched at request time; no token, or a token for the Kubernetes API, is refused with 401. The quota follows the token, not a header: the support agent gets 60 requests a minute, about twice its busiest measured minute, and any other workload 3, refused with 429 on the fourth while the next workload is served; a workload that writes the agent's name into a header is still held to its own. A request is not a unit of cost, so each caller also has a budget in tokens, keyed the same way: 60,000 a minute for the agent, about twice its busiest measured minute, and 1,000 for any other workload, whose one long request is served and whose next is refused with 429. The gateway counts tokens only for a route to a backend that says it is a model; on a route straight to the model's Service the same budget is accepted, shows as attached and refuses nothing, so every route goes to a model backend and a static check refuses one that does not. The agent's six daily eval runs go through it too, and each must show the gateway's count equal to the agent's, request for request. A separate job runs two models behind it: a request names its model and goes to that model's server, and a model with no route is refused at the gateway. The agents reach the gateway and nothing that serves a model directly. The checks are in `tests/e2e/gateway.sh` and `scripts/evals.sh`, every day.
 
 ## What is proven, and how
 
@@ -68,7 +68,7 @@ Every line is a check in `tests/e2e/run.sh` or `scripts/evals.sh` on a fresh clu
 | The model image is what its source says it is | every run rebuilds it from the pinned model file and fails if the digest differs from `models/models.lock` |
 | A fooled agent cannot send data out | emails delivered outside acme.example: zero, read from the outbox, gated for every model; the harness's own control email must arrive inside, so the zero is not a broken outbox |
 | A fooled agent cannot destroy data | records deleted: zero, read from the records service, gated |
-| Every model request goes through one gateway, as a known caller | in every eval run, the agent's count of model requests equals the gateway's, and none was refused over the agent's quota; in the gateway job, no token and a Kubernetes API token are refused with 401, a quota follows the token's subject and not a header, and the model servers cannot be reached around the gateway |
+| Every model request goes through one gateway, as a known caller | in every eval run, the agent's count of model requests equals the gateway's, and none was refused over the agent's quota or token budget; in the gateway job, no token and a Kubernetes API token are refused with 401, a quota follows the token's subject and not a header, a workload that spent its token budget in one request is refused the next, the proxy counts each model's tokens, and the model servers cannot be reached around the gateway |
 | Each check can fail | `tests/static/plants.tsv` shows each static check the violation it exists for; `tests/e2e/plants/` holds the pods admission must refuse and the one it must admit |
 
 ## How it works
@@ -84,7 +84,7 @@ flowchart LR
     subgraph cluster["kind cluster"]
       kyv["Kyverno + native policy<br/>verify the model offline"]
       llm["llama-server<br/>model on an image volume"]
-      gw["agentgateway<br/>token checked, quota per caller"]
+      gw["agentgateway<br/>token checked, quota and token budget per caller"]
       agent["Agent<br/>support-agent identity"]
       mcp["MCP server<br/>identity, grants, schema, audit"]
       rec["Records service<br/>outbox"]

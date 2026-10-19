@@ -74,7 +74,7 @@ PY
       sleep 2
     done
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
-    say "agentgateway is up inside: Gateway models programmed, routes for $served, a quota per service account"
+    say "agentgateway is up inside: Gateway models programmed, routes for $served, a quota and a token budget per service account"
     ;;
   *)
     echo "usage: gateway.sh <fetch|install>" >&2

@@ -6,11 +6,12 @@
 # and a name with no route is refused at the gateway. A caller shows who it is
 # with a service account token made for the gateway's audience and signed by
 # the cluster; without one it is refused with 401. The quota follows that
-# identity: the support agent may send 60 requests a minute, any other
-# workload 3, and a request over the quota is refused with 429 while every
-# other workload is still served. Nothing here reaches outside the boundary:
+# identity: the support agent may send 60 requests a minute and 60,000 tokens,
+# any other workload 3 requests and 1,000 tokens, and a request over either is
+# refused with 429 while every other workload is still served. Nothing here
+# reaches outside the boundary:
 # the model servers have no egress, and the gateway has nowhere to send a
-# request but the Services the routes name. tests/e2e/gateway.sh proves it.
+# request but the model servers the routes name. tests/e2e/gateway.sh proves it.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -78,7 +79,10 @@ spec:
 # anything. The token stops here: the gateway removes it before the request
 # goes on. The limit is keyed on the token's subject, never on a header the
 # caller writes. The agent's 60 a minute is about twice its busiest minute in
-# the evals (docs/decisions/0011-the-gateway-knows-who-is-calling.md).
+# the evals (docs/decisions/0011-the-gateway-knows-who-is-calling.md), and so
+# is its 60,000 tokens (0012-a-token-budget-per-caller.md). A token budget is
+# settled once an answer is complete, so the request that crosses it is
+# served and the next one is refused.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -101,12 +105,14 @@ spec:
           policy:
             local:
               - {key: jwt.sub, requests: 60, unit: Minutes}
+              - {key: jwt.sub, tokens: 60000, unit: Minutes}
         - policy:
             local:
               - {key: jwt.sub, requests: 3, unit: Minutes}
+              - {key: jwt.sub, tokens: 1000, unit: Minutes}
 ---
-# The routes live in gateway and the Services in inference: inference says
-# which namespace may point at them.
+# The routes live in gateway and the model backends in inference: inference
+# says which namespace may point at them.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
@@ -116,7 +122,7 @@ spec:
   from:
     - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: gateway}
   to:
-    - {group: "", kind: Service}
+    - {group: agentgateway.dev, kind: AgentgatewayBackend}
 ---
 # The model servers answer the gateway too, still with no egress of their own.
 apiVersion: networking.k8s.io/v1

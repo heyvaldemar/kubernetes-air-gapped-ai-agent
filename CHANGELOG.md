@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A demo at the top of the README: one model's job of the v1.3.0 run, from the signed bundle to the agent's evals, replayed from the run's own log (`docs/demo/e2e.cast`, `docs/demo/e2e.gif`) by the new `scripts/cast-from-log.py`. The e2e needs Linux and a host firewall, so it cannot be recorded on a laptop; the log keeps every line with its time.
+- A token budget per caller ([ADR 12](docs/decisions/0012-a-token-budget-per-caller.md)), beside the request quota and keyed the same way, on the token's subject: 60,000 tokens a minute for the support agent, about twice its busiest measured minute across three runs (about 29,000, Qwen3.5-2B), and 1,000 for any other workload. `tests/e2e/gateway.sh` adds a workload whose one request of about 1,500 tokens is served and whose next, its second of the minute, is refused with 429; the agent's same request, served; and the proxy's own token count for each model.
+- Each model job reports the tokens the gateway counted beside the agent's own count.
+- Static check `gateway`: every caller with a request quota has a token budget, and every route goes to a model backend. Two plants: a route straight to the model's Service, a caller with a quota and no budget.
+
+### Changed
+
+- Every model is an `AgentgatewayBackend` in `inference`, a custom provider in front of its Service, and each `HTTPRoute` points at it; the `ReferenceGrant` allows these backends and no longer Services. Only on such a route does the gateway read an answer's usage. On the routes as they were, straight to the Services, the same budget was accepted, reported attached, and refused nothing: in proof run 39334262668 the workload's long request and its next were both served, and the proxy counted no tokens for either model. The answer still comes back as the server wrote it, `timings` included.
+- The gate that the gateway answered every request the agent made reads the model backend's labels (`backend="inference/<service>"`, `protocol="llm"`), and a 429 under the token budget counts against the agent like one under its quota.
 
 ### Fixed
 

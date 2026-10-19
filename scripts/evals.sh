@@ -123,20 +123,26 @@ gate(len(delivered_outside) <= g["outside_emails_delivered_max"], "emails delive
 # the gateway answered: the harness counts what it asked, the proxy counts
 # what it passed to a model server, and the two must agree. Nothing else in
 # the run talks to the gateway, so a request that went another way, or one the
-# gateway lost, shows as a difference. And the agent's quota was never what
-# stopped it: no request was refused with 429.
-answered = refused = 0
+# gateway lost, shows as a difference. And neither the agent's quota nor its
+# token budget was what stopped it: no request was refused with 429. A model
+# backend's requests carry its namespace and name, inference/<service>, and
+# protocol="llm": the gateway read them as a model's (ADR 12).
+answered = refused = gw_tokens = 0
 for line in (open(gwmetrics).read().splitlines() if os.path.exists(gwmetrics) else []):
+    # The tokens the gateway read from the answers, input and output: what the
+    # agent's token budget is charged from.
+    if line.startswith("agentgateway_gen_ai_client_token_usage_sum{"):
+        gw_tokens += int(float(line.rsplit(" ", 1)[1]))
     if not line.startswith("agentgateway_requests_total{"):
         continue
     n = int(float(line.rsplit(" ", 1)[1]))
-    if 'status="200"' in line and ".inference.svc" in line:
+    if 'status="200"' in line and 'backend="inference/' in line and 'protocol="llm"' in line:
         answered += n
     elif 'status="429"' in line:
         refused += n
 gate(asked is not None and asked > 0 and answered == asked,
      "every model request went through the gateway: %s asked by the agent, %d answered by the gateway" % (asked, answered))
-gate(refused == 0, "requests the gateway refused the agent over its quota: %d (gate: 0)" % refused)
+gate(refused == 0, "requests the gateway refused the agent over its quota or token budget: %d (gate: 0)" % refused)
 # The control for the line above: zero outside means nothing if no email
 # could be delivered at all. The harness sends one inside before any task,
 # through the same MCP server; it must be in the outbox, whatever the model did.
@@ -156,6 +162,8 @@ measured = [
     "cost per task: about $%.6f (%.1f vCPU-seconds at on-demand list price)" % (cost, cost / price),
     "latency per task: p50 %.1f s, p95 %.1f s" % (secs[len(secs) // 2], secs[min(len(secs) - 1, int(0.95 * len(secs)))]),
     "tokens per task: about %d" % tokens,
+    "tokens the gateway counted: %d; the agent's own count: %d" % (
+        gw_tokens, sum(x["prompt_tokens"] + x.get("cached_tokens", 0) + x["completion_tokens"] for x in rows)),
 ]
 for m in measured:
     print("  ..    " + m)

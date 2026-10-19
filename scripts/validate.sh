@@ -20,7 +20,10 @@
 #                 by digest
 #   gateway       every caller of the model gateway needs a token for its
 #                 audience, the evals Job holds one, and every quota is keyed
-#                 on the token's subject, never on a header the caller writes
+#                 on the token's subject, never on a header the caller writes;
+#                 every caller has a token budget beside its request quota,
+#                 and every route goes to a model backend, where tokens are
+#                 counted, never straight to a Service
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -53,7 +56,7 @@ check_kubeconform() {
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" \
-    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters manifests/gateway/gateway.yaml manifests/gateway/route.yaml
+    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters,AgentgatewayBackend manifests/gateway/gateway.yaml manifests/gateway/route.yaml
 }
 
 check_images() {
@@ -168,7 +171,7 @@ check_policies() {
 }
 
 check_gateway() {
-  local ok=0 aud keys
+  local ok=0 aud keys requests budgets backends
   { grep -q '^    jwtAuthentication:$' manifests/gateway/gateway.yaml && grep -q '^      mode: Strict$' manifests/gateway/gateway.yaml; } \
     || { echo "gateway.yaml does not require a token of every caller (jwtAuthentication, mode Strict)"; ok=1; }
   aud="$(sed -n 's/^ *audiences: \[\(.*\)\]$/\1/p' manifests/gateway/gateway.yaml)"
@@ -178,7 +181,19 @@ check_gateway() {
   # A quota keyed on anything but the token's subject is one a caller can pick.
   keys="$(grep -oE 'key: [^,}]+' manifests/gateway/gateway.yaml | sort -u)"
   [ "$keys" = "key: jwt.sub" ] || { echo "a quota in gateway.yaml is keyed on something other than the token's subject: $(tr '\n' ' ' <<<"$keys")"; ok=1; }
-  [ "$ok" = 0 ] && echo "every caller of the gateway needs a token for $aud, the agent holds one, and every quota is keyed on its subject"
+  # A token budget for every caller that has a request quota (ADR 12).
+  requests="$(grep -cE '\brequests: [0-9]+' manifests/gateway/gateway.yaml)"
+  budgets="$(grep -cE '\btokens: [0-9]+' manifests/gateway/gateway.yaml)"
+  if [ "$requests" -eq 0 ] || [ "$budgets" != "$requests" ]; then
+    echo "gateway.yaml has $requests request quotas and $budgets token budgets: a caller without a budget can spend any number of tokens"; ok=1
+  fi
+  # On a route straight to a Service the gateway never reads an answer's
+  # usage, and a token budget there is accepted and refuses nothing.
+  backends="$(awk '/^ *backendRefs:/ {f = 1; next} f && /^ *- / {print; next} {f = 0}' manifests/gateway/route.yaml)"
+  if [ -z "$backends" ] || grep -qv 'kind: AgentgatewayBackend' <<<"$backends"; then
+    echo "route.yaml sends a model's requests somewhere other than an AgentgatewayBackend, where no token is counted: $backends"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "every caller of the gateway needs a token for $aud, the agent holds one, every quota is keyed on its subject, every caller has a token budget, and every route goes to a model backend"
   return "$ok"
 }
 

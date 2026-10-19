@@ -13,7 +13,12 @@
 #      header does not lift it; another workload, right after, is still
 #      served, and the support agent has its own, larger quota
 #   6. the model servers cannot be reached around the gateway
-#   7. the proxy's metrics answer, and count the refusal
+#   7. the token budget follows the service account too: a workload's one
+#      long request is served and spends more than its 1,000 tokens, and its
+#      next request, its second of the minute, is refused with 429; the
+#      support agent's same long request is served
+#   8. the proxy's metrics answer, count the refusal, and count each model's
+#      tokens
 #
 # Each answer names the model that produced it: the server reports its
 # --alias, so a request routed to the wrong server says so. Tokens are made
@@ -30,8 +35,9 @@ fail() { results+=("FAIL  $1"); printf '  FAIL  %s\n' "$1"; failed=1; }
 svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}')"
 GW="http://$svc.gateway.svc.cluster.local:8080"
 
-# Three workloads besides the agent: one for the routes, two for the quota.
-for sa in gw-routes gw-busy gw-other; do
+# Four workloads besides the agent: one for the routes, two for the quota,
+# one for the token budget.
+for sa in gw-routes gw-busy gw-other gw-tokens; do
   kubectl -n agents create serviceaccount "$sa" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
 kubectl -n agents delete pod gw-client --ignore-not-found --wait=true >/dev/null 2>&1
@@ -61,12 +67,14 @@ token() {
   esac
 }
 
-# ask <model> <who> [claim]: "<status> <model that answered>". With a claim,
-# the request also says x-client-id: <claim>, as a caller may write anything.
+# ask <model> <who> [claim] [words]: "<status> <model that answered>". With a
+# claim, the request also says x-client-id: <claim>, as a caller may write
+# anything. With words, the prompt carries that many more words, about a
+# token each, for the token budget.
 ask() {
   token "$2" | kubectl -n agents exec -i gw-client -- python3 -c '
 import json, sys, urllib.request, urllib.error
-url, model, claim = sys.argv[1:4]
+url, model, claim, words = sys.argv[1:5]
 headers = {"Content-Type": "application/json"}
 tok = sys.stdin.read().strip()
 if tok:
@@ -74,7 +82,7 @@ if tok:
 if claim:
     headers["x-client-id"] = claim
 body = json.dumps({"model": model, "max_tokens": 1,
-                   "messages": [{"role": "user", "content": "Say OK."}]}).encode()
+                   "messages": [{"role": "user", "content": "Say OK." + " word" * int(words)}]}).encode()
 req = urllib.request.Request(url + "/v1/chat/completions", data=body, method="POST", headers=headers)
 try:
     with urllib.request.urlopen(req, timeout=180) as r:
@@ -83,7 +91,7 @@ except urllib.error.HTTPError as e:
     print(e.code, "-")
 except Exception as e:
     print(0, type(e).__name__)
-' "$GW" "$1" "${3:-}" 2>/dev/null || echo "0 exec-failed"
+' "$GW" "$1" "${3:-}" "${4:-0}" 2>/dev/null || echo "0 exec-failed"
 }
 
 printf '\n== 1-2. each model by name\n'
@@ -133,7 +141,21 @@ except Exception as e:
 if [[ "$direct" == blocked* ]]; then pass "the model servers cannot be reached around the gateway ($direct)"
 else fail "a model server answered directly, around the gateway: $direct"; fi
 
-printf '\n== 7. the proxy counts what it did\n'
+printf '\n== 7. a token budget per service account\n'
+# 1,500 words is about 1,500 tokens, more than the 1,000 a minute any
+# workload but the agent may spend. The budget is settled when the answer is
+# complete, so the long request is served and the next one is refused; that
+# next one is only the workload's second request this minute, under its
+# request quota of 3, so the refusal is the token budget's.
+read -r code _ <<<"$(ask granite-4.0-1b gw-tokens "" 1500)"
+read -r code2 _ <<<"$(ask granite-4.0-1b gw-tokens)"
+if [ "$code $code2" = "200 429" ]; then pass "a workload that spent its 1,000 tokens in one request is refused the next (429), its second request of the minute"
+else fail "a workload's long request, then a short one: got $code $code2, expected 200 429 (a token budget the gateway never charges refuses nothing)"; fi
+read -r code _ <<<"$(ask granite-4.0-1b support-agent "" 1500)"
+if [ "$code" = 200 ]; then pass "the support agent's same long request is served, within its own 60,000 tokens"
+else fail "the support agent's long request: HTTP $code, expected 200"; fi
+
+printf '\n== 8. the proxy counts what it did\n'
 pod_ip="$(kubectl -n gateway get pod -o jsonpath='{.items[0].status.podIP}')"
 metrics="$(kubectl -n agents exec gw-client -- python3 -c '
 import sys, urllib.request
@@ -146,9 +168,17 @@ refused="$(grep -E '^agentgateway_requests_total\{' <<<"$metrics" | grep 'status
 if [ -n "$refused" ]; then pass "the proxy's request counter records the 429: ${refused:0:160}"
 else fail "the proxy's request counter has no series for a 429"; fi
 grep -E '^agentgateway_requests_total\{' <<<"$metrics" | head -8 | cut -c1-200 | sed 's/^/   series: /'
+# The tokens it counted, per model: the series the token budget is charged
+# from. None for a model means the gateway never read its answers.
+for m in granite-4.0-1b minicpm5-2b; do
+  n="$(grep -E '^agentgateway_gen_ai_client_token_usage_sum\{' <<<"$metrics" | grep "gen_ai_request_model=\"$m\"" \
+       | awk '{s += $NF} END {printf "%d", s}')"
+  if [ "${n:-0}" -gt 0 ]; then pass "the proxy counted $n tokens in $m's requests and answers"
+  else fail "the proxy counted no tokens for $m: it never read that model's answers"; fi
+done
 
 kubectl -n agents delete pod gw-client --wait=false >/dev/null 2>&1
-kubectl -n agents delete serviceaccount gw-routes gw-busy gw-other --ignore-not-found >/dev/null 2>&1
+kubectl -n agents delete serviceaccount gw-routes gw-busy gw-other gw-tokens --ignore-not-found >/dev/null 2>&1
 printf '\n'; printf '%s\n' "${results[@]}"
 if [ -n "${E2E_RESULTS:-}" ]; then
   printf '%s\n' "${results[@]}" | python3 -c '
