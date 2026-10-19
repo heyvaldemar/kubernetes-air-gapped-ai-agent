@@ -39,13 +39,18 @@ DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000
 check_kubeconform() {
   mkdir -p .cache/kubeconform out
   kubectl kustomize manifests >out/manifests.yaml || return 1
-  sed "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" manifests/inference/llama.yaml >out/llama.yaml
+  sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama#g" -e "s#@ALIAS@#m#g" manifests/inference/llama.yaml >out/llama.yaml
   for f in tests/e2e/plants/*.yaml; do
     sed -e "s#@[A-Z_]*@#registry.boundary.internal:5000/models/m@$DIGEST#" "$f" >"out/plant-$(basename "$f")"
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml out/plant-*.yaml
+    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml out/plant-*.yaml || return 1
+  # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
+  # of the file, the namespace and the network policies, is checked.
+  kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
+    -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" \
+    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters manifests/gateway/gateway.yaml
 }
 
 check_images() {
@@ -77,6 +82,12 @@ for line in open("admission/kyverno-images.yaml"):
         rep = v
     elif "@sha256:" in v:
         need.add("%s/%s:%s" % (reg, rep, v))
+# The gateway's images, rendered by its chart and its controller rather than
+# written in a manifest here, are named in gateway/gateway.lock.
+for line in open("gateway/gateway.lock"):
+    f = line.split()
+    if len(f) >= 4 and f[0] == "image":
+        need.add(f[3])
 missing = sorted(need - inside)
 print("\n".join("not inside the boundary: " + m for m in missing) or "every image the cluster runs is in airgap/images.txt (%d)" % len(need))
 sys.exit(1 if missing else 0)

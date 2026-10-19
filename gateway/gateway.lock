@@ -1,0 +1,12 @@
+# The inference gateway, pinned: the Gateway API CRDs and both charts by the
+# sha256 of the file, the images by digest. scripts/gateway.sh fetches the
+# files outside and refuses any whose hash differs; the images are seeded
+# from airgap/images.txt like every other, and the static check `boundary`
+# fails if one here is missing there.
+#
+# kind   name               version  sha256-or-image                                                       source
+crds     gateway-api        v1.6.3   356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5      https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml
+chart    agentgateway-crds  v1.6.0   49e4c65fb8b1119305a64af3b1f2229d31340e8af448d6b34dbf5a5360d25560      oci://cr.agentgateway.dev/charts/agentgateway-crds
+chart    agentgateway       v1.6.0   4a0064af58aabe04b4a9fedc08349028dc0d0eb4dc5eb15f9a26ebbcdb6360cf      oci://cr.agentgateway.dev/charts/agentgateway
+image    controller         v1.6.0   cr.agentgateway.dev/controller:v1.6.0@sha256:d84259a7e2d87f8f39bae385d4b032d823c0a4450aecb32e0e31e2258449645b  -
+image    proxy              v1.6.0   cr.agentgateway.dev/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c  -

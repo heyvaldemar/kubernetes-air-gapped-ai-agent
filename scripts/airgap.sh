@@ -36,7 +36,7 @@ REGISTRY=kind-registry
 NAME=registry.boundary.internal
 STATE="$ROOT/.cache/airgap"
 CA="$STATE/ca.crt"
-HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io)
+HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io cr.agentgateway.dev)
 say() { printf '== %s\n' "$*"; }
 nodes() { kind get nodes --name "$CLUSTER"; }
 registry_ip() { docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' "$REGISTRY"; }

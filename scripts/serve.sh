@@ -9,6 +9,9 @@ STATE="$ROOT/.cache/airgap"
 read -r MODEL _ _ _ PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
 digest="$PINNED"; [ "$digest" = unpinned ] && digest="$(cat "$STATE/$MODEL.digest")"
 ref="registry.boundary.internal:5000/models/$MODEL@$digest"
-sed "s#@MODEL@#$ref#" "$ROOT/manifests/inference/llama.yaml" | kubectl apply -f - >/dev/null
-kubectl -n inference rollout status deployment/llama --timeout=600s >/dev/null
-printf '== llama-server is up, serving %s\n' "$ref"
+# SERVE_NAME names the server: llama for the evals, one name per model when a
+# run serves two side by side behind the gateway.
+NAME="${SERVE_NAME:-llama}"
+sed -e "s#@MODEL@#$ref#" -e "s#@NAME@#$NAME#g" -e "s#@ALIAS@#$MODEL#g" "$ROOT/manifests/inference/llama.yaml" | kubectl apply -f - >/dev/null
+kubectl -n inference rollout status "deployment/$NAME" --timeout=600s >/dev/null
+printf '== llama-server %s is up, serving %s\n' "$NAME" "$ref"

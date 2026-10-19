@@ -1,0 +1,158 @@
+# One way in to two model servers: agentgateway, inside the boundary.
+#
+# A client names the model in the request, as the OpenAI API does. Before any
+# route is chosen, the gateway copies that name from the body into a header;
+# each route sends one name to one model server, and a name with no route is
+# refused at the gateway. Each client, named by the x-client-id header, may
+# send three requests a minute, and the fourth is refused with 429 while
+# every other client is still served. Nothing here reaches outside the
+# boundary: the model servers have no egress, and the gateway has nowhere to
+# send a request but the two Services below. tests/e2e/gateway.sh proves it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+# The proxy the controller starts for the Gateway runs under the namespace's
+# restricted Pod Security profile; its generated Deployment sets everything
+# that profile asks but the seccomp profile, which this adds.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: restricted
+  namespace: gateway
+spec:
+  deployment:
+    spec:
+      template:
+        spec:
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: models
+  namespace: gateway
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: restricted
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces: {from: Same}
+---
+# The model's name, from the body into a header, before routing. The same
+# expression the agentgateway documentation uses for routing by model.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: model-from-body
+  namespace: gateway
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: Gateway, name: models}
+  traffic:
+    phase: PreRouting
+    transformation:
+      request:
+        set:
+          - name: x-gateway-model
+            value: string(json(request.body).model)
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: models
+  namespace: gateway
+spec:
+  parentRefs:
+    - name: models
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /v1/}
+          headers:
+            - {name: x-gateway-model, value: granite-4.0-1b}
+      backendRefs:
+        - {name: granite, namespace: inference, port: 8080}
+    - matches:
+        - path: {type: PathPrefix, value: /v1/}
+          headers:
+            - {name: x-gateway-model, value: minicpm5-2b}
+      backendRefs:
+        - {name: minicpm, namespace: inference, port: 8080}
+---
+# Three requests a minute for each client, counted per x-client-id. Local to
+# the proxy: no rate-limit service, nothing outside the boundary.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: per-client
+  namespace: gateway
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: models}
+  traffic:
+    rateLimit:
+      local:
+        - key: request.headers["x-client-id"]
+          requests: 3
+          unit: Minutes
+---
+# The routes live in gateway and the Services in inference: inference says
+# which namespace may point at them.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: from-gateway
+  namespace: inference
+spec:
+  from:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: gateway}
+  to:
+    - {group: "", kind: Service}
+---
+# The model servers answer the gateway too, still with no egress of their own.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: from-gateway
+  namespace: inference
+spec:
+  podSelector:
+    matchLabels:
+      app: llama
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# The agents reach the gateway: its listener, and the proxy's metrics.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway
+  namespace: agents
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gateway
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 15020}

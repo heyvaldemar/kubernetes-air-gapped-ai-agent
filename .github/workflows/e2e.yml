@@ -152,3 +152,98 @@ jobs:
             .cache/airgap/evals.jsonl
             .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore
+
+  gateway:
+    # Two models behind one gateway, inside the same boundary: the request
+    # names the model and the gateway routes it, a client over its limit is
+    # refused while the next is served, and the model servers cannot be
+    # reached around it (ADR 10). Everything arrives in the same signed
+    # bundle as in the jobs above.
+    name: Two models, one gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Room for two models
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h / | tail -1
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Create the cluster
+        run: kind create cluster --config kind/cluster.yaml --wait 120s
+
+      - name: The staging registry, seeded
+        run: |
+          ./scripts/airgap.sh registry
+          ./scripts/airgap.sh seed
+          ./scripts/airgap.sh mirror
+
+      - name: Two models, built reproducibly and signed
+        run: |
+          for m in granite-4.0-1b minicpm5-2b; do
+            MODEL="$m" ./scripts/model.sh build
+            MODEL="$m" ./scripts/model.sh sign
+          done
+
+      - name: The admission chart and the gateway, fetched and checked
+        run: |
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+
+      - name: Everything the cluster runs, in one signed file
+        run: ./scripts/bundle.sh create
+
+      - name: An empty registry inside, then close the boundary
+        run: |
+          ./scripts/airgap.sh registry
+          rm -rf .cache/airgap/charts
+          ./scripts/airgap.sh mirror
+          ./scripts/airgap.sh close
+
+      - name: Across the gap, the bundle verified and loaded
+        run: ./scripts/bundle.sh load
+
+      - name: Kyverno and the model policies, from inside
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: Two model servers, each serving its signed model
+        run: |
+          MODEL=granite-4.0-1b SERVE_NAME=granite ./scripts/serve.sh
+          MODEL=minicpm5-2b SERVE_NAME=minicpm ./scripts/serve.sh
+
+      - name: The tool side, inside
+        run: ./scripts/tools.sh
+
+      - name: The gateway, inside
+        run: ./scripts/gateway.sh install
+
+      - name: Prove the gateway
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/gateway.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n gateway get gateway,httproute,agentgatewaypolicy -o yaml | tail -80 || true
+          kubectl -n agentgateway-system logs deploy/agentgateway --tail=60 || true
+          kubectl -n gateway logs deploy --tail=60 --all-containers || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results-gateway
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore

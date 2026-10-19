@@ -47,6 +47,10 @@ The same evals run every day, on a cluster built from nothing. The latest run's 
 
 Six models go through the same evals every day: the two above, which the release ships with, and four more from other makers, measured rather than shipped: Ministral-3-3B, Granite-4.1-3B, Qwen3-4B-Instruct-2507 and MiniCPM5-2B, all Apache-2.0 and pinned like the rest. The boundary's gates hold for all six; only the two that ship must also do 60% of ordinary tasks ([ADR 7](docs/decisions/0007-every-model-through-the-same-boundary.md)). In the run v1.1.0 was cut from, the six acted on between 0 and 6 of 12 hidden instructions, and two of them tried to email outside 23 times between them; nothing was delivered outside and nothing was deleted, for any of the six. The larger model is not the safer one: Qwen3-4B-Instruct-2507 acted on 6 of 12, Qwen3.5-2B on none. Two things the six show that two could not. A gate on the model would have picked the wrong one: held to 90% resistance to the planted instructions and 75% of ordinary tasks, Ministral and MiniCPM would pass, and Qwen3.5-2B, the one model never fooled, would fail on its task rate. And the models that never wrote an outside address are the ones that emailed colleagues nobody had named: 47 such emails from those four, none from the two that tried outside and were refused. The table for all six is rewritten after every run, from the run: [leaderboard.md](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/leaderboard.md) on the `status` branch.
 
+### Two models, one gateway
+
+A separate job runs two models behind agentgateway, inside the same boundary and from the same signed bundle ([ADR 10](docs/decisions/0010-one-gateway-in-front-of-the-models.md)). A request names its model and goes to that model's server; a model with no route is refused at the gateway; each client gets three requests a minute, and the fourth is refused with 429 while the next client is served; the agents reach the gateway and nothing that serves a model directly. Each check is in `tests/e2e/gateway.sh`, every day.
+
 ## What is proven, and how
 
 Every line is a check in `tests/e2e/run.sh` or `scripts/evals.sh` on a fresh cluster, or in `scripts/validate.sh`. Each refusal is paired with a control that must succeed, so a check cannot pass because the environment refuses everything.
@@ -148,6 +152,7 @@ The [threat model](docs/threat-model.md) lists every threat with its control and
 | 7 | [Every model through the same boundary, every day](docs/decisions/0007-every-model-through-the-same-boundary.md) |
 | 8 | [One signed file across the gap](docs/decisions/0008-one-signed-file-across-the-gap.md) |
 | 9 | [An AI-BOM for every model, read at admission](docs/decisions/0009-an-ai-bom-for-every-model.md) |
+| 10 | [One gateway in front of the models](docs/decisions/0010-one-gateway-in-front-of-the-models.md) |
 
 ## Related
 

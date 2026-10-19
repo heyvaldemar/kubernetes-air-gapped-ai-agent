@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- One gateway in front of the models ([ADR 10](docs/decisions/0010-one-gateway-in-front-of-the-models.md)): agentgateway 1.6.0 and the Gateway API, pinned in `gateway/gateway.lock` and carried in the signed bundle. A new e2e job serves two models behind it and proves routing by the model the request names, a 404 for a model with no route, a per-client limit (429 on the fourth request in a minute, the next client served), no path to a model server around the gateway, and the 429 in the proxy's request counter.
 - Static check `mlbom`: every model's AI-BOM, written from its lock line, is validated against the CycloneDX 1.6 schema with `cyclonedx-cli` 0.33.1, pinned by digest in `ci-images.pins`, on every push. A planted violation, a model whose component type the schema does not know, shows the check can fail.
 
 ## [1.1.0] - 2026-10-18

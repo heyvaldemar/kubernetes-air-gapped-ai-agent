@@ -43,7 +43,8 @@ case "${1:-}" in
         n=$((n + 1))
       done
     done
-    cp "$CHART_DIR"/*.tgz "$work/charts/"
+    # Charts and the manifests that travel with them (the gateway's CRDs).
+    cp "$CHART_DIR"/* "$work/charts/"
     (cd "$work" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$STATE/SHA256SUMS.tmp"
     mv "$STATE/SHA256SUMS.tmp" "$work/SHA256SUMS"
     # The same bytes for the same contents: sorted, no times, no owners.
@@ -79,7 +80,7 @@ case "${1:-}" in
         n=$((n + 1))
       done
     done < <(find "$inside/oci" -name index.json | sort)
-    mkdir -p "$CHART_DIR" && cp "$inside"/charts/*.tgz "$CHART_DIR/"
+    mkdir -p "$CHART_DIR" && cp "$inside"/charts/* "$CHART_DIR/"
     # The blobs are in the registry now. The indexes stay, so the acceptance
     # test can compare what the registry holds with what the file carried.
     find "$inside/oci" -path '*/blobs/*' -type f -delete
