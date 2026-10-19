@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A demo at the top of the README: one model's job of the v1.3.0 run, from the signed bundle to the agent's evals, replayed from the run's own log (`docs/demo/e2e.cast`, `docs/demo/e2e.gif`) by the new `scripts/cast-from-log.py`. The e2e needs Linux and a host firewall, so it cannot be recorded on a laptop; the log keeps every line with its time.
 
+### Fixed
+
+- `scripts/cast-from-log.py` finds a step by the command in its `Run` header when GitHub serves a log with every step named `UNKNOWN STEP`, as it did for a run on 2026-10-19. Against run 39197628817 it writes `docs/demo/e2e.cast` byte for byte as before.
+
 ## [1.3.0] - 2026-10-19
 
 ### Added
