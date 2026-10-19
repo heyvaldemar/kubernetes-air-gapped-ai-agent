@@ -1,0 +1,19 @@
+# One route per model server: a request that names @MODEL@ goes to the
+# Service @SERVICE@ in inference, and nowhere else. scripts/gateway.sh install
+# applies one for each model it is told the cluster serves. The policies on
+# the Gateway (gateway.yaml) cover every route.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: "@SERVICE@"
+  namespace: gateway
+spec:
+  parentRefs:
+    - name: models
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /v1/}
+          headers:
+            - {name: x-gateway-model, value: "@MODEL@"}
+      backendRefs:
+        - {name: "@SERVICE@", namespace: inference, port: 8080}

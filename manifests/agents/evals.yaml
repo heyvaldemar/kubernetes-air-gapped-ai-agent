@@ -1,7 +1,8 @@
 # The agent, run through the evals: one Job, as the support-agent identity,
-# with a token for the MCP server's audience only and no Kubernetes API
-# token. It reaches the MCP server and the model server, and nothing else
-# (network-policies.yaml).
+# with one token for the MCP server's audience, one for the model gateway's,
+# and no Kubernetes API token. It reaches the MCP server and the model
+# gateway, and nothing else (network-policies.yaml, and the gateway's own
+# rule in manifests/gateway/gateway.yaml).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,6 +29,10 @@ spec:
           image: docker.io/library/python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
           command: [python3, /evals/harness.py]
           env:
+            # The model through the gateway, by name: scripts/evals.sh fills in
+            # the gateway's address and the model this run serves.
+            - {name: MODEL_URL, value: "@MODEL_URL@"}
+            - {name: MODEL_NAME, value: "@MODEL_NAME@"}
             - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
             - {name: ATTEMPTS, value: "3"}
             - {name: MODEL_THREADS, value: "2"}
@@ -41,6 +46,7 @@ spec:
           volumeMounts:
             - {name: evals, mountPath: /evals, readOnly: true}
             - {name: mcp-token, mountPath: /var/run/secrets/mcp, readOnly: true}
+            - {name: models-token, mountPath: /var/run/secrets/models, readOnly: true}
       volumes:
         - name: evals
           configMap: {name: evals}
@@ -50,4 +56,11 @@ spec:
               - serviceAccountToken:
                   path: token
                   audience: mcp.boundary.heyvaldemar.com
+                  expirationSeconds: 3600
+        - name: models-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: models.boundary.heyvaldemar.com
                   expirationSeconds: 3600

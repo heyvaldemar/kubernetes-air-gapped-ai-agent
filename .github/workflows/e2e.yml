@@ -85,8 +85,10 @@ jobs:
           ./scripts/model.sh sign
           ./scripts/model.sh plants
 
-      - name: The admission chart, fetched and checked
-        run: ./scripts/admission.sh fetch
+      - name: The admission chart and the gateway, fetched and checked
+        run: |
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
 
       # Everything above is the vendor's side: a connected machine with a
       # staging registry. Everything the cluster runs leaves it as one
@@ -115,6 +117,11 @@ jobs:
 
       - name: The tool side, inside
         run: ./scripts/tools.sh
+
+      # The agent reaches its model only through the gateway, as itself:
+      # one route, to the one model server, and the agent's own quota.
+      - name: The gateway, inside
+        run: ./scripts/gateway.sh install
 
       - name: Prove the boundary and the model's way in
         env:
@@ -224,6 +231,8 @@ jobs:
         run: ./scripts/tools.sh
 
       - name: The gateway, inside
+        env:
+          SERVED: granite-4.0-1b=granite minicpm5-2b=minicpm
         run: ./scripts/gateway.sh install
 
       - name: Prove the gateway

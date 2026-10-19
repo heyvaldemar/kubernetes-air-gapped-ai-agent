@@ -7,3 +7,7 @@
 "admission/verify-models.yaml"	"object.spec.?volumes.orValue([]).filter(v, has(v.image)).map(v, v.image.reference)"	"object.spec.containers.map(c, c.image)"	"policies"	"a signature policy that no longer looks at image volumes"
 "admission/verify-models.yaml"	"c.licenses.exists(l, l.license.id in ['Apache-2.0', 'MIT'])"	"c.licenses.exists(l, true)"	"policies"	"a model policy that no longer reads the AI-BOM's licence"
 "scripts/mlbom.py"	"            \"type\": \"machine-learning-model\",\n"	"            \"type\": \"model\",\n"	"mlbom"	"an AI-BOM whose model is not a CycloneDX component type"
+"manifests/gateway/gateway.yaml"	"              - {key: jwt.sub, requests: 3, unit: Minutes}\n"	"              - {key: request.headers[\"x-client-id\"], requests: 3, unit: Minutes}\n"	"gateway"	"a quota keyed on a header the caller writes"
+"manifests/gateway/gateway.yaml"	"      mode: Strict\n"	"      mode: Optional\n"	"gateway"	"a gateway that lets a caller without a token through"
+"manifests/agents/evals.yaml"	"                  audience: models.boundary.heyvaldemar.com\n"	"                  audience: mcp.boundary.heyvaldemar.com\n"	"gateway"	"an agent whose model token is for another audience"
+"manifests/agents/evals.yaml"	"                  audience: mcp.boundary.heyvaldemar.com\n"	"                  audience: models.boundary.heyvaldemar.com\n"	"mcp"	"an agent whose MCP token is for the model gateway instead"

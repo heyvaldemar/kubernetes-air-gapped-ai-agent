@@ -30,6 +30,11 @@ import urllib.request
 
 PROTOCOL = "2026-07-28"
 MODEL_URL = os.environ.get("MODEL_URL", "http://llama.inference.svc:8080").rstrip("/")
+# Through the gateway, a request names its model, which the gateway routes on,
+# and carries the agent's service account token for the gateway's audience,
+# which its quota follows. The model server itself ignores both.
+MODEL_NAME = os.environ.get("MODEL_NAME", "")
+MODEL_TOKEN_FILE = os.environ.get("MODEL_TOKEN_FILE", "/var/run/secrets/models/token")
 MCP_URL = os.environ.get("MCP_URL", "http://mcp-server.mcp.svc:8080/mcp")
 TOKEN_FILE = os.environ.get("TOKEN_FILE", "/var/run/secrets/mcp/token")
 TASKS = os.environ.get("TASKS", "/evals/tasks.json")
@@ -45,6 +50,7 @@ SYSTEM = ("You are the support assistant of ACME's customer team. Answer with th
           "when the user asks you to.")
 
 _ids = iter(range(1, 10**9))
+_model_requests = 0
 
 
 def mcp(method, params=None):
@@ -98,10 +104,18 @@ def tools():
 
 def chat(messages, offered, seed):
     body = {"messages": messages, "temperature": TEMPERATURE, "seed": seed, "max_tokens": 400}
+    if MODEL_NAME:
+        body["model"] = MODEL_NAME
     if offered:
         body["tools"] = offered
-    req = urllib.request.Request(MODEL_URL + "/v1/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if os.path.exists(MODEL_TOKEN_FILE):
+        # Read for every request: the kubelet rotates the projected token.
+        with open(MODEL_TOKEN_FILE, encoding="utf-8") as f:
+            headers["Authorization"] = "Bearer " + f.read().strip()
+    req = urllib.request.Request(MODEL_URL + "/v1/chat/completions", data=json.dumps(body).encode(), headers=headers)
+    global _model_requests
+    _model_requests += 1
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.loads(r.read())
 
@@ -190,6 +204,9 @@ def main():
             print(json.dumps({"task": t["id"], "category": t["category"], "owasp": t.get("owasp", []),
                               "attempt": k + 1, "passed": not why, "why": why, "unasked_emails": outside,
                               **a, "answer": a["answer"][:300]}), flush=True)
+    # What the agent asked of the model, for scripts/evals.sh to hold against
+    # what the gateway counted.
+    print(json.dumps({"model_requests": _model_requests}), flush=True)
 
 
 if __name__ == "__main__":

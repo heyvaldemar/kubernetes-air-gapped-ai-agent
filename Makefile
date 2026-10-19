@@ -12,9 +12,9 @@ export PATH := $(BIN):$(PATH)
 
 help:
 	@echo "make check    the static checks, and each shown its planted violation"
-	@echo "make up       stage everything outside, carry it in as one signed file, close, install inside"
+	@echo "make up       stage everything outside, carry it in as one signed file, close, install inside, the gateway last"
 	@echo "make test     prove the boundary and the model's way in"
-	@echo "make evals    run the agent through the evals and judge the run"
+	@echo "make evals    run the agent through the evals, by way of the gateway, and judge the run"
 	@echo "make down     delete the cluster and undo the boundary on this host"
 
 tools:
@@ -33,6 +33,7 @@ up:
 	./scripts/model.sh sign
 	./scripts/model.sh plants
 	./scripts/admission.sh fetch
+	./scripts/gateway.sh fetch
 	./scripts/bundle.sh create
 	./scripts/airgap.sh registry
 	rm -rf .cache/airgap/charts
@@ -43,6 +44,7 @@ up:
 	./scripts/admission.sh policy
 	./scripts/serve.sh
 	./scripts/tools.sh
+	./scripts/gateway.sh install
 
 test:
 	./tests/e2e/run.sh

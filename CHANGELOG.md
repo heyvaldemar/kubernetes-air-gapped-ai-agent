@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AGENTS.md` (and a `CLAUDE.md` that imports it): the rules an AI agent working on this repository is held to: claims only as CI checks, a check trusted only after it has failed, risky changes proved on a branch, pins and their homes, numbers never typed by hand, how a release is cut and verified.
 - `scripts/release-numbers.py <run id>`: the README's eval table and the email facts behind its prose, from a run's artifacts.
+- The agent's own evals go through the gateway. Every model job installs agentgateway and routes the one model it serves; the agent's rule to the model server is gone, so the gateway is its only way to a model. Two new gates: every model request the agent made is one the gateway answered (the harness's count against the proxy's), and none was refused over the agent's quota.
+- The gateway knows who is calling. A caller shows a projected service account token for the gateway's audience, checked against the cluster's own signing keys written into the policy at install, with nothing fetched at request time; no token, or a token for the Kubernetes API, is 401. Quotas are keyed on the token's subject: the support agent 60 requests a minute (about twice its busiest measured minute, 28), any other workload 3. `tests/e2e/gateway.sh` adds the 401s, a workload that writes `x-client-id: support-agent` and is still held to its own quota, and the agent's larger quota.
+- Static check `gateway`: every caller needs a token for the gateway's audience, the evals Job holds one, every quota is keyed on `jwt.sub`. Three plants: a quota keyed on a header, `mode: Optional`, a model token for another audience. And one more for `mcp`: an MCP token for the gateway's audience.
+
+### Changed
+
+- One `HTTPRoute` per model server, from `manifests/gateway/route.yaml`; `scripts/gateway.sh install` takes the served models as `SERVED` (model=Service pairs, default `$MODEL=llama`). The gateway's policies attach to the Gateway and cover every route.
+- The `x-client-id` header no longer means anything to the gateway.
+- The status workflow hands its push credential to git through git's environment, not its command line, which any process on the runner can read.
 
 ## [1.2.0] - 2026-10-18
 

@@ -1,13 +1,16 @@
-# One way in to two model servers: agentgateway, inside the boundary.
+# One way in to the model servers: agentgateway, inside the boundary.
 #
 # A client names the model in the request, as the OpenAI API does. Before any
 # route is chosen, the gateway copies that name from the body into a header;
-# each route sends one name to one model server, and a name with no route is
-# refused at the gateway. Each client, named by the x-client-id header, may
-# send three requests a minute, and the fourth is refused with 429 while
-# every other client is still served. Nothing here reaches outside the
-# boundary: the model servers have no egress, and the gateway has nowhere to
-# send a request but the two Services below. tests/e2e/gateway.sh proves it.
+# each route (route.yaml, one per model server) sends one name to one server,
+# and a name with no route is refused at the gateway. A caller shows who it is
+# with a service account token made for the gateway's audience and signed by
+# the cluster; without one it is refused with 401. The quota follows that
+# identity: the support agent may send 60 requests a minute, any other
+# workload 3, and a request over the quota is refused with 429 while every
+# other workload is still served. Nothing here reaches outside the boundary:
+# the model servers have no egress, and the gateway has nowhere to send a
+# request but the Services the routes name. tests/e2e/gateway.sh proves it.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -68,44 +71,39 @@ spec:
           - name: x-gateway-model
             value: string(json(request.body).model)
 ---
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: models
-  namespace: gateway
-spec:
-  parentRefs:
-    - name: models
-  rules:
-    - matches:
-        - path: {type: PathPrefix, value: /v1/}
-          headers:
-            - {name: x-gateway-model, value: granite-4.0-1b}
-      backendRefs:
-        - {name: granite, namespace: inference, port: 8080}
-    - matches:
-        - path: {type: PathPrefix, value: /v1/}
-          headers:
-            - {name: x-gateway-model, value: minicpm5-2b}
-      backendRefs:
-        - {name: minicpm, namespace: inference, port: 8080}
----
-# Three requests a minute for each client, counted per x-client-id. Local to
-# the proxy: no rate-limit service, nothing outside the boundary.
+# Who is calling, and how often they may. The token is a projected service
+# account token for this audience; the issuer and the public keys are the
+# cluster's own, written in by scripts/gateway.sh install from the API
+# server's discovery document, so the gateway checks a token without fetching
+# anything. The token stops here: the gateway removes it before the request
+# goes on. The limit is keyed on the token's subject, never on a header the
+# caller writes. The agent's 60 a minute is about twice its busiest minute in
+# the evals (docs/decisions/0011-the-gateway-knows-who-is-calling.md).
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
-  name: per-client
+  name: per-workload
   namespace: gateway
 spec:
   targetRefs:
-    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: models}
+    - {group: gateway.networking.k8s.io, kind: Gateway, name: models}
   traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+        - issuer: "@ISSUER@"
+          audiences: [models.boundary.heyvaldemar.com]
+          jwks:
+            inline: '@JWKS@'
     rateLimit:
-      local:
-        - key: request.headers["x-client-id"]
-          requests: 3
-          unit: Minutes
+      conditional:
+        - condition: 'jwt.sub == "system:serviceaccount:agents:support-agent"'
+          policy:
+            local:
+              - {key: jwt.sub, requests: 60, unit: Minutes}
+        - policy:
+            local:
+              - {key: jwt.sub, requests: 3, unit: Minutes}
 ---
 # The routes live in gateway and the Services in inference: inference says
 # which namespace may point at them.

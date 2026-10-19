@@ -6,9 +6,12 @@
 #            refused unless its sha256 is the one gateway.lock pins; they go
 #            where the bundle takes charts from, and cross with everything
 #            else
-#   install  inside: the CRDs, the charts with the images by digest, and
-#            manifests/gateway/gateway.yaml; waits until the Gateway is
-#            programmed and its proxy answers
+#   install  inside: the CRDs, the charts with the images by digest,
+#            manifests/gateway/gateway.yaml with the cluster's service account
+#            issuer and public keys written in, and one route.yaml for each
+#            model served: SERVED lists them as model=Service pairs, and
+#            defaults to $MODEL=llama, the one server the evals use; waits
+#            until the Gateway is programmed and its proxy answers
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -45,7 +48,23 @@ case "${1:-}" in
     helm upgrade --install agentgateway "$(chart_file agentgateway)" \
       --namespace agentgateway-system --wait --timeout 5m \
       --set "controller.image.tag=$(tag_of controller)" --set "proxy.image.tag=$(tag_of proxy)" >/dev/null
-    kubectl apply -f "$ROOT/manifests/gateway/gateway.yaml" >/dev/null
+    # The cluster's service account issuer and its public keys, read once
+    # from the API server: the gateway checks a token against them with
+    # nothing to fetch at request time.
+    mkdir -p "$STATE"
+    kubectl get --raw /.well-known/openid-configuration >"$STATE/cluster-oidc.json"
+    kubectl get --raw /openid/v1/jwks >"$STATE/cluster-jwks.json"
+    python3 - "$ROOT/manifests/gateway/gateway.yaml" "$STATE/cluster-oidc.json" "$STATE/cluster-jwks.json" <<'PY' | kubectl apply -f - >/dev/null
+import json, sys
+text, oidc, jwks = (open(f).read() for f in sys.argv[1:4])
+print(text.replace("@ISSUER@", json.loads(oidc)["issuer"])
+          .replace("@JWKS@", json.dumps(json.loads(jwks), separators=(",", ":"))))
+PY
+    served="${SERVED:-${MODEL:?MODEL or SERVED names the models the gateway routes}=llama}"
+    for pair in $served; do
+      sed -e "s#@MODEL@#${pair%%=*}#g" -e "s#@SERVICE@#${pair#*=}#g" "$ROOT/manifests/gateway/route.yaml" \
+        | kubectl apply -f - >/dev/null
+    done
     # The gateway is the one way in: the agents' own rule to the model
     # servers goes, and their default-deny leaves them the gateway alone.
     kubectl -n agents delete networkpolicy allow-model --ignore-not-found >/dev/null
@@ -55,7 +74,7 @@ case "${1:-}" in
       sleep 2
     done
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
-    say "agentgateway is up inside: Gateway models programmed, routes by model, three requests a minute per client"
+    say "agentgateway is up inside: Gateway models programmed, routes for $served, a quota per service account"
     ;;
   *)
     echo "usage: gateway.sh <fetch|install>" >&2

@@ -1,6 +1,6 @@
 # 10. One gateway in front of the models
 
-- Status: accepted
+- Status: accepted; amended by [ADR 11](0011-the-gateway-knows-who-is-calling.md), which keys the limit on a service account token instead of a header and puts the agent's evals behind the gateway
 - Date: 2026-10-18
 
 ## Context

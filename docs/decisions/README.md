@@ -13,4 +13,5 @@ Each record states the context, the decision, what it costs, what was considered
 | 7 | [Every model through the same boundary, every day](0007-every-model-through-the-same-boundary.md) | accepted |
 | 8 | [One signed file across the gap](0008-one-signed-file-across-the-gap.md) | accepted |
 | 9 | [An AI-BOM for every model, read at admission](0009-an-ai-bom-for-every-model.md) | accepted |
-| 10 | [One gateway in front of the models](0010-one-gateway-in-front-of-the-models.md) | accepted |
+| 10 | [One gateway in front of the models](0010-one-gateway-in-front-of-the-models.md) | accepted, amended by 11 |
+| 11 | [The gateway knows who is calling](0011-the-gateway-knows-who-is-calling.md) | accepted |

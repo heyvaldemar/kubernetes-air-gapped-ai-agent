@@ -18,6 +18,9 @@
 #   policies      the signature policy extracts image volumes and verifies
 #                 them, and the native policy holds them to the models path,
 #                 by digest
+#   gateway       every caller of the model gateway needs a token for its
+#                 audience, the evals Job holds one, and every quota is keyed
+#                 on the token's subject, never on a header the caller writes
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -50,7 +53,7 @@ check_kubeconform() {
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" \
-    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters manifests/gateway/gateway.yaml
+    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters manifests/gateway/gateway.yaml manifests/gateway/route.yaml
 }
 
 check_images() {
@@ -111,10 +114,12 @@ for who, grant in sorted(policy["identities"].items()):
         elif srv.TOOLS[t]["definition"]["annotations"].get("destructiveHint", True):
             bad.append("%s is granted %s, a destructive tool" % (who, t))
 aud = policy["audience"]
-job = re.findall(r"audience:\s*(\S+)", open("manifests/agents/evals.yaml").read())
+# The token the agent shows the MCP server (the Job holds one for the model
+# gateway too, for that audience alone).
+job = re.findall(r"name: mcp-token\n(?:.*\n){0,6}?\s*audience:\s*(\S+)", open("manifests/agents/evals.yaml").read())
 if job != [aud]:
-    bad.append("the evals Job's token is not for the MCP server's audience (%s): %s" % (aud, job))
-print("\n".join(bad) or "every grant names a tool the server has; none is destructive; one audience")
+    bad.append("the evals Job's MCP token is not for the MCP server's audience (%s): %s" % (aud, job))
+print("\n".join(bad) or "every grant names a tool the server has; none is destructive; the agent's MCP token is for the server's audience")
 sys.exit(1 if bad else 0)
 PY
 }
@@ -162,6 +167,21 @@ check_policies() {
   return "$ok"
 }
 
+check_gateway() {
+  local ok=0 aud keys
+  { grep -q '^    jwtAuthentication:$' manifests/gateway/gateway.yaml && grep -q '^      mode: Strict$' manifests/gateway/gateway.yaml; } \
+    || { echo "gateway.yaml does not require a token of every caller (jwtAuthentication, mode Strict)"; ok=1; }
+  aud="$(sed -n 's/^ *audiences: \[\(.*\)\]$/\1/p' manifests/gateway/gateway.yaml)"
+  [ -n "$aud" ] || { echo "gateway.yaml names no audience: any token the cluster signs would do"; ok=1; }
+  grep -A6 'name: models-token' manifests/agents/evals.yaml | grep -q "audience: $aud\$" \
+    || { echo "the evals Job holds no token for the gateway's audience ($aud)"; ok=1; }
+  # A quota keyed on anything but the token's subject is one a caller can pick.
+  keys="$(grep -oE 'key: [^,}]+' manifests/gateway/gateway.yaml | sort -u)"
+  [ "$keys" = "key: jwt.sub" ] || { echo "a quota in gateway.yaml is keyed on something other than the token's subject: $(tr '\n' ' ' <<<"$keys")"; ok=1; }
+  [ "$ok" = 0 ] && echo "every caller of the gateway needs a token for $aud, the agent holds one, and every quota is keyed on its subject"
+  return "$ok"
+}
+
 check_mlbom() {
   local img ok=0 n=0 name url sha lic
   img="$(sed -n 's/^CYCLONEDX_IMAGE=//p' ci-images.pins)"
@@ -178,7 +198,7 @@ check_mlbom() {
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"
