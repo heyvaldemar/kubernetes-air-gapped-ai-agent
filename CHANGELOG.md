@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The latest run's evals as Inspect logs on the `status` branch, one per model, in `inspect/`, for Inspect's viewer (the UK AI Security Institute's evaluation framework). `scripts/inspect-log.py` translates the harness log: a sample is one attempt, with the task's prompt, what it expects, the harness's score and reasons, the tool calls the model made and their outcomes, and the model server's token count; the run's gates go in the log's metadata. Each log is read back with Inspect's own reader before the branch is written. inspect-ai 0.3.276 and its 79 dependencies are pinned by hash in `scripts/inspect-requirements.txt`, none newer than 2026-10-05.
 - Each model job prints the runner's CPU model and count first. Cost and latency per task moved by up to about two times between runs of the same code (MiniCPM5-2B: 10.7 and 18.2 vCPU-seconds a task in runs 39199529930 and 39280471778), and the logs did not say what the runner was.
 
 ## [1.4.0] - 2026-10-19

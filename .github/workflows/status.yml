@@ -44,13 +44,31 @@ jobs:
           E2E_WORKFLOW: e2e.yml
         run: python3 scripts/status.py "$RUNNER_TEMP/status"
 
+      - name: The latest run's evals, as Inspect logs
+        # One Inspect log per model job (scripts/inspect-log.py), each read back
+        # by Inspect's own reader, onto the branch beside the leaderboard. A run
+        # that failed before its evals has none to translate.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2016
+          run_id="$(python3 -c 'import json, sys; l = json.load(open(sys.argv[1]))["latest"]; print(l["url"].rsplit("/", 1)[1] if l else "")' "$RUNNER_TEMP/status/status.json")"
+          if [ -z "$run_id" ]; then echo "no finished run on main: no Inspect logs"; exit 0; fi
+          read -r created commit < <(gh run view "$run_id" -R "$GITHUB_REPOSITORY" --json createdAt,headSha --jq '"\(.createdAt) \(.headSha)"')
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -p 'e2e-results-*' -D "$RUNNER_TEMP/run"
+          python3 -m venv "$RUNNER_TEMP/inspect"
+          "$RUNNER_TEMP/inspect/bin/pip" install -q --require-hashes --only-binary :all: -r scripts/inspect-requirements.txt
+          RUN_ID="$run_id" RUN_CREATED="$created" RUN_COMMIT="$commit" \
+            "$RUNNER_TEMP/inspect/bin/python" scripts/inspect-log.py "$RUNNER_TEMP/run" "$RUNNER_TEMP/status/inspect"
+
       - name: Replace the branch `status`
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           cd "$RUNNER_TEMP/status"
-          printf '# status\n\nWritten by .github/workflows/status.yml from the e2e runs on main, every day. Not edited by hand.\n' > README.md
+          # shellcheck disable=SC2016
+          printf '# status\n\nWritten by .github/workflows/status.yml from the e2e runs on main, every day. Not edited by hand.\n\n`inspect/` holds the latest run'"'"'s evals as Inspect logs, one per model: `inspect view --log-dir inspect`.\n' > README.md
           git init -q -b status
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
