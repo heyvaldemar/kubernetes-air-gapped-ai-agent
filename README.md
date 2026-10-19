@@ -14,6 +14,10 @@ An AI agent deployed into a Kubernetes cluster with no route to the internet. Th
 
 It is a reference, not a product, and it does not run in production anywhere. It runs on kind, CPU only, at no cloud cost.
 
+![One model's job: the signed bundle loaded across the gap, the gateway, the boundary and admission checks, then the agent's evals](docs/demo/e2e.gif)
+
+The Qwen3.5-2B job of [run 39197628817](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39197628817), the run v1.3.0 was cut from, replayed from its log by `scripts/cast-from-log.py`: the e2e needs Linux and a firewall on the host, so it is recorded where it runs. The times are the log's own, waits cut to two seconds and played at half speed; GitHub's step headers and the summary each script repeats at its end are left out, and nothing is reworded. This model tried to email outside the company 15 times; the MCP server refused all 15. [`docs/demo/e2e.cast`](docs/demo/e2e.cast) replays it in a terminal (`asciinema play`).
+
 ## What the evals report
 
 The two models the release ships with, in the run v1.1.0 was cut from, on a 4-vCPU runner ([run 39157806610](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39157806610)). Each task ran three times with its own seed. The numbers are the agent's own log and the records service's state, read back after the run.
