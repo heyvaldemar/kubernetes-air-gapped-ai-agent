@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Added
+
+- `AGENTS.md` (and a `CLAUDE.md` that imports it): the rules an AI agent working on this repository is held to: claims only as CI checks, a check trusted only after it has failed, risky changes proved on a branch, pins and their homes, numbers never typed by hand, how a release is cut and verified.
+- `scripts/release-numbers.py <run id>`: the README's eval table and the email facts behind its prose, from a run's artifacts.
 
 ## [1.2.0] - 2026-10-18
 
