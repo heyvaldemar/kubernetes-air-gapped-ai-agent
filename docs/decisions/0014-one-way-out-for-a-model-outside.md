@@ -30,7 +30,7 @@ Three facts made a narrow answer possible. Anthropic publishes the addresses its
 
 - What the agent sends its model leaves the boundary: the customer's prompts, the records the tools return, the report's text. That is the trade a site makes in turning this on, and the reason the default here stays inside. The checks prove that nothing else leaves, and that it reaches Anthropic and nowhere else.
 - Residual paths, stated: the node agents in `kube-system` share the egress node's network and could reach the range; whoever may create pods in `gateway` may place one on the node; a token taken from the gateway spends the workspace's budget for up to ten minutes and reaches only that workspace.
-- The quota and the token budget were sized for models on CPU (ADR 11, 12). An API answers faster. The harness now waits and asks again on 429 and reports its busiest minute, and the gate still fails on any refusal: if the first runs refuse, the budget for this route is set from their measurement, as ADR 12 set the first one.
+- The quota and the token budget were sized for models on CPU (ADR 11, 12). An API answers faster: Claude Haiku 5.5's busiest minute was 50 answers and 50,986 tokens (run 39473093500), inside the 60 and 60,000 the agent had, with a sixth to spare. Both are now about twice the busiest measured minute again, 100 and 100,000 (ADR 11, 12, amended). The harness waits and asks again on 429, and the gate still fails on any refusal.
 - Cost per task is the tokens at Anthropic's list price (`evals/pricing.json`). The workspace refuses anything past its $10 limit: a run past it fails, it does not bill.
 - The status page reads the air-gapped e2e only. Numbers from this job are cited by run until they have a page of their own.
 

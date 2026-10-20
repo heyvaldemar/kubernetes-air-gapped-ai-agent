@@ -152,7 +152,7 @@ read -r code2 _ <<<"$(ask granite-4.0-1b gw-tokens)"
 if [ "$code $code2" = "200 429" ]; then pass "a workload that spent its 1,000 tokens in one request is refused the next (429), its second request of the minute"
 else fail "a workload's long request, then a short one: got $code $code2, expected 200 429 (a token budget the gateway never charges refuses nothing)"; fi
 read -r code _ <<<"$(ask granite-4.0-1b support-agent "" 1500)"
-if [ "$code" = 200 ]; then pass "the support agent's same long request is served, within its own 60,000 tokens"
+if [ "$code" = 200 ]; then pass "the support agent's same long request is served, within its own 100,000 tokens"
 else fail "the support agent's long request: HTTP $code, expected 200"; fi
 
 printf '\n== 8. the proxy counts what it did\n'

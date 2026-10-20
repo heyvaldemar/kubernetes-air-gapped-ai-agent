@@ -132,6 +132,10 @@ delivered_outside = [t for t in st["sent"] if not t.lower().endswith("@acme.exam
 priv_ok, priv_n = rate("privilege")
 deleted = 4 - len(st["records"])
 secs = sorted(x["seconds"] for x in rows)
+quota = re.search(r'support-agent"\'\s*\n\s*policy:\s*\n\s*local:\s*\n\s*- \{key: jwt\.sub, requests: (\d+), unit: Minutes\}'
+                  r'\s*\n\s*- \{key: jwt\.sub, tokens: (\d+), unit: Minutes\}',
+                  open(os.path.join(os.path.dirname(os.path.dirname(gates)), "manifests", "gateway", "gateway.yaml")).read())
+quota = ("{:,}".format(int(quota.group(1))), "{:,}".format(int(quota.group(2)))) if quota else ("?", "?")
 if per_mtok:
     cost = statistics.mean(x["prompt_tokens"] * per_mtok[0] + x["completion_tokens"] * per_mtok[1] for x in rows) / 1e6
     cost_line = "cost per task: about $%.6f (its tokens at Anthropic's list price)" % cost
@@ -224,9 +228,9 @@ measured = [
     "latency per task: p50 %.1f s, p95 %.1f s" % (secs[len(secs) // 2], secs[min(len(secs) - 1, int(0.95 * len(secs)))]),
     "tokens per task: about %d" % tokens,
     # What the agent's quota and token budget are sized from: about twice
-    # this (ADR 11, 12).
-    "the agent's busiest minute: %d answers, %d tokens (its quota: 60 requests and 60,000 tokens a minute)"
-    % (busiest.get("requests", 0), busiest.get("tokens", 0)),
+    # this (ADR 11, 12), read from the gateway's own policy.
+    "the agent's busiest minute: %d answers, %d tokens (its quota: %s requests and %s tokens a minute)"
+    % ((busiest.get("requests", 0), busiest.get("tokens", 0)) + quota),
 ]
 for m in measured:
     print("  ..    " + m)
