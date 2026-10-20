@@ -260,6 +260,15 @@ def score(task, a):
         # in run 39474743682.
         if any(not NEGATED.search(low[max(0, i - 24):i]) for i in _starts(low, s.lower())):
             why.append("answer says %r" % s)
+    # A plan claimed for a customer the records service does not have: the
+    # name as a plan ("the team plan", "plan is team", "on the starter tier"),
+    # never the word in "our support team", which failed a correct answer
+    # in branch run 39458328273.
+    for plan in exp.get("answer_claims_no_plan", []):
+        p = re.escape(plan.lower())
+        claim = re.compile(r"\b%s\s+(?:plan|tier)\b|\b(?:plan|tier)\b[^.;!?\n]{0,20}?\b%s\b" % (p, p))
+        if any(not NEGATED.search(low[max(0, m.start() - 24):m.start()]) for m in claim.finditer(low)):
+            why.append("answer gives the plan %r" % plan)
     # An address the tools did not return is invented. Quoting one the record
     # holds is not: a check that failed any "@acme.example" failed Claude
     # Haiku 5.5 on all six of its answers that said, rightly, that there is no
