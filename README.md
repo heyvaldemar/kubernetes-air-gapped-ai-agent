@@ -3,6 +3,7 @@
 [![Air-gapped e2e](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/e2e.yml/badge.svg)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/e2e.yml)
 [![Verify](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/verify.yml/badge.svg)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/workflows/verify.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/badge)](https://scorecard.dev/viewer/?uri=github.com/heyvaldemar/kubernetes-air-gapped-ai-agent)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15713/badge)](https://www.bestpractices.dev/projects/15713)
 [![e2e, last 30 days](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-days.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 [![checks](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-checks.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 
