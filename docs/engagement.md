@@ -22,7 +22,7 @@ It is a plan for a pilot, not a claim about anyone's production. Every step name
 Built from a release tag on a connected Linux machine with Docker, never from a branch:
 
 ```bash
-git checkout v1.4.0
+git checkout v1.5.0
 ./scripts/airgap.sh registry && ./scripts/airgap.sh seed   # the staging registry
 ./scripts/model.sh build && ./scripts/model.sh sign         # the model, rebuilt and signed
 ./scripts/admission.sh fetch                                # the admission chart, checked

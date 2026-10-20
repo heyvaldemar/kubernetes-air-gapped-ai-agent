@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.5.0] - 2026-10-20
+
 ### Security
 
 - **The boundary had a way out by DNS, and the host's SSH port was open to pods.** A pod that asked the kind bridge's gateway (172.18.0.1) for example.com got an address (run 39371733895). Inside the node, kind's entrypoint sends the gateway's port 53 to Docker's embedded resolver, and dockerd answers from the host, where no rule on the bridge applies (run 39374222983 printed the NAT rules); a first fix that closed only the host's `INPUT` chain did not stop it (run 39373144875). Traffic addressed to the host also takes `INPUT`, which the boundary's forwarding rule never sees, so a pod could open the host's TCP 22. Every release before this one had both. `scripts/airgap.sh close` now empties the node's `DOCKER_OUTPUT` and `DOCKER_POSTROUTING` NAT chains and rejects new connections from the bridge to the host, IPv4 and IPv6; `make down` removes the host rule with the others ([ADR 1](docs/decisions/0001-the-boundary-is-the-runners-firewall.md), amended). Found by probes added the same day after a review of the repository, and shown to fail first.
@@ -115,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.1.0...v1.2.0
