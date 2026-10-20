@@ -24,6 +24,9 @@
 #                 every caller has a token budget beside its request quota,
 #                 and every route goes to a model backend, where tokens are
 #                 counted, never straight to a Service
+#   docs          every command in docs/engagement.md is one the e2e workflow
+#                 runs, its tag is the latest release, and the README lists
+#                 every decision record
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -116,13 +119,19 @@ for who, grant in sorted(policy["identities"].items()):
             bad.append("%s is granted %s, a tool the server does not have" % (who, t))
         elif srv.TOOLS[t]["definition"]["annotations"].get("destructiveHint", True):
             bad.append("%s is granted %s, a destructive tool" % (who, t))
+# A value JSON Schema refuses must be refused here too: the server checks
+# every argument itself, so its reading of a pattern is the boundary's.
+for tool, value in (("send_email", {"to": "dana@acme.example\n", "subject": "s", "body": "b"}),
+                    ("records_lookup", {"customer_id": "C1042\n"})):
+    if srv.validate(srv.TOOLS[tool]["definition"]["inputSchema"], value) is None:
+        bad.append("%s accepts %r, which its schema's pattern refuses" % (tool, value))
 aud = policy["audience"]
 # The token the agent shows the MCP server (the Job holds one for the model
 # gateway too, for that audience alone).
 job = re.findall(r"name: mcp-token\n(?:.*\n){0,6}?\s*audience:\s*(\S+)", open("manifests/agents/evals.yaml").read())
 if job != [aud]:
     bad.append("the evals Job's MCP token is not for the MCP server's audience (%s): %s" % (aud, job))
-print("\n".join(bad) or "every grant names a tool the server has; none is destructive; the agent's MCP token is for the server's audience")
+print("\n".join(bad) or "every grant names a tool the server has; none is destructive; a pattern refuses a trailing newline; the agent's MCP token is for the server's audience")
 sys.exit(1 if bad else 0)
 PY
 }
@@ -197,6 +206,32 @@ check_gateway() {
   return "$ok"
 }
 
+check_docs() {
+  python3 - <<'PY' || return 1
+import os, re, sys
+bad = []
+e2e = open(".github/workflows/e2e.yml").read()
+runbook = open("docs/engagement.md").read()
+for block in re.findall(r"```bash\n(.*?)```", runbook, re.S):
+    for line in block.splitlines():
+        for cmd in re.findall(r"\./(?:scripts|tests)/[\w./-]+(?: [a-z]+)?", line.split("#")[0]):
+            if not re.search(re.escape(cmd) + r"(?![\w-])", e2e):
+                bad.append("docs/engagement.md runs %s, which the e2e workflow does not" % cmd)
+tag = re.findall(r"git checkout (\S+)", runbook)
+latest = re.search(r"^## \[(\d+\.\d+\.\d+)\]", open("CHANGELOG.md").read(), re.M)
+if not latest or tag != ["v" + latest.group(1)]:
+    bad.append("docs/engagement.md checks out %s, the latest release is v%s" % (tag, latest and latest.group(1)))
+# The table itself, not a mention elsewhere in the README.
+table = re.search(r"^## Decisions\n(.*?)(?=^## )", open("README.md").read(), re.M | re.S)
+readme = table.group(1) if table else ""
+for f in sorted(os.listdir("docs/decisions")):
+    if re.match(r"\d{4}-.*\.md$", f) and "(docs/decisions/%s)" % f not in readme:
+        bad.append("the README's decisions table does not list docs/decisions/%s" % f)
+print("\n".join(bad) or "every command in the engagement plan is one the e2e runs, its tag is the latest release, and the README lists every decision")
+sys.exit(1 if bad else 0)
+PY
+}
+
 check_mlbom() {
   local img ok=0 n=0 name url sha lic
   img="$(sed -n 's/^CYCLONEDX_IMAGE=//p' ci-images.pins)"
@@ -213,7 +248,7 @@ check_mlbom() {
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

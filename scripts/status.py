@@ -224,13 +224,19 @@ def main(out):
         json.dump(status, f, indent=2)
 
     if days:
-        color = "brightgreen" if len(green) == len(days) else ("yellow" if len(green) >= 0.9 * len(days) else "red")
-        # Both counts: a day is green by its last run, and the runs show
-        # what that hides, a failure earlier the same day.
+        # A day is green by its last run, so the colour also reads the runs:
+        # green only when every day ended green and nine runs in ten passed.
+        share = status["runs_passed"] / len(finished)
+        color = ("brightgreen" if len(green) == len(days) and share >= 0.9
+                 else "yellow" if len(green) >= 0.9 * len(days) else "red")
         msg = f"{len(green)} of {len(days)} days green, {status['runs_passed']} of {len(finished)} runs"
     else:
         color, msg = "lightgrey", "no runs yet"
-    json.dump(badge(f"e2e, last {WINDOW_DAYS} days", msg, color), open(os.path.join(out, "badge-days.json"), "w"))
+    # The label says how much history there is: "last 30 days" only once a
+    # run is that old, "since <first day>" before.
+    label = f"e2e, last {WINDOW_DAYS} days" if days and days[0] <= since.isoformat() else (
+        f"e2e, since {days[0]}" if days else f"e2e, last {WINDOW_DAYS} days")
+    json.dump(badge(label, msg, color), open(os.path.join(out, "badge-days.json"), "w"))
     if checks:
         color = "brightgreen" if not failed else "red"
         json.dump(badge("checks", f"{passed} of {passed + failed} passed, {latest['created_at'][:10]}", color),

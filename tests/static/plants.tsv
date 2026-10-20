@@ -13,3 +13,7 @@
 "manifests/agents/evals.yaml"	"                  audience: mcp.boundary.heyvaldemar.com\n"	"                  audience: models.boundary.heyvaldemar.com\n"	"mcp"	"an agent whose MCP token is for the model gateway instead"
 "manifests/gateway/route.yaml"	"        - {group: agentgateway.dev, kind: AgentgatewayBackend, name: \"@SERVICE@\", namespace: inference}\n"	"        - {name: \"@SERVICE@\", namespace: inference, port: 8080}\n"	"gateway"	"a route straight to the model Service, where a token budget counts nothing"
 "manifests/gateway/gateway.yaml"	"              - {key: jwt.sub, tokens: 1000, unit: Minutes}\n"	""	"gateway"	"a caller with a request quota and no token budget"
+"manifests/mcp/server.py"	"if \"pattern\" in p and not re.fullmatch(p[\"pattern\"], value):"	"if \"pattern\" in p and not re.search(p[\"pattern\"], value):"	"mcp"	"a server that reads a pattern with search, letting a trailing newline through"
+"docs/engagement.md"	"./scripts/gateway.sh install"	"./scripts/gateway.sh deploy"	"docs"	"an engagement plan that runs a command the e2e never ran"
+"docs/engagement.md"	"git checkout v"	"git checkout v0."	"docs"	"an engagement plan pinned to a release that is not the latest"
+"README.md"	"| 1 | [The boundary is the host's firewall, the node's resolver and CoreDNS](docs/decisions/0001-the-boundary-is-the-runners-firewall.md) |\n"	""	"docs"	"a decision record the README's table leaves out"

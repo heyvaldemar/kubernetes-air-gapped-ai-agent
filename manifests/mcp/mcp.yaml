@@ -1,8 +1,9 @@
 # The MCP server: the agents' only door to their tools (server.py says what
 # it checks, policy.json what each agent is granted).
 #
-# It runs on gVisor like the agents, because it parses whatever a fooled
-# agent sends. It holds the one credential its tools need, the records key,
+# It parses whatever a fooled agent sends, so it runs under the restricted
+# Pod Security profile; it does not run on gVisor here, and neither do the
+# agents (ADR 6: the sandbox repository is where that isolation is). It holds the one credential its tools need, the records key,
 # and its own Kubernetes token can do one thing: ask the API server whether
 # an agent's token is genuine (system:auth-delegator, TokenReview).
 apiVersion: v1

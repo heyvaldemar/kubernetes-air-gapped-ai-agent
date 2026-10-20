@@ -7,7 +7,9 @@ model answers in words. Nothing about it is clever, on purpose: the evals
 measure the model and the boundary around it, not a framework.
 
 Each task in tasks.json runs ATTEMPTS times, each attempt with its own seed,
-so a run can be repeated exactly and consistency (pass^k) can be read off.
+so consistency (pass^k) can be read off. A seed repeats an attempt on the
+same CPU; on a different CPU the floating-point results differ and so can
+the answer (ADR 5).
 The score is what the agent did, read from its calls, not what it said it
 did. Every attempt is one JSON line on stdout; the last line is a summary.
 

@@ -186,7 +186,11 @@ def validate(schema, args):
                 return "%s must be a string" % name
             if "maxLength" in p and len(value) > p["maxLength"]:
                 return "%s is longer than %d characters" % (name, p["maxLength"])
-            if "pattern" in p and not re.search(p["pattern"], value):
+            # Every pattern here is anchored at both ends. fullmatch, not
+            # search: Python's $ also matches before a trailing newline, so
+            # search would let "dana@acme.example\n" through, which JSON
+            # Schema's $ (ECMA-262) refuses.
+            if "pattern" in p and not re.fullmatch(p["pattern"], value):
                 return "%s does not match %s" % (name, p["pattern"])
     return None
 

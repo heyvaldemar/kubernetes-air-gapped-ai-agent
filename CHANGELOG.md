@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `docs/engagement.md`, the five-day plan for a site, still checked out v1.1.0 and left out the gateway: Day 1 never fetched its charts and Day 2 never installed it, so the evals on Day 3 would have had no way to the model. It now follows the e2e workflow command for command, and the new static check `docs` holds it there: every command in its code blocks must be one the e2e runs, its tag must be the latest release, and the README's decisions table must list every record (three plants).
+- Comments in `manifests/mcp/mcp.yaml` and `manifests/namespaces.yaml` said the MCP server runs on gVisor. It does not, and ADR 6 says so; the comments now say what runs.
+
+- The MCP server read each argument's pattern with Python's `re.search`, whose `$` also matches before a trailing newline: `send_email` to `"dana@acme.example\n"` passed its check, where JSON Schema refuses it. It now uses `re.fullmatch`, and static check `mcp` holds both patterns to a trailing newline, with a plant that puts `search` back. Found in a review of the repository.
+
 ### Added
 
+- `scripts/release-numbers.py` counts, of the emails to colleagues nobody asked for, those that are an outside address's name with the company's domain: in run 39157806610, 39 of the 47 from the four models that never wrote an outside address.
 - The latest run's evals as Inspect logs on the `status` branch, one per model, in `inspect/`, for Inspect's viewer (the UK AI Security Institute's evaluation framework). `scripts/inspect-log.py` translates the harness log: a sample is one attempt, with the task's prompt, what it expects, the harness's score and reasons, the tool calls the model made and their outcomes, and the model server's token count; the run's gates go in the log's metadata. Each log is read back with Inspect's own reader before the branch is written. inspect-ai 0.3.276 and its 79 dependencies are pinned by hash in `scripts/inspect-requirements.txt`, none newer than 2026-10-05.
 - Each model job prints the runner's CPU model and count first. Cost and latency per task moved by up to about two times between runs of the same code (MiniCPM5-2B: 10.7 and 18.2 vCPU-seconds a task in runs 39199529930 and 39280471778), and the logs did not say what the runner was.
+
+### Changed
+
+- The README says what "Granite never wrote an outside address" more likely measures: its tool calls follow the recipient pattern in the tool's schema, which is what a grammar built from the schema produces, and whether one applies depends on the model's chat template (ADR 5 said so; the README did not).
+- The 60% floor is described as what it is, a line between a working agent and one that has lost its model or its tools, not a measure of quality; the cost per task as the model server's busy time at list price, marginal compute rather than a bill; and a run's length as measured, 18 to 37 minutes across the eight green runs on main before 2026-10-20, where the README said 30 to 40.
+- The e2e badge says how much history it has: "since <first day>" until a run is 30 days old. Its colour reads the runs as well as the days: green only when every day ended green and nine runs in ten passed. A day counts as green by its last run, which hid the failures before it.
+- The README's decisions table lists ADR 12. The harness's docstring no longer says a run repeats exactly: a seed repeats an attempt on the same CPU, not on a different one (ADR 5). A comment in `release-assets.yml` carried a date from the repository it was copied from.
 
 ## [1.4.0] - 2026-10-19
 

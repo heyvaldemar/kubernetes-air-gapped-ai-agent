@@ -2,7 +2,7 @@
 
 An air-gapped AI install rarely fails on the model. It fails on the first morning: a registry the site's CA does not sign, an image nobody brought in, a file nobody may carry across, and a security team seeing the controls for the first time on the day they are asked to approve them. This is the engagement as five days, each ending with something the customer can check for themselves.
 
-It is a plan for a pilot, not a claim about anyone's production. Every step names the command or the file that does it, and each command is one this repository runs on every e2e run.
+It is a plan for a pilot, not a claim about anyone's production. Every step names the command or the file that does it, and each command is one this repository runs on every e2e run; static check `docs` fails if one is not, or if the tag below is not the latest release.
 
 ## Before the first day
 
@@ -22,10 +22,11 @@ It is a plan for a pilot, not a claim about anyone's production. Every step name
 Built from a release tag on a connected Linux machine with Docker, never from a branch:
 
 ```bash
-git checkout v1.1.0
+git checkout v1.4.0
 ./scripts/airgap.sh registry && ./scripts/airgap.sh seed   # the staging registry
 ./scripts/model.sh build && ./scripts/model.sh sign         # the model, rebuilt and signed
 ./scripts/admission.sh fetch                                # the admission chart, checked
+./scripts/gateway.sh fetch                                  # the gateway's CRDs and charts, checked
 ./scripts/bundle.sh create                                  # .cache/airgap/bundle.tar, signed
 sha256sum .cache/airgap/bundle.tar
 ```
@@ -41,14 +42,19 @@ sha256sum .cache/airgap/bundle.tar
 ./scripts/bundle.sh load                                    # signature, then checksums, then the load
 ./scripts/admission.sh install && ./scripts/admission.sh policy
 ./scripts/serve.sh && ./scripts/tools.sh
+./scripts/gateway.sh install                                # the one way to the models: who calls, how much
 ./tests/e2e/run.sh                                          # the acceptance test
 ```
 
-`bundle.sh load` reads nothing from a file whose signature does not verify, and loads nothing from one whose checksums do not match. The acceptance test is the one CI runs every day: a pod and the node fail to reach the internet and to resolve a public name, the registry answers only over TLS, unsigned weights and weights signed by another key are refused, the signed model is admitted, and everything in the registry is what the file carried ([ADR 8](decisions/0008-one-signed-file-across-the-gap.md)).
+`bundle.sh load` reads nothing from a file whose signature does not verify, and loads nothing from one whose checksums do not match. The acceptance test is the one CI runs every day: a pod and the node fail to reach the internet and to resolve a public name, the registry answers only over TLS, unsigned weights and weights signed by another key are refused, the signed model is admitted, and everything in the registry is what the file carried ([ADR 8](decisions/0008-one-signed-file-across-the-gap.md)). The gateway is the only way to the models: a caller without a token for its audience is refused, and each caller has a quota and a token budget ([ADR 10](decisions/0010-one-gateway-in-front-of-the-models.md) to [12](decisions/0012-a-token-budget-per-caller.md)).
 
 **Done when:** `tests/e2e/run.sh` passes on their cluster, and its output is attached to the change record.
 
 ## Day 3: their model, their tasks
+
+```bash
+./scripts/evals.sh                                          # the agent through the tasks, through the gateway
+```
 
 The evals in `evals/tasks.json` are a starting set. The customer's own tasks go in the same format: a question, the tool calls it should make, what the answer must and must not say. Candidate models go into `models/models.lock`, one line each, pinned by revision and sha256, and the e2e matrix runs every candidate through the same boundary ([ADR 7](decisions/0007-every-model-through-the-same-boundary.md)).
 

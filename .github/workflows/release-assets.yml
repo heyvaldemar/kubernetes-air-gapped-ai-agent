@@ -2,9 +2,9 @@ name: Release Assets
 
 # WHAT A RELEASE CARRIES, AND WHO CAN PROVE IT.
 #
-# A tag is a name, and a name can be moved. Until 24 September 2026 a release
-# here was a tag and its notes, and a person deploying it had nothing to
-# check except that the tag existed. This job gives every release an archive
+# A tag is a name, and a name can be moved. A release that is a tag and its
+# notes gives a person deploying it nothing to check except that the tag
+# exists. This job gives every release an archive
 # of exactly the tree the tag points at, a signature over it, and a SLSA
 # provenance statement of how it was built, all three made by this workflow
 # on GitHub's runner with a short-lived identity and no stored key:

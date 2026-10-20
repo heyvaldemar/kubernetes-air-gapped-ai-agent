@@ -1,7 +1,7 @@
 # agents: where agent workloads run. The sandbox label is what the admission
 # policy binds to and what the other namespaces' network policies refuse.
 # mcp: the MCP server, the agents' only door to their tools. Its label binds
-# the tool-server policy: gVisor too, since it parses what agents send.
+# the tool-server policy. Restricted Pod Security, not gVisor (ADR 6).
 # tools: the services the MCP server's tools call.
 # corp: stands for everything else in the cluster an agent must not reach.
 apiVersion: v1
