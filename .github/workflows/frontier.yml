@@ -114,18 +114,27 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/frontier.sh
 
-      # The token lives ten minutes and the evals take longer: a new one
-      # every four, for as long as they run.
+      # The token lives ten minutes. A new one every minute while the agent
+      # runs, so every run's evals cross at least one replacement: the first
+      # green runs took two to three minutes and never got to a refresh every
+      # four. The run fails if the gateway's token was never replaced.
       - name: Run the agent through the evals
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+          REFRESH_SECONDS: "60"
         run: |
-          ./scripts/frontier.sh refresh &
+          ./scripts/frontier.sh refresh 2> >(tee "$RUNNER_TEMP/refresh.log" >&2) &
           refresher=$!
           rc=0
           ./scripts/evals.sh || rc=$?
           kill "$refresher" 2>/dev/null || true
+          replaced="$(grep -c 'holds a new API token' "$RUNNER_TEMP/refresh.log" || true)"
+          if [ "${replaced:-0}" -ge 1 ]; then
+            echo "  PASS  the gateway's token was replaced ${replaced} times while the agent ran, and the gates above held across it"
+          else
+            echo "  FAIL  the gateway's token was never replaced while the agent ran, so its replacement is untested"; rc=1
+          fi
           exit "$rc"
 
       - name: What the cluster looked like

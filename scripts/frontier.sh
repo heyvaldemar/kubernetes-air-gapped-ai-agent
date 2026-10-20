@@ -14,7 +14,7 @@
 #            and hand it to the gateway as the Secret inference/anthropic-token,
 #            through kubectl's stdin: it is never an argument, a file or a log
 #            line. Prints only how long it lives and how long it is
-#   refresh  token, every $REFRESH_SECONDS (default 240), until killed
+#   refresh  token, every $REFRESH_SECONDS (default 60), until killed
 #   close    take the firewall rule out again
 #
 # No API key exists anywhere. Anthropic exchanges the runner's OIDC token
@@ -115,7 +115,7 @@ print("== the gateway holds a new API token: lives %d s, %d characters" % (ttl, 
 PY
     ;;
   refresh)
-    while sleep "${REFRESH_SECONDS:-240}"; do
+    while sleep "${REFRESH_SECONDS:-60}"; do
       "$0" token || echo "== the token was not replaced; the one the gateway holds lives on until it expires" >&2
     done
     ;;

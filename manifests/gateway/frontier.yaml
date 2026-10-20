@@ -10,7 +10,7 @@
 # the gateway holds and the agent never sees. The token is not a key: the
 # runner exchanges its own short-lived GitHub identity for it under a
 # federation rule pinned to this repository's main branch, it lives ten
-# minutes, and scripts/frontier.sh replaces it every four.
+# minutes, and scripts/frontier.sh replaces it every minute.
 
 # The gateway's proxy runs on the egress node and nowhere else, and knows the
 # API's address without asking a resolver: the boundary has none that answers
