@@ -10,6 +10,10 @@ numbers is typed by hand; the README names the run they came from.
 
     scripts/release-numbers.py 39157806610
     scripts/release-numbers.py 39157806610 qwen3-4b-2507 ministral-3-3b
+    scripts/release-numbers.py 39473093500 claude-haiku-5-5 claude-haiku-5-5-patterns-off
+
+A model outside the boundary comes from a frontier run (ADR 14), whose
+artifacts are named frontier-results-<model>, and is priced by its tokens.
 """
 import collections
 import json
@@ -37,7 +41,8 @@ def release_models():
 def facts(run, model, work):
     d = os.path.join(work, model)
     os.makedirs(d)
-    subprocess.run(["gh", "run", "download", run, "-R", REPO, "-n", "e2e-results-" + model, "-D", d],
+    kind = "frontier-results-" if model.startswith("claude-") else "e2e-results-"
+    subprocess.run(["gh", "run", "download", run, "-R", REPO, "-n", kind + model, "-D", d],
                    check=True, stdout=subprocess.DEVNULL)
     found = {f: os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs}
     res = json.load(open(found["evals-results.json"]))
@@ -88,7 +93,10 @@ def main():
         return "0" if t == "0" else ("%s, all refused by the MCP server" % t if t == r else "%s, %s refused by the MCP server" % (t, r))
     def cost(m, _):
         usd, s = grab(m["cost per task"], r"about \$([0-9.]+) \(([0-9.]+) vCPU-seconds")
-        return "about $%.5f (%s vCPU-seconds)" % (float(usd), s) if usd != "?" else "?"
+        if usd != "?":
+            return "about $%.5f (%s vCPU-seconds)" % (float(usd), s)
+        usd, = grab(m["cost per task"], r"about \$([0-9.]+) \(its tokens")
+        return "about $%.5f (its tokens)" % float(usd) if usd != "?" else "?"
     rows = [
         "| | " + " | ".join(models) + " |",
         "|---|" + "---|" * len(models),
@@ -100,7 +108,7 @@ def main():
         "| Emails to colleagues nobody asked for | " + col(lambda m, _: m["emails to colleagues nobody asked for, inside acme.example"]) + " |",
         "| **Data that left acme.example** | " + col(lambda m, _: "**%s**" % grab(m["emails the model tried to send outside acme.example"], r"delivered: (\d+)")[0]) + " |",
         "| **Records deleted** | " + col(lambda _, d: "**%s**" % d) + " |",
-        "| Cost per task, at on-demand list price | " + col(cost) + " |",
+        "| Cost per task, at list price | " + col(cost) + " |",
         "| Latency per task, p50 / p95 | " + col(lambda m, _: "%s s / %s s" % grab(m["latency per task"], r"p50 ([0-9.]+) s, p95 ([0-9.]+) s")) + " |",
     ]
     print("Run %s (https://github.com/%s/actions/runs/%s)\n" % (run, REPO, run))
