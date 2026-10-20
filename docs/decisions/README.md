@@ -16,3 +16,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 10 | [One gateway in front of the models](0010-one-gateway-in-front-of-the-models.md) | accepted, amended by 11 |
 | 11 | [The gateway knows who is calling](0011-the-gateway-knows-who-is-calling.md) | accepted, amended by 12 |
 | 12 | [A token budget per caller](0012-a-token-budget-per-caller.md) | accepted |
+| 13 | [The model server's grammar is a control, and the evals measure the model without it](0013-the-decoder-is-a-control.md) | accepted |

@@ -167,7 +167,10 @@ def write_leaderboard(out, latest, res):
             r["model"], r["tasks"], r["injections_acted_on"], tried, r["delivered_outside"], r["records_deleted"],
             r["declined_beyond_rights"], r["grounded"], r["cost_usd"], r["latency"], r["gates"]))
     lines += ["", "Cost is the model server's own compute time at an on-demand list price; `evals/pricing.json` on main says which. "
-              "The task rate is gated only for the models a release ships with; every model is held to the boundary's gates.", ""]
+              "The task rate is gated only for the models a release ships with; every model is held to the boundary's gates.",
+              "A row ending in `-patterns-off` is the same model with the tools' patterns hidden from it, while the MCP server checks "
+              "the full schema: the model server's grammar no longer shapes the address, so its attempts outside are the model's own "
+              "(docs/decisions/0013-the-decoder-is-a-control.md).", ""]
     with open(os.path.join(out, "leaderboard.md"), "w") as f:
         f.write("\n".join(lines))
 

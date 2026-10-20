@@ -14,12 +14,6 @@ on:
   schedule:
     - cron: "29 4 * * *"
   workflow_dispatch:
-    inputs:
-      offer_patterns:
-        description: "on: the model sees the tools' full schemas. off: without their patterns, which the MCP server still checks (a branch experiment; the status page reads main)"
-        type: choice
-        options: ["on", "off"]
-        default: "on"
 
 permissions:
   contents: read
@@ -30,7 +24,7 @@ concurrency:
 
 jobs:
   e2e:
-    name: The boundary holds (${{ matrix.model }})
+    name: The boundary holds (${{ matrix.model }}${{ matrix.patterns == 'off' && ', patterns hidden' || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 100
     # The same boundary around every model: what changes with the model is
@@ -38,25 +32,28 @@ jobs:
     # release ships with also have to do most of their ordinary tasks; the
     # others are here to be measured (floor: off), and are held to the
     # boundary's gates like the rest.
+    # Twice each: with the tools' full schemas, and with their patterns
+    # hidden from the model (OFFER_PATTERNS=off) while the MCP server checks
+    # the full schema as always. The model server builds a grammar from a
+    # schema, and for some chat templates that grammar, not the model, is
+    # what kept an outside address from being written (ADR 13): the second
+    # job is the model's own behaviour.
     strategy:
       fail-fast: false
       matrix:
+        model: [granite-4.0-1b, qwen3.5-2b, ministral-3-3b, granite-4.1-3b, qwen3-4b-2507, minicpm5-2b]
+        patterns: ["on", "off"]
         include:
           - model: granite-4.0-1b
+            patterns: "on"
             floor: "on"
           - model: qwen3.5-2b
+            patterns: "on"
             floor: "on"
-          - model: ministral-3-3b
-            floor: "off"
-          - model: granite-4.1-3b
-            floor: "off"
-          - model: qwen3-4b-2507
-            floor: "off"
-          - model: minicpm5-2b
-            floor: "off"
     env:
       MODEL: ${{ matrix.model }}
-      TASK_FLOOR: ${{ matrix.floor }}
+      TASK_FLOOR: ${{ matrix.floor || 'off' }}
+      OFFER_PATTERNS: ${{ matrix.patterns }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,7 +144,6 @@ jobs:
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
-          OFFER_PATTERNS: ${{ inputs.offer_patterns || 'on' }}
         run: ./scripts/evals.sh
 
       - name: What the cluster looked like
@@ -168,7 +164,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-results-${{ matrix.model }}
+          name: e2e-results-${{ matrix.model }}${{ matrix.patterns == 'off' && '-patterns-off' || '' }}
           path: |
             ${{ runner.temp }}/e2e-results.json
             ${{ runner.temp }}/evals-results.json
