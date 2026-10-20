@@ -135,7 +135,7 @@ Nothing in a cloud. The model runs on CPU inside kind, and no model provider is 
 
 ## What it does not do
 
-The [threat model](docs/threat-model.md) lists every threat with its control and its check, and what is not covered. The model is fooled, and the architecture does not rely on it not being. The tool's schema holds recipients to the company's domain, not to the right colleague. Signatures are checked by key without a transparency log, and CI makes the keys per run. The agent's side runs under the restricted Pod Security profile, not under gVisor; the sandbox repository is where that isolation is built. One node, one registry, one replica of each service.
+The [threat model](docs/threat-model.md) lists every threat with its control and its check, and what is not covered. [What this gives evidence for](docs/compliance.md) maps the checks to NIST SP 800-53, the NIST AI RMF and its Generative AI Profile, ISO/IEC 42001 Annex A and the EU AI Act, as evidence for a control, never as compliance, with the six gaps a CISO will look for. The model is fooled, and the architecture does not rely on it not being. The tool's schema holds recipients to the company's domain, not to the right colleague. Signatures are checked by key without a transparency log, and CI makes the keys per run. The agent's side runs under the restricted Pod Security profile, not under gVisor; the sandbox repository is where that isolation is built. One node, one registry, one replica of each service.
 
 ## Repository
 

@@ -50,10 +50,6 @@ jobs:
       - name: Each check, shown its planted violation
         run: python3 tests/static/plant_violations.py
 
-      # A server only its own tests understand proves little: the protocol's
-      # reference client discovers it, lists, calls and reads as two
-      # identities, and is refused what each is not granted.
-
   freshness:
     name: Pins that fell behind upstream
     # Scheduled and manual only: a new upstream release is not actionable in

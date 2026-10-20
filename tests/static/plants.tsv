@@ -20,3 +20,4 @@
 "scripts/mlbom.py"	"\"component\": {\"type\": \"container\", \"bom-ref\": \"image\","	"\"component\": {\"type\": \"container\", \"bom-ref\": \"model\","	"mlbom"	"an AI-BOM whose subject and model share one bom-ref"
 "admission/carried-images.yaml"	"variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))"	"variables.images.all(i, true)"	"policies"	"a policy that no longer holds pods to the digests the bundle carried"
 "admission/carried-images.yaml"	"parameterNotFoundAction: Deny"	"parameterNotFoundAction: Allow"	"policies"	"a policy that admits everything when its list of digests is missing"
+"kind/cluster.yaml"	"@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5"	""	"images"	"a node image by tag only"

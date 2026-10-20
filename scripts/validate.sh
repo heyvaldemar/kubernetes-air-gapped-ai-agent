@@ -68,6 +68,9 @@ check_images() {
   bad="$(grep -rnE '(image:|"image":|^[A-Z]+=)[[:space:]]*"?[a-z0-9.-]+\.[a-z]+/[^@[:space:]"]+:[^@[:space:]"]+("|$|[[:space:]])' \
     manifests admission/kyverno-images.yaml ci-images.pins airgap/registry.ref .github/workflows scripts 2>/dev/null | grep -v '@sha256:' || true)"
   bad+="$(grep -vE '^\s*(#|$)' airgap/images.txt | grep -v '@sha256:' || true)"
+  # The node image reaches the cluster outside the bundle (README, What it
+  # does not do); its pin is the one thing that says which node it was.
+  bad+="$(grep -nE '^\s*image:' kind/cluster.yaml | grep -v '@sha256:' || true)"
   if [ -n "$bad" ]; then echo "images without a digest:"; echo "$bad"; return 1; fi
   echo "every image is referenced by digest"
 }
