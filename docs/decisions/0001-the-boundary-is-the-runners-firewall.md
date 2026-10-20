@@ -1,6 +1,6 @@
 # 1. The boundary is the host's firewall, the node's resolver and CoreDNS
 
-- Status: accepted, amended 2026-10-20 (the host itself)
+- Status: accepted, amended 2026-10-20 (Docker's DNS inside the node, and the host itself)
 - Date: 2026-10-18
 
 ## Context
@@ -16,15 +16,20 @@ A firewall rule is not the whole of it either. A kind node resolves names throug
 `scripts/airgap.sh close` cuts in three places, after the registry inside is seeded:
 
 1. **The host's firewall.** A rule at the top of `DOCKER-USER`, for IPv4 and IPv6, rejects anything that enters from kind's bridge and does not leave through it. The node and the registry share the bridge, so they still reach each other; nothing reaches beyond it.
-2. **The node's resolver.** The node's `/etc/resolv.conf` points at 127.0.0.1, where nothing listens. The node needs no names: containerd reaches the registry through `/etc/hosts`.
+2. **The node's resolver, and the way to Docker's.** The node's `/etc/resolv.conf` points at 127.0.0.1, where nothing listens. The node needs no names: containerd reaches the registry through `/etc/hosts`. kind's entrypoint also sends the bridge gateway's port 53, from the node and from its pods, to Docker's embedded resolver; the node's `DOCKER_OUTPUT` and `DOCKER_POSTROUTING` NAT chains, which do that, are emptied (since 2026-10-20).
 3. **CoreDNS.** Its `forward` block goes, so it answers for the cluster and for the registry's name (a `hosts` entry) and for nothing else. kind's own offline CI removes the same block, so that the answer is NXDOMAIN rather than a timeout clients keep retrying.
-4. **The host itself** (added 2026-10-20). A rule at the top of `INPUT`, for IPv4 and IPv6, rejects any new connection from kind's bridge to the host. Replies to the host's own connections, kubectl's to the API server among them, are not new, and pass.
+4. **The host itself** (added 2026-10-20). A rule at the top of `INPUT`, for IPv4 and IPv6, rejects any new connection from kind's bridge to the host, whose SSH port a pod could open before. Replies to the host's own connections, kubectl's to the API server among them, are not new, and pass.
 
 `tests/e2e/run.sh` then proves it from inside: a pod and the node each fail to reach 1.1.1.1 by IP and to resolve example.com, the node fails to pull an image the registry inside does not hold, and an image it does hold comes up by its original name and digest.
 
 ## What the first three missed
 
-Traffic addressed to the host does not cross `DOCKER-USER`: it takes `INPUT`, and the rule in step 1 never sees it. Until 2026-10-20 nothing closed it, and nothing checked it. The probes added to `tests/e2e/run.sh` that day found a pod could open TCP 22 and 53 on the host's address on the bridge (172.18.0.1 on a GitHub runner), and the resolver on 53 answered a pod's query for example.com (run [39371733895](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39371733895), "a pod resolved example.com by asking the host itself"). That is the way out by DNS this record names in its context, through the host's resolver instead of the node's. Every release before v1.5.0 had it. Step 4 closes it, and the same probes now gate it: no port on the host opens from a pod, and no outside name resolves through it.
+Until 2026-10-20 nothing checked the host's address on the bridge from a pod. The probes added to `tests/e2e/run.sh` that day found two ways out there (172.18.0.1 on a GitHub runner).
+
+- **TCP 22.** Traffic addressed to the host takes `INPUT`, and the rule in step 1, in `FORWARD`, never sees it. A pod could open the host's SSH port.
+- **Port 53, answered.** A pod asked 172.18.0.1 for example.com and got an address (run [39371733895](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39371733895)). A rule in `INPUT` did not stop it (run [39373144875](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39373144875)): the query never reached the host's `INPUT`. Inside the node, kind's entrypoint rewrites Docker's NAT rules so that the gateway's port 53 goes to Docker's embedded resolver at 127.0.0.11, for the node and, through a `PREROUTING` jump, for its pods; dockerd answers from the host, where no rule on the bridge applies (run [39374222983](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39374222983) printed the rules). That is the way out by DNS this record's context names, reached from a pod rather than from the node's own resolver, which step 2 had closed.
+
+Every release before v1.5.0 had both. Step 2 now empties the node's Docker NAT chains, step 4 closes `INPUT`, and the probes gate both: no port on the host opens from a pod, and no outside name resolves through the gateway.
 
 ## Consequences
 

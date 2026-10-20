@@ -95,10 +95,11 @@ elif [ "$host_md" = 200 ]; then
 else
   pass "a pod cannot reach the metadata address (the host has no metadata service here: ${host_md:-no answer})"
 fi
-# The host itself. Traffic addressed to the host takes its INPUT chain, which
-# the forwarding rule does not cover: before the boundary closed INPUT too, a
-# pod could open TCP 22 and 53 on the host's bridge address, and the resolver
-# there answered it (run 39371733895).
+# The host's address on the bridge. Two ways out were open there until
+# 2026-10-20 (runs 39371733895 and 39373144875): the host's SSH port, which the
+# forwarding rule does not cover (traffic to the host takes INPUT), and port
+# 53, which kind's node sends to Docker's embedded DNS, answered by dockerd
+# from the host.
 gw="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -m1 -E '^[0-9.]+$')"
 open_ports=""
 for port in 22 53 80 443 3128 8080; do reach "$gw" "$port" && open_ports="$open_ports $port"; done
