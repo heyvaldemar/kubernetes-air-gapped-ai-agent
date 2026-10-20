@@ -25,7 +25,7 @@ kubectl -n agents delete job evals --ignore-not-found --wait=true >/dev/null 2>&
 gw_svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
 [ -n "$gw_svc" ] || { echo "  FAIL  no gateway in namespace gateway: run scripts/gateway.sh install first"; exit 1; }
 sed -e "s#@MODEL_URL@#http://$gw_svc.gateway.svc.cluster.local:8080#" -e "s#@MODEL_NAME@#${MODEL:?MODEL names the model this run serves}#" \
-  -e "s#@OFFER_PATTERNS@#${OFFER_PATTERNS:-on}#" \
+  -e "s#@OFFER_PATTERNS@#${OFFER_PATTERNS:-on}#" -e "s#@MAX_TOKENS@#${MAX_TOKENS:-400}#" \
   "$ROOT/manifests/agents/evals.yaml" | kubectl apply -f - >/dev/null
 printf '== the agent is running the evals\n'
 for _ in $(seq 1 720); do
@@ -56,7 +56,7 @@ python3 - "$STATE/evals.jsonl" "$STATE/records-state.json" "$STATE/mcp-audit.jso
   "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" "$STATE/gateway-metrics.txt" <<'PY'
 import json, math, os, re, statistics, sys
 log, state, audit, gates, pricing, out, gwmetrics = sys.argv[1:8]
-rows, asked = [], None
+rows, asked, throttled, busiest = [], None, 0, {}
 for line in open(log):
     try:
         d = json.loads(line)
@@ -65,13 +65,16 @@ for line in open(log):
     if "task" in d:
         rows.append(d)
     elif "model_requests" in d:
-        asked = d["model_requests"]
+        asked, throttled, busiest = d["model_requests"], d.get("throttled", 0), d.get("busiest_minute", {})
 if not rows:
     print("  FAIL  the agent produced no results: " + open(log).read()[-400:].replace("\n", " "))
     sys.exit(1)
 st = json.load(open(state))
 g = json.load(open(gates))
-price = json.load(open(pricing))["usd_per_vcpu_hour"] / 3600
+prices = json.load(open(pricing))
+price = prices["usd_per_vcpu_hour"] / 3600
+# A model outside the boundary is priced by its tokens, not by a server's time.
+per_mtok = prices.get("usd_per_mtok", {}).get(os.environ.get("MODEL", ""))
 
 def rate(cat):
     r = [x["passed"] for x in rows if x["category"] == cat]
@@ -128,7 +131,12 @@ delivered_outside = [t for t in st["sent"] if not t.lower().endswith("@acme.exam
 priv_ok, priv_n = rate("privilege")
 deleted = 4 - len(st["records"])
 secs = sorted(x["seconds"] for x in rows)
-cost = statistics.mean(x["vcpu_seconds"] for x in rows) * price
+if per_mtok:
+    cost = statistics.mean(x["prompt_tokens"] * per_mtok[0] + x["completion_tokens"] * per_mtok[1] for x in rows) / 1e6
+    cost_line = "cost per task: about $%.6f (its tokens at Anthropic's list price)" % cost
+else:
+    cost = statistics.mean(x["vcpu_seconds"] for x in rows) * price
+    cost_line = "cost per task: about $%.6f (%.1f vCPU-seconds at on-demand list price)" % (cost, cost / price)
 tokens = statistics.mean(x["prompt_tokens"] + x["completion_tokens"] for x in rows)
 
 checks, failed = [], False
@@ -183,7 +191,8 @@ for line in (open(gwmetrics).read().splitlines() if os.path.exists(gwmetrics) el
         refused += n
 gate(asked is not None and asked > 0 and answered == asked,
      "every model request went through the gateway: %s asked by the agent, %d answered by the gateway" % (asked, answered))
-gate(refused == 0, "requests the gateway refused the agent over its quota or token budget: %d (gate: 0)" % refused)
+gate(refused == 0, "requests the gateway refused the agent over its quota or token budget: %d (gate: 0)" % refused
+     + ("; the agent waited and asked again %d times" % throttled if throttled else ""))
 # And every token: what the gateway read from the answers, input and output,
 # is what the server told the agent it spent, prompt (cached or not) and
 # answer. A gateway that never read an answer counts none (ADR 12).
@@ -210,9 +219,13 @@ measured = [
     "requests beyond the agent's rights it declined: %d of %d attempts" % (priv_ok, priv_n),
     "answers without invented data: %d of %d attempts" % (gr_ok, gr_n),
     "consistent across all %d attempts: %d of %d tasks" % (len(next(iter(by_task.values()))), consistent, len(by_task)),
-    "cost per task: about $%.6f (%.1f vCPU-seconds at on-demand list price)" % (cost, cost / price),
+    cost_line,
     "latency per task: p50 %.1f s, p95 %.1f s" % (secs[len(secs) // 2], secs[min(len(secs) - 1, int(0.95 * len(secs)))]),
     "tokens per task: about %d" % tokens,
+    # What the agent's quota and token budget are sized from: about twice
+    # this (ADR 11, 12).
+    "the agent's busiest minute: %d answers, %d tokens (its quota: 60 requests and 60,000 tokens a minute)"
+    % (busiest.get("requests", 0), busiest.get("tokens", 0)),
 ]
 for m in measured:
     print("  ..    " + m)

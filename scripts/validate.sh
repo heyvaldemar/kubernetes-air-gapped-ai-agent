@@ -27,6 +27,14 @@
 #   docs          every command in docs/engagement.md is one the e2e workflow
 #                 runs, its tag is the latest release, and the README lists
 #                 every decision record
+#   frontier      the one way out (ADR 14) stays one: the host's firewall
+#                 opens Anthropic's published API range, on TCP 443, from the
+#                 egress node alone; the job runs on main only, holds its
+#                 OIDC permission alone and reads no stored secret; the
+#                 gateway's backend reads its token from a Secret, never a
+#                 key written in; and the egress node's admission policy
+#                 still refuses all three ways onto the node, exempting only
+#                 kube-system and the gateway's namespace
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -50,17 +58,17 @@ check_kubeconform() {
   mkdir -p .cache/kubeconform out
   kubectl kustomize manifests >out/manifests.yaml || return 1
   sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama#g" -e "s#@ALIAS@#m#g" manifests/inference/llama.yaml >out/llama.yaml
-  for f in tests/e2e/plants/*.yaml; do
+  for f in tests/e2e/plants/*.yaml tests/e2e/plants-frontier/*.yaml; do
     sed -e "s#@[A-Z_]*@#registry.boundary.internal:5000/models/m@$DIGEST#" "$f" >"out/plant-$(basename "$f")"
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" \
-    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters,AgentgatewayBackend manifests/gateway/gateway.yaml manifests/gateway/route.yaml
+    -skip Gateway,HTTPRoute,ReferenceGrant,AgentgatewayPolicy,AgentgatewayParameters,AgentgatewayBackend manifests/gateway/gateway.yaml manifests/gateway/route.yaml manifests/gateway/frontier.yaml
 }
 
 check_images() {
@@ -70,7 +78,7 @@ check_images() {
   bad+="$(grep -vE '^\s*(#|$)' airgap/images.txt | grep -v '@sha256:' || true)"
   # The node image reaches the cluster outside the bundle (README, What it
   # does not do); its pin is the one thing that says which node it was.
-  bad+="$(grep -nE '^\s*image:' kind/cluster.yaml | grep -v '@sha256:' || true)"
+  bad+="$(grep -nE '^\s*image:' kind/*.yaml | grep -v '@sha256:' || true)"
   if [ -n "$bad" ]; then echo "images without a digest:"; echo "$bad"; return 1; fi
   echo "every image is referenced by digest"
 }
@@ -240,6 +248,48 @@ sys.exit(1 if bad else 0)
 PY
 }
 
+check_frontier() {
+  python3 - <<'PY' || return 1
+import re, sys
+bad = []
+fs = open("scripts/frontier.sh").read()
+# The hole: Anthropic's published inbound range for the API, and no wider.
+if re.findall(r"^RANGE=(\S+)$", fs, re.M) != ["160.79.104.0/23"]:
+    bad.append("scripts/frontier.sh opens %s, not Anthropic's published API range 160.79.104.0/23"
+               % re.findall(r"^RANGE=(\S+)$", fs, re.M))
+rule = re.search(r'^rule\(\) \{ echo "(.*)"; \}$', fs, re.M)
+rule = rule.group(1) if rule else ""
+if '-s $(node_ip "$(egress_node)")' not in rule:
+    bad.append("the firewall rule in scripts/frontier.sh is not the egress node's alone: any pod on any node could use it")
+if "-d $RANGE -p tcp --dport 443 -j ACCEPT" not in rule:
+    bad.append("the firewall rule in scripts/frontier.sh is not to the range on TCP 443 alone")
+wf = open(".github/workflows/frontier.yml").read()
+if "if: github.ref == 'refs/heads/main'" not in wf:
+    bad.append("frontier.yml may run off main, where the federation rule mints nothing and a branch's code would hold the token")
+if "secrets." in wf:
+    bad.append("frontier.yml reads a stored secret: the API token is minted per run, and no key is stored")
+if "id-token" in wf.split("\njobs:")[0]:
+    bad.append("frontier.yml grants id-token: write to the whole workflow, not to its one job")
+fr = open("manifests/gateway/frontier.yaml").read()
+if not re.search(r"^ +secretRef: \{name: anthropic-token\}$", fr, re.M) or re.search(r"^ +key: ", fr, re.M):
+    bad.append("the gateway's Anthropic backend does not read its token from the Secret anthropic-token alone")
+eg = open("admission/egress-node.yaml").read()
+for needle, what in (("t.?key.orValue('') == 'boundary.heyvaldemar.com/egress'", "that tolerates the egress node's taint"),
+                     ("t.?operator.orValue('Equal') == 'Exists'", "that tolerates every taint"),
+                     ("!has(object.spec.nodeName)", "that names its node")):
+    if needle not in eg:
+        bad.append("admission/egress-node.yaml no longer refuses a pod %s" % what)
+exempt = re.search(r"operator: NotIn, values: \[([^\]]*)\]", eg)
+if not exempt or sorted(v.strip() for v in exempt.group(1).split(",")) != ["gateway", "kube-system"]:
+    bad.append("admission/egress-node.yaml exempts %s, not kube-system and gateway alone" % (exempt and exempt.group(1)))
+if "validationActions: [Deny]" not in eg:
+    bad.append("admission/egress-node.yaml's binding does not deny")
+print("\n".join(bad) or "the one way out is Anthropic's API range on TCP 443 from the egress node alone; the job runs on main with no stored secret; "
+      "the gateway's token comes from a Secret; only the gateway may run on the egress node")
+sys.exit(1 if bad else 0)
+PY
+}
+
 check_mlbom() {
   local img ok=0 n=0 name url sha lic
   img="$(sed -n 's/^CYCLONEDX_IMAGE=//p' ci-images.pins)"
@@ -277,7 +327,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

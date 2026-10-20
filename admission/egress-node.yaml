@@ -1,0 +1,49 @@
+# Who may run on the egress node (ADR 14). The host's firewall lets that one
+# node open TCP 443 to Anthropic's API range, so a pod placed there could
+# reach the API with a key of its own and carry data out to its own account.
+# A taint keeps the scheduler from placing anything there, but whoever may
+# create a pod may also tolerate the taint, tolerate every taint, or name the
+# node and skip the scheduler. The API server refuses all three outside the
+# namespace gateway, whose pods agentgateway's controller makes.
+#
+# Not kube-system: the node's own network agents (kindnet, kube-proxy) run on
+# every node, tolerate every taint and come with the node image, like the
+# rest of that namespace (admission/carried-images.yaml says the same). The
+# CI applies this only where the egress node exists (scripts/frontier.sh).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: egress-node
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, gateway]}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: tolerations
+      expression: object.spec.?tolerations.orValue([])
+  validations:
+    - expression: >-
+        !variables.tolerations.exists(t, t.?key.orValue('') == 'boundary.heyvaldemar.com/egress')
+      message: only the gateway runs on the egress node; a pod outside namespace gateway may not tolerate its taint
+    - expression: >-
+        !variables.tolerations.exists(t, t.?key.orValue('') == '' && t.?operator.orValue('Equal') == 'Exists')
+      message: a pod outside namespace gateway may not tolerate every taint, the egress node's among them
+    # On CREATE only: the scheduler binds a pod by setting its node, and an
+    # update to a bound pod carries the node it was given.
+    - expression: request.operation != 'CREATE' || !has(object.spec.nodeName)
+      message: a pod may not name its node and skip the scheduler, which is how a taint is passed by
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: egress-node
+spec:
+  policyName: egress-node
+  validationActions: [Deny]

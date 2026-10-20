@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Added
+
+- A model outside the boundary, through one way out (ADR 14): `.github/workflows/frontier.yml` runs the same agent, MCP server, gateway and gates against Anthropic's API, weekly, on main only. The boundary is closed as in the e2e, and `scripts/frontier.sh open` makes one exception: the host's firewall lets the second node of `kind/frontier.yaml`, the egress node, open TCP 443 to Anthropic's published API range, 160.79.104.0/23, and nothing else on kind's network. The gateway's proxy runs there with the API's address written in; the boundary still resolves no outside name. A taint keeps other pods off the node, and `admission/egress-node.yaml` refuses any pod outside the gateway's namespace that tolerates the taint, tolerates every taint or names the node. No API key exists: `scripts/frontier.sh token` exchanges the runner's GitHub OIDC token, under a federation rule that names this repository's main branch, for a ten-minute token, handed to the gateway through kubectl's stdin and replaced every four minutes while the evals run. `tests/e2e/frontier.sh` proves it: the gateway alone on the egress node, four admission plants, no way to the API from the other node, and from the egress node the API on 443 and nothing else, the API's own port 80 included.
+- Static check `frontier`: the hole is Anthropic's range on TCP 443 from the egress node alone, the job runs on main and reads no stored secret, the backend's token comes from a Secret, and the egress policy keeps its three refusals. Eight plants.
+- The harness reads an API's `usage` where llama-server gives `timings`, takes a token ceiling per run (`MAX_TOKENS`, 400 inside, 4,096 for a model that thinks), waits and asks again when the gateway answers 429, and reports its busiest minute, in answers and tokens: what the quota and the token budget are sized from (ADR 11, 12). `scripts/evals.sh` prints it for every model, and prices a model outside by its tokens at Anthropic's list price (`evals/pricing.json`).
+
+### Changed
+
+- `scripts/gateway.sh install` makes the models' namespace from the model server's manifest, and with `SERVED` set and empty serves no model inside.
 
 ## [1.5.0] - 2026-10-20
 

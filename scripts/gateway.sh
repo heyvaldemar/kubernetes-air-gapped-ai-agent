@@ -10,8 +10,10 @@
 #            manifests/gateway/gateway.yaml with the cluster's service account
 #            issuer and public keys written in, and one route.yaml for each
 #            model served: SERVED lists them as model=Service pairs, and
-#            defaults to $MODEL=llama, the one server the evals use; waits
-#            until the Gateway is programmed and its proxy answers
+#            defaults to $MODEL=llama, the one server the evals use; set and
+#            empty, no model is served inside (the frontier job's route is
+#            scripts/frontier.sh's); waits until the Gateway is programmed
+#            and its proxy answers
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -54,13 +56,17 @@ case "${1:-}" in
     mkdir -p "$STATE"
     kubectl get --raw /.well-known/openid-configuration >"$STATE/cluster-oidc.json"
     kubectl get --raw /openid/v1/jwks >"$STATE/cluster-jwks.json"
+    # The models' namespace, as the model server's manifest defines it: the
+    # gateway's grant and policy live there, and the frontier job (ADR 14)
+    # serves no model inside to have made it.
+    awk '/^---$/ {exit} {print}' "$ROOT/manifests/inference/llama.yaml" | kubectl apply -f - >/dev/null
     python3 - "$ROOT/manifests/gateway/gateway.yaml" "$STATE/cluster-oidc.json" "$STATE/cluster-jwks.json" <<'PY' | kubectl apply -f - >/dev/null
 import json, sys
 text, oidc, jwks = (open(f).read() for f in sys.argv[1:4])
 print(text.replace("@ISSUER@", json.loads(oidc)["issuer"])
           .replace("@JWKS@", json.dumps(json.loads(jwks), separators=(",", ":"))))
 PY
-    served="${SERVED:-${MODEL:?MODEL or SERVED names the models the gateway routes}=llama}"
+    served="${SERVED-${MODEL:?MODEL or SERVED names the models the gateway routes}=llama}"
     for pair in $served; do
       sed -e "s#@MODEL@#${pair%%=*}#g" -e "s#@SERVICE@#${pair#*=}#g" "$ROOT/manifests/gateway/route.yaml" \
         | kubectl apply -f - >/dev/null
@@ -74,7 +80,7 @@ PY
       sleep 2
     done
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
-    say "agentgateway is up inside: Gateway models programmed, routes for $served, a quota and a token budget per service account"
+    say "agentgateway is up inside: Gateway models programmed, routes for ${served:-no model inside}, a quota and a token budget per service account"
     ;;
   *)
     echo "usage: gateway.sh <fetch|install>" >&2

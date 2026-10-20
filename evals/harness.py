@@ -15,7 +15,9 @@ did. Every attempt is one JSON line on stdout; the last line is a summary.
 
 The model server is llama.cpp's llama-server, OpenAI-compatible. Its
 `timings` give the compute each attempt cost: prompt and generation time,
-times the server's threads, is vCPU-seconds, priced in pricing.json.
+times the server's threads, is vCPU-seconds, priced in pricing.json. A model
+outside the boundary (ADR 14) answers through the gateway in the same format,
+with `usage` in place of `timings`: its tokens are what it is priced by.
 
 Standard library only, like the rest of the agent's side: the image is a
 pinned python:3.13-alpine and nothing is installed into it.
@@ -42,6 +44,9 @@ TOKEN_FILE = os.environ.get("TOKEN_FILE", "/var/run/secrets/mcp/token")
 TASKS = os.environ.get("TASKS", "/evals/tasks.json")
 ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.6"))
+# The ceiling on one answer. A model that thinks before it answers spends its
+# thinking from the same ceiling, so a model outside the boundary gets more.
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "400"))
 THREADS = int(os.environ.get("MODEL_THREADS", "2"))
 MAX_TURNS = 6
 # The tool schemas the model is shown. "off" strips every pattern from them
@@ -58,6 +63,11 @@ SYSTEM = ("You are the support assistant of ACME's customer team. Answer with th
 
 _ids = iter(range(1, 10**9))
 _model_requests = 0
+# Every answer's time and tokens, for the busiest minute: what the gateway's
+# quota and token budget are sized from (ADR 11, 12). And every time the
+# gateway said 429 and the agent waited, which scripts/evals.sh gates on.
+_answered = []
+_throttled = 0
 
 
 def mcp(method, params=None):
@@ -119,7 +129,7 @@ def tools():
 
 
 def chat(messages, offered, seed):
-    body = {"messages": messages, "temperature": TEMPERATURE, "seed": seed, "max_tokens": 400}
+    body = {"messages": messages, "temperature": TEMPERATURE, "seed": seed, "max_tokens": MAX_TOKENS}
     if MODEL_NAME:
         body["model"] = MODEL_NAME
     if offered:
@@ -130,10 +140,22 @@ def chat(messages, offered, seed):
         with open(MODEL_TOKEN_FILE, encoding="utf-8") as f:
             headers["Authorization"] = "Bearer " + f.read().strip()
     req = urllib.request.Request(MODEL_URL + "/v1/chat/completions", data=json.dumps(body).encode(), headers=headers)
-    global _model_requests
-    _model_requests += 1
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        return json.loads(r.read())
+    global _model_requests, _throttled
+    for _ in range(10):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                answer = json.loads(r.read())
+            _model_requests += 1
+            return answer
+        except urllib.error.HTTPError as e:
+            # Over the quota or the token budget: an agent waits and asks
+            # again, as a client of any rate-limited API does. Counted, and
+            # scripts/evals.sh fails the run on it all the same.
+            if e.code != 429:
+                raise
+            _throttled += 1
+            time.sleep(min(60, int(e.headers.get("Retry-After") or 10)))
+    sys.exit("the gateway refused the agent ten times running")
 
 
 def attempt(task, offered, seed):
@@ -145,10 +167,19 @@ def attempt(task, offered, seed):
     for _ in range(MAX_TURNS):
         r = chat(messages, use, seed)
         t = r.get("timings") or {}
-        prompt_n += t.get("prompt_n", 0)
-        cached_n += t.get("cache_n", 0)
-        predicted_n += t.get("predicted_n", 0)
-        compute_ms += t.get("prompt_ms", 0) + t.get("predicted_ms", 0)
+        if t:
+            # llama-server: the prompt it computed, the part it had cached,
+            # and what it generated, three separate numbers.
+            n = (t.get("prompt_n", 0), t.get("cache_n", 0), t.get("predicted_n", 0))
+            compute_ms += t.get("prompt_ms", 0) + t.get("predicted_ms", 0)
+        else:
+            # An API's usage: prompt_tokens already includes any cached part.
+            u = r.get("usage") or {}
+            n = (u.get("prompt_tokens", 0), 0, u.get("completion_tokens", 0))
+        prompt_n += n[0]
+        cached_n += n[1]
+        predicted_n += n[2]
+        _answered.append((time.time(), sum(n)))
         msg = r["choices"][0]["message"]
         tool_calls = msg.get("tool_calls") or []
         messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls") and v is not None})
@@ -222,8 +253,14 @@ def main():
                               "attempt": k + 1, "passed": not why, "why": why, "unasked_emails": outside,
                               **a, "answer": a["answer"][:300]}), flush=True)
     # What the agent asked of the model, for scripts/evals.sh to hold against
-    # what the gateway counted.
-    print(json.dumps({"model_requests": _model_requests}), flush=True)
+    # what the gateway answered (a request it refused with 429 is counted
+    # apart), and its busiest minute: the most answers, and the most tokens,
+    # in any sixty seconds.
+    busiest = {"requests": 0, "tokens": 0}
+    for i, (t0, _) in enumerate(_answered):
+        window = [n for t, n in _answered[i:] if t - t0 < 60]
+        busiest = {"requests": max(busiest["requests"], len(window)), "tokens": max(busiest["tokens"], sum(window))}
+    print(json.dumps({"model_requests": _model_requests, "throttled": _throttled, "busiest_minute": busiest}), flush=True)
 
 
 if __name__ == "__main__":

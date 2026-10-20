@@ -1,0 +1,17 @@
+# a pod outside the gateway's namespace that tolerates every taint
+# expect: may not tolerate every taint
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-tolerate-all
+  namespace: default
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+  tolerations:
+    - {operator: Exists}

@@ -1,0 +1,77 @@
+# A model outside the boundary, through the same gateway (ADR 14).
+# scripts/frontier.sh open applies this after scripts/gateway.sh install,
+# with @MODEL@, the model the agent names, and @API_IP@, api.anthropic.com's
+# address, resolved outside and checked against Anthropic's published range.
+#
+# What changes for the agent: nothing. It names a model, shows its service
+# account token, and the gateway applies the same quota and token budget.
+# What changes at the gateway: the route for that name leads to Anthropic's
+# API instead of a model server inside, and the request leaves with a token
+# the gateway holds and the agent never sees. The token is not a key: the
+# runner exchanges its own short-lived GitHub identity for it under a
+# federation rule pinned to this repository's main branch, it lives ten
+# minutes, and scripts/frontier.sh replaces it every four.
+
+# The gateway's proxy runs on the egress node and nowhere else, and knows the
+# API's address without asking a resolver: the boundary has none that answers
+# for outside names, and gets none for this.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: restricted
+  namespace: gateway
+spec:
+  deployment:
+    spec:
+      template:
+        spec:
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+          nodeSelector:
+            boundary.heyvaldemar.com/egress: anthropic
+          tolerations:
+            - {key: boundary.heyvaldemar.com/egress, operator: Equal, value: anthropic, effect: NoSchedule}
+          hostAliases:
+            - ip: "@API_IP@"
+              hostnames: [api.anthropic.com]
+---
+# One model, whatever the request says. The token is read from the Secret on
+# every change: agentgateway's controller pushes a new one to the proxy within
+# a second (measured on v1.6.0). A token that starts sk-ant-oat stays in
+# Authorization: Bearer; the API accepts it there with the beta flag below,
+# which the gateway sets and a client cannot.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: anthropic
+  namespace: inference
+spec:
+  ai:
+    provider:
+      anthropic:
+        model: "@MODEL@"
+  policies:
+    auth:
+      secretRef: {name: anthropic-token}
+    transformation:
+      request:
+        set:
+          - {name: anthropic-beta, value: '"oauth-2025-04-20"'}
+    http:
+      requestTimeout: 180s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: anthropic
+  namespace: gateway
+spec:
+  parentRefs:
+    - name: models
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /v1/}
+          headers:
+            - {name: x-gateway-model, value: "@MODEL@"}
+      backendRefs:
+        - {group: agentgateway.dev, kind: AgentgatewayBackend, name: anthropic, namespace: inference}

@@ -1,0 +1,18 @@
+# a pod outside the gateway's namespace that tolerates the egress node's taint
+# expect: may not tolerate its taint
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-toleration
+  namespace: default
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+  nodeSelector: {boundary.heyvaldemar.com/egress: anthropic}
+  tolerations:
+    - {key: boundary.heyvaldemar.com/egress, operator: Exists, effect: NoSchedule}

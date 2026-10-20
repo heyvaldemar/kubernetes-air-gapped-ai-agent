@@ -1,0 +1,16 @@
+# a pod that names the egress node and skips the scheduler and its taint
+# expect: may not name its node
+apiVersion: v1
+kind: Pod
+metadata:
+  name: egress-node-name
+  namespace: default
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+  nodeName: air-gapped-worker

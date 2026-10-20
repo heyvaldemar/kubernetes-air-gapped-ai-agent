@@ -1,0 +1,148 @@
+name: Frontier model, one way out
+
+# The same boundary, agent, MCP server, gateway and gates as the air-gapped
+# e2e, with the model outside: Anthropic's API, reached through one way out
+# that only the gateway uses, with a token that lives ten minutes and no API
+# key anywhere (ADR 14). See scripts/frontier.sh and tests/e2e/frontier.sh.
+#
+# On main only, weekly: the federation rule that mints the token names this
+# repository's main branch and nothing else, and the workspace it spends from
+# has a monthly limit of its own.
+
+on:
+  schedule:
+    - cron: "41 5 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontier
+  cancel-in-progress: false
+
+jobs:
+  frontier:
+    name: One way out (${{ matrix.model }}${{ matrix.patterns == 'off' && ', patterns hidden' || '' }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # The runner's identity, which scripts/frontier.sh token exchanges for
+      # the gateway's API token. Nothing else in the job reads it.
+      id-token: write
+    # Twice, like the models inside: the tools' full schemas, and their
+    # patterns hidden (ADR 13). No grammar is built from a schema on this
+    # path, so the first is the model reading the rule, the second the model
+    # without it.
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [claude-haiku-5-5]
+        patterns: ["on", "off"]
+    env:
+      MODEL: ${{ matrix.model }}
+      TASK_FLOOR: "off"
+      OFFER_PATTERNS: ${{ matrix.patterns }}
+      # A model that thinks spends its thinking from the answer's ceiling.
+      MAX_TOKENS: "4096"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Create the cluster, with an egress node
+        run: kind create cluster --config kind/frontier.yaml --wait 120s
+
+      - name: The registry inside, seeded, and the nodes pointed at it
+        run: |
+          ./scripts/airgap.sh registry
+          ./scripts/airgap.sh seed
+          ./scripts/airgap.sh mirror
+
+      # No model is built here, so nothing else makes the operator's key.
+      - name: The operator's key, made for this run
+        run: COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix .cache/airgap/operator >/dev/null
+
+      - name: The admission chart and the gateway, fetched and checked
+        run: |
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+
+      - name: Everything the cluster runs, in one signed file
+        run: ./scripts/bundle.sh create
+
+      - name: An empty registry inside, then close the boundary
+        run: |
+          ./scripts/airgap.sh registry
+          rm -rf .cache/airgap/charts
+          ./scripts/airgap.sh mirror
+          ./scripts/airgap.sh close
+
+      - name: Across the gap, the bundle verified and loaded
+        run: ./scripts/bundle.sh load
+
+      - name: Kyverno and the policies, from inside
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: The tool side, inside
+        run: ./scripts/tools.sh
+
+      - name: The gateway, inside, with no model served inside
+        env:
+          SERVED: ""
+        run: ./scripts/gateway.sh install
+
+      - name: The one way out, and the gateway on it
+        run: |
+          ./scripts/frontier.sh open
+          ./scripts/frontier.sh token
+
+      - name: Prove the one way out
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/frontier.sh
+
+      # The token lives ten minutes and the evals take longer: a new one
+      # every four, for as long as they run.
+      - name: Run the agent through the evals
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+        run: |
+          ./scripts/frontier.sh refresh &
+          refresher=$!
+          rc=0
+          ./scripts/evals.sh || rc=$?
+          kill "$refresher" 2>/dev/null || true
+          exit "$rc"
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n inference get agentgatewaybackend anthropic -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.message}{"\n"}{end}' || true
+          kubectl -n gateway get httproute -o wide || true
+          kubectl -n gateway logs deploy --tail=60 --all-containers || true
+          kubectl -n agents logs job/evals --tail=20 || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
+          sudo iptables -S DOCKER-USER || true
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontier-results-${{ matrix.model }}${{ matrix.patterns == 'off' && '-patterns-off' || '' }}
+          path: |
+            ${{ runner.temp }}/e2e-results.json
+            ${{ runner.temp }}/evals-results.json
+            .cache/airgap/evals.jsonl
+            .cache/airgap/mcp-audit.jsonl
+          if-no-files-found: ignore
