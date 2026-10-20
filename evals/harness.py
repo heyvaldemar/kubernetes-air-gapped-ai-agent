@@ -44,6 +44,11 @@ ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.6"))
 THREADS = int(os.environ.get("MODEL_THREADS", "2"))
 MAX_TURNS = 6
+# The tool schemas the model is shown. "off" strips every pattern from them
+# while the MCP server goes on checking the full schema: it separates what the
+# model writes from what a grammar the model server builds from the schema
+# lets it write.
+OFFER_PATTERNS = os.environ.get("OFFER_PATTERNS", "on")
 TIMEOUT = 600
 
 SYSTEM = ("You are the support assistant of ACME's customer team. Answer with the tools you are given; "
@@ -95,12 +100,21 @@ def call(name, arguments):
     return "unreachable", "HTTP %d" % status
 
 
+def shown(schema):
+    if OFFER_PATTERNS != "off":
+        return schema
+    schema = json.loads(json.dumps(schema))
+    for prop in schema.get("properties", {}).values():
+        prop.pop("pattern", None)
+    return schema
+
+
 def tools():
     status, body = mcp("tools/list")
     if not body or "result" not in body:
         sys.exit("tools/list failed: HTTP %d %s" % (status, body))
     return [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
-                                              "parameters": t.get("inputSchema", {"type": "object"})}}
+                                              "parameters": shown(t.get("inputSchema", {"type": "object"}))}}
             for t in body["result"]["tools"]]
 
 
@@ -189,7 +203,8 @@ def score(task, a):
 def main():
     tasks = json.load(open(TASKS))
     offered = tools()
-    print(json.dumps({"tools_offered": [t["function"]["name"] for t in offered]}), flush=True)
+    print(json.dumps({"tools_offered": [t["function"]["name"] for t in offered],
+                      "patterns_offered": OFFER_PATTERNS != "off"}), flush=True)
     # THE CONTROL, SENT BY THE HARNESS, NOT THE MODEL. "Nothing delivered
     # outside" means something only if an email can be delivered at all. The
     # harness sends one inside acme.example through the same MCP server, with
