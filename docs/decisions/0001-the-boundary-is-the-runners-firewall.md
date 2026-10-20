@@ -1,6 +1,6 @@
 # 1. The boundary is the host's firewall, the node's resolver and CoreDNS
 
-- Status: accepted
+- Status: accepted, amended 2026-10-20 (the host itself)
 - Date: 2026-10-18
 
 ## Context
@@ -18,12 +18,17 @@ A firewall rule is not the whole of it either. A kind node resolves names throug
 1. **The host's firewall.** A rule at the top of `DOCKER-USER`, for IPv4 and IPv6, rejects anything that enters from kind's bridge and does not leave through it. The node and the registry share the bridge, so they still reach each other; nothing reaches beyond it.
 2. **The node's resolver.** The node's `/etc/resolv.conf` points at 127.0.0.1, where nothing listens. The node needs no names: containerd reaches the registry through `/etc/hosts`.
 3. **CoreDNS.** Its `forward` block goes, so it answers for the cluster and for the registry's name (a `hosts` entry) and for nothing else. kind's own offline CI removes the same block, so that the answer is NXDOMAIN rather than a timeout clients keep retrying.
+4. **The host itself** (added 2026-10-20). A rule at the top of `INPUT`, for IPv4 and IPv6, rejects any new connection from kind's bridge to the host. Replies to the host's own connections, kubectl's to the API server among them, are not new, and pass.
 
 `tests/e2e/run.sh` then proves it from inside: a pod and the node each fail to reach 1.1.1.1 by IP and to resolve example.com, the node fails to pull an image the registry inside does not hold, and an image it does hold comes up by its original name and digest.
 
+## What the first three missed
+
+Traffic addressed to the host does not cross `DOCKER-USER`: it takes `INPUT`, and the rule in step 1 never sees it. Until 2026-10-20 nothing closed it, and nothing checked it. The probes added to `tests/e2e/run.sh` that day found a pod could open TCP 22 and 53 on the host's address on the bridge (172.18.0.1 on a GitHub runner), and the resolver on 53 answered a pod's query for example.com (run [39371733895](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39371733895), "a pod resolved example.com by asking the host itself"). That is the way out by DNS this record names in its context, through the host's resolver instead of the node's. Every release before v1.5.0 had it. Step 4 closes it, and the same probes now gate it: no port on the host opens from a pod, and no outside name resolves through it.
+
 ## Consequences
 
-- The proof is the same six checks on every run, not a diagram.
+- The proof is the same checks on every run, not a diagram: a pod and the node reaching nothing outside, each beside a control that must reach the registry inside, a pod reaching nothing on the host, and every way of asking for an outside name failing.
 - `close` needs the host's iptables: it runs on Linux, the GitHub runner included. The other steps run anywhere Docker does.
 - In a real site the boundary is the site's network and firewall, not a rule on one host. What carries over is the order (seed, close, then install) and the checks.
 - The host itself is outside the boundary: it fetches the model and the images before the cut, as a transfer station would.

@@ -4,7 +4,7 @@ Each record states the context, the decision, what it costs, what was considered
 
 | # | Decision | Status |
 |---|---|---|
-| 1 | [The boundary is the host's firewall, the node's resolver and CoreDNS](0001-the-boundary-is-the-runners-firewall.md) | accepted |
+| 1 | [The boundary is the host's firewall, the node's resolver and CoreDNS](0001-the-boundary-is-the-runners-firewall.md) | accepted, amended 2026-10-20 |
 | 2 | [The registry inside has its own name and speaks only TLS](0002-the-registry-inside-has-its-own-name.md) | accepted |
 | 3 | [Model weights as a signed image, mounted as an image volume](0003-model-weights-as-a-signed-image-volume.md) | accepted |
 | 4 | [Small open-weights models on CPU, chosen by measurement](0004-small-models-on-cpu-chosen-by-measurement.md) | accepted |

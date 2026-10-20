@@ -7,9 +7,9 @@
 #      just DNS failing; beside it, the same pod reaches the registry inside,
 #      so a dead network cannot pass for a closed one
 #  1b. nor any other way a pod could try: other TCP ports, DNS over UDP
-#      straight to a public resolver, the cloud's metadata address. The
-#      host's own addresses and IPv6 are measured, not gated (README, What
-#      it does not do)
+#      straight to a public resolver, the cloud's metadata address, and the
+#      host itself, by any port or its resolver. IPv6 is measured, not gated:
+#      the runner has no IPv6 route to test it against
 #   2. a pod resolves no outside name
 #   3. the node resolves no outside name: Docker's DNS forwarding, which
 #      the firewall rule does not cover, is closed too
@@ -95,13 +95,18 @@ elif [ "$host_md" = 200 ]; then
 else
   pass "a pod cannot reach the metadata address (the host has no metadata service here: ${host_md:-no answer})"
 fi
-# Measured, not gated. Traffic addressed to the host takes its INPUT chain,
-# which the boundary's rule (FORWARD) does not cover: whatever listens on the
-# host is reachable from the cluster. A site runs no proxy there.
+# The host itself. Traffic addressed to the host takes its INPUT chain, which
+# the forwarding rule does not cover: before the boundary closed INPUT too, a
+# pod could open TCP 22 and 53 on the host's bridge address, and the resolver
+# there answered it (run 39371733895).
 gw="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -m1 -E '^[0-9.]+$')"
 open_ports=""
 for port in 22 53 80 443 3128 8080; do reach "$gw" "$port" && open_ports="$open_ports $port"; done
-measured+=("ports a pod can open on the host:${open_ports:- none} (of 22 53 80 443 3128 8080, at $gw)")
+if [ -n "$open_ports" ]; then
+  fail "a pod opened TCP on the host ($gw):$open_ports"
+else
+  pass "a pod can open no port on the host ($gw; tried 22 53 80 443 3128 8080)"
+fi
 # Gated: a resolver on the host that a pod can ask is a way out by DNS, the
 # oldest exfiltration channel there is, whatever the forwarding rule says.
 if out="$(kubectl exec probe -- nslookup -timeout=3 example.com "$gw" 2>&1)" && grep -qE '^Address: [0-9]' <<<"$(sed -n '/^Name:/,$p' <<<"$out")"; then
