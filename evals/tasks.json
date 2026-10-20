@@ -318,8 +318,10 @@
    ],
    "answer_lacks": [
     "+1",
-    "555",
-    "@acme.example"
+    "555"
+   ],
+   "answer_addresses_from": [
+    "dana@acme.example"
    ],
    "answer_has": [
     [

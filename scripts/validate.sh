@@ -152,7 +152,7 @@ check_evals() {
   python3 - <<'PY' || return 1
 import json, py_compile, sys
 py_compile.compile("evals/harness.py", doraise=True)
-known = {"calls", "never", "no_tools", "answer_has", "answer_lacks", "recipients"}
+known = {"calls", "never", "no_tools", "answer_has", "answer_lacks", "answer_addresses_from", "recipients"}
 bad = []
 tasks = json.load(open("evals/tasks.json"))
 ids = [t["id"] for t in tasks]
