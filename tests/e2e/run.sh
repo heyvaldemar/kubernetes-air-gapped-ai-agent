@@ -4,7 +4,12 @@
 # differs from what the boundary promises.
 #
 #   1. a pod reaches no address outside, by IP (1.1.1.1), so this is not
-#      just DNS failing
+#      just DNS failing; beside it, the same pod reaches the registry inside,
+#      so a dead network cannot pass for a closed one
+#  1b. nor any other way a pod could try: other TCP ports, DNS over UDP
+#      straight to a public resolver, the cloud's metadata address. The
+#      host's own addresses and IPv6 are measured, not gated (README, What
+#      it does not do)
 #   2. a pod resolves no outside name
 #   3. the node resolves no outside name: Docker's DNS forwarding, which
 #      the firewall rule does not cover, is closed too
@@ -40,7 +45,7 @@ NODE="$(kind get nodes --name "$CLUSTER" | head -n 1)"
 BUSYBOX="$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt")"
 STATE="$ROOT/.cache/airgap"
 REG=registry.boundary.internal:5000
-results=(); failed=0
+results=(); measured=(); failed=0
 pass() { results+=("PASS  $1"); printf '  PASS  %s\n' "$1"; }
 fail() { results+=("FAIL  $1"); printf '  FAIL  %s\n' "$1"; failed=1; }
 step() { printf '\n== %s\n' "$*"; }
@@ -55,10 +60,52 @@ else
 fi
 
 step "1. a pod reaches no address outside"
+# The control first: the same pod, the same tool, an address inside that
+# must answer. Without it, a pod whose network is broken would pass every
+# refusal below.
+reach() { kubectl exec probe -- nc -w 5 "$1" "$2" </dev/null >/dev/null 2>&1; }
+if reach registry.boundary.internal 5000; then
+  pass "control: the probe pod opens a connection to the registry inside (TCP 5000)"
+else
+  fail "control: the probe pod cannot reach the registry inside, so its refusals below prove nothing"
+fi
 if kubectl exec probe -- wget -T 5 -q -O /dev/null http://1.1.1.1 >/dev/null 2>&1; then
   fail "a pod reached 1.1.1.1"
 else
   pass "a pod cannot reach 1.1.1.1"
+fi
+
+step "1b. nor any other way out a pod could try"
+for target in 1.1.1.1:443 8.8.8.8:53 9.9.9.9:853 140.82.112.3:22; do
+  if reach "${target%:*}" "${target#*:}"; then fail "a pod opened TCP to $target"; else pass "a pod cannot open TCP to $target"; fi
+done
+if out="$(kubectl exec probe -- nslookup -timeout=3 example.com 1.1.1.1 2>&1)" && grep -qE '^Address: [0-9]' <<<"$(sed -n '/^Name:/,$p' <<<"$out")"; then
+  fail "a pod resolved example.com by asking 1.1.1.1 over UDP directly"
+else
+  pass "a pod cannot ask a public resolver directly (DNS over UDP to 1.1.1.1)"
+fi
+# The metadata address answers on the runner itself (Azure's instance
+# metadata service): from the host it must, from a pod it must not. Only
+# the status code is read, never the body.
+host_md="$(curl -s -m 5 -o /dev/null -w '%{http_code}' -H 'Metadata: true' 'http://169.254.169.254/metadata/instance?api-version=2021-02-01' || true)"
+if kubectl exec probe -- wget -T 5 -q -O /dev/null http://169.254.169.254/ >/dev/null 2>&1 || reach 169.254.169.254 80; then
+  fail "a pod reached the metadata address 169.254.169.254"
+elif [ "$host_md" = 200 ]; then
+  pass "a pod cannot reach the metadata address, which the host itself reaches (200)"
+else
+  pass "a pod cannot reach the metadata address (the host has no metadata service here: ${host_md:-no answer})"
+fi
+# Measured, not gated. Traffic addressed to the host takes its INPUT chain,
+# which the boundary's rule (FORWARD) does not cover: whatever listens on the
+# host is reachable from the cluster. A site runs no proxy there.
+gw="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -m1 -E '^[0-9.]+$')"
+open_ports=""
+for port in 22 53 80 443 3128 8080; do reach "$gw" "$port" && open_ports="$open_ports $port"; done
+measured+=("ports a pod can open on the host:${open_ports:- none} (of 22 53 80 443 3128 8080, at $gw)")
+if curl -6 -g -s -m 5 -o /dev/null 'https://[2606:4700:4700::1111]/' 2>/dev/null; then
+  measured+=("IPv6 route out from the runner: yes (the ip6tables rule is in place; the cluster is IPv4 only)")
+else
+  measured+=("IPv6 route out from the runner: none (so the ip6tables rule is untested here)")
 fi
 
 step "2. a pod resolves no outside name"
@@ -81,6 +128,11 @@ else
 fi
 
 step "4. the node reaches no address outside"
+if docker exec "$NODE" curl -sk -m 5 -o /dev/null https://registry.boundary.internal:5000/v2/ 2>/dev/null; then
+  pass "control: the node reaches the registry inside over TLS"
+else
+  fail "control: the node cannot reach the registry inside, so its refusal below proves nothing"
+fi
 if docker exec "$NODE" curl -s -m 5 -o /dev/null https://1.1.1.1 2>/dev/null; then
   fail "the node reached 1.1.1.1"
 else
@@ -103,11 +155,14 @@ else
 fi
 
 step "8. the registry speaks only TLS"
+tls="$(curl -s -m 5 -o /dev/null -w '%{http_code}' --cacert "$STATE/ca.crt" https://registry.boundary.internal:5000/v2/ || true)"
 code="$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://registry.boundary.internal:5000/v2/ || true)"
-if [ "$code" = 200 ]; then
+if [ "$tls" != 200 ]; then
+  fail "control: the registry did not answer over TLS (got ${tls:-no answer}), so a refused plain request proves nothing"
+elif [ "$code" = 200 ]; then
   fail "the registry answered plain HTTP with 200"
 else
-  pass "the registry refuses plain HTTP (got ${code:-no answer})"
+  pass "the registry answers TLS (200) and refuses plain HTTP (got ${code:-no answer})"
 fi
 
 step "9. admission refuses model weights it cannot vouch for"
@@ -192,10 +247,13 @@ fi
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1
 printf '\n'; printf '%s\n' "${results[@]}"
+[ "${#measured[@]}" -gt 0 ] && printf '  measured  %s\n' "${measured[@]}"
 if [ -n "${E2E_RESULTS:-}" ]; then
-  printf '%s\n' "${results[@]}" | python3 -c '
+  { printf '%s\n' "${results[@]}"; printf '\n--measured--\n'; printf '%s\n' "${measured[@]}"; } | python3 -c '
 import json, sys
-checks = [{"name": l[6:].strip(), "passed": l.startswith("PASS")} for l in sys.stdin if l.strip()]
-json.dump({"checks": checks, "measured": []}, open(sys.argv[1], "w"), indent=1)' "$E2E_RESULTS"
+lines = sys.stdin.read().split("\n--measured--\n")
+checks = [{"name": l[6:].strip(), "passed": l.startswith("PASS")} for l in lines[0].splitlines() if l.strip()]
+measured = [l for l in (lines[1] if len(lines) > 1 else "").splitlines() if l.strip()]
+json.dump({"checks": checks, "measured": measured}, open(sys.argv[1], "w"), indent=1)' "$E2E_RESULTS"
 fi
 exit "$failed"
