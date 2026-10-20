@@ -11,10 +11,15 @@ request is checked in this order, and the first failure answers it:
      server's audience, verified by the API server's TokenReview. A token
      for the Kubernetes API is not accepted here, and this server's token is
      not accepted there;
+  2b. the person the caller acts for (ADR 15): a second token, in the
+     On-Behalf-Of header, for the people audience, from a person policy.json
+     knows. A call that names no one is refused: the agent can do nothing
+     on its own account;
   3. the protocol: version 2026-07-28 in the header and in _meta, the
      Mcp-Method and Mcp-Name headers matching the body;
-  4. the grant: policy.json names the tools and resources each identity may
-     see. Anything else is answered as if it did not exist;
+  4. the grant: what the agent is granted and the person is granted, both;
+     a person's grant may also hold them to their own customers. Anything
+     else, a record outside it included, is answered as if it did not exist;
   5. the call: a rate limit per identity, arguments validated against the
      tool's input schema, the result capped and stripped of control
      characters.
@@ -22,7 +27,8 @@ request is checked in this order, and the first failure answers it:
 The credential the records tool needs is mounted here and nowhere else: an
 agent asks for a record, this server fetches it with a key the agent never
 holds. Every decision is one JSON line on stdout, with the caller's
-ServiceAccount and pod: the audit trail of what each agent tried.
+ServiceAccount and pod and the person it acted for: the audit trail of what
+each agent tried, and for whom.
 
 Standard library only: the image is a pinned python:3.13-alpine and nothing
 is installed into it.
@@ -213,10 +219,11 @@ _reviews_lock = threading.Lock()
 
 
 def identify(token, audience):
-    """(ServiceAccount, pod) for a token the API server accepts for this
-    server's audience, else None. Answers are cached for 30 seconds by the
-    token's hash, never by the token."""
-    digest = hashlib.sha256(token.encode()).hexdigest()
+    """(ServiceAccount, pod) for a token the API server accepts for the given
+    audience, else None. Answers are cached for 30 seconds by a hash of the
+    audience and the token, never by the token: one token is checked against
+    two audiences here, and an answer for one is not an answer for the other."""
+    digest = hashlib.sha256((audience + "\n" + token).encode()).hexdigest()
     now = time.monotonic()
     with _reviews_lock:
         hit = _reviews.get(digest)
@@ -296,9 +303,18 @@ class Server:
         self.audience = policy["audience"]
         self.grants = policy["identities"]
         self.limit = RateLimit(policy["rate_limit"]["calls"], policy["rate_limit"]["seconds"])
+        self.people_audience = policy["people_audience"]
+        self.people = policy["people"]
 
-    def grant(self, who):
-        return self.grants.get(who, {"tools": [], "resources": []})
+    def grant(self, who, person):
+        """What `who` may do acting for `person`: what both are granted. The
+        agent's grant bounds what any person can ask of it; the person's
+        bounds what the agent may do for them, down to their customers."""
+        agent = self.grants.get(who, {"tools": [], "resources": []})
+        mine = self.people.get(person, {"tools": [], "resources": [], "customers": []})
+        return {"tools": [t for t in agent["tools"] if t in mine.get("tools", [])],
+                "resources": [r for r in agent.get("resources", []) if r in mine.get("resources", [])],
+                "customers": mine.get("customers", [])}
 
     def check_protocol(self, headers, msg):
         method = msg.get("method")
@@ -331,11 +347,11 @@ class Server:
             if got != want:
                 raise Refused(400, -32020, "Header mismatch: Mcp-Name does not match the body")
 
-    def handle(self, who, msg):
-        """The result for a request from `who`, or Refused. Also returns what
-        the audit line should say: (result, decision, name)."""
+    def handle(self, who, msg, person=""):
+        """The result for a request from `who` acting for `person`, or Refused.
+        Also returns what the audit line should say: (result, decision, name)."""
         method, params = msg.get("method"), msg.get("params") or {}
-        g = self.grant(who)
+        g = self.grant(who, person)
         if method == "server/discover":
             return complete({"supportedVersions": [PROTOCOL], "capabilities": {"tools": {}, "resources": {}},
                              "instructions": "Tools and resources are listed per caller; a call to anything "
@@ -363,6 +379,12 @@ class Server:
             if problem:
                 return complete({"content": [{"type": "text", "text": "Invalid arguments: " + problem}],
                                  "isError": True}), "invalid_arguments", name
+            # A customer outside the person's own is answered as the records
+            # service answers one that does not exist: which customers exist
+            # is not something a person may learn by asking for others'.
+            if "customer_id" in args and g["customers"] != "*" and args["customer_id"] not in g["customers"]:
+                return complete({"content": [{"type": "text", "text": "The service answered HTTP 404."}],
+                                 "isError": True}), "out_of_scope", name
             try:
                 text = tool["run"](args)
                 is_error = False
@@ -402,6 +424,14 @@ def detail(msg):
             "body_sha256": hashlib.sha256(str(args.get("body", "")).encode()).hexdigest()[:16]}
 
 
+def customer(msg):
+    """The customer a call named, so the audit can be held against the
+    person's scope (scripts/evals.sh does)."""
+    params = (msg.get("params") or {}) if isinstance(msg, dict) else {}
+    args = params.get("arguments")
+    return {"customer": str(args["customer_id"])[:12]} if isinstance(args, dict) and "customer_id" in args else {}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "sandbox-mcp"
@@ -431,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(405, None, {"Allow": "POST"})
 
     def do_POST(self):
-        who, pod, msg = "", "", {}
+        who, pod, person, msg = "", "", "", {}
         try:
             # The body is read before anything is decided: a refusal that left
             # it unread would leave it on a kept-alive connection, to be parsed
@@ -464,18 +494,33 @@ class Handler(BaseHTTPRequestHandler):
                 raise Refused(400, -32700, "Parse error")
             if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
                 raise Refused(400, -32600, "Invalid Request")
+            # The person the agent acts for, by a token of theirs for the
+            # people audience: never the agent's own, which is for this
+            # server's audience and is refused for that one. Checked after
+            # the body is read, so the audit says what was asked.
+            behalf = self.headers.get("On-Behalf-Of", "")
+            try:
+                someone = identify(behalf[len("Bearer "):].strip(), SERVER.people_audience) \
+                    if behalf.startswith("Bearer ") else None
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                raise Refused(503, -32603, "Identity check unavailable: %s" % type(e).__name__)
+            if someone is None or someone[0] not in SERVER.people:
+                raise Refused(403, -32600, "No person named: On-Behalf-Of needs a token of a known person, "
+                                           "for the people audience", decision="no_person")
+            person = someone[0]
             if "id" not in msg:
-                audit(identity=who, pod=pod, method=msg["method"], decision="accepted")
+                audit(identity=who, pod=pod, on_behalf_of=person, method=msg["method"], decision="accepted")
                 return self.send(202)
             SERVER.check_protocol(self.headers, msg)
-            result, decision, name = SERVER.handle(who, msg)
-            audit(identity=who, pod=pod, method=msg["method"], name=name, decision=decision, **detail(msg))
+            result, decision, name = SERVER.handle(who, msg, person)
+            audit(identity=who, pod=pod, on_behalf_of=person, method=msg["method"], name=name, decision=decision,
+                  **detail(msg), **customer(msg))
             self.send(200, {"jsonrpc": "2.0", "id": msg["id"], "result": result})
         except Refused as r:
             params = msg.get("params") if isinstance(msg, dict) else None
             name = (params or {}).get("name") or (params or {}).get("uri") or ""
-            audit(identity=who, pod=pod, method=msg.get("method", "") if isinstance(msg, dict) else "",
-                  name=name, decision=r.decision, reason=r.message, status=r.status, **detail(msg))
+            audit(identity=who, pod=pod, on_behalf_of=person, method=msg.get("method", "") if isinstance(msg, dict) else "",
+                  name=name, decision=r.decision, reason=r.message, status=r.status, **detail(msg), **customer(msg))
             extra = {"WWW-Authenticate": 'Bearer realm="sandbox-mcp"'} if r.status == 401 else None
             body = None
             if r.code is not None:
@@ -493,7 +538,7 @@ def main():
     SERVER = Server(load_policy())
     port = int(os.environ.get("PORT", "8080"))
     httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    audit(event="listening", port=port, protocol=PROTOCOL, identities=sorted(SERVER.grants))
+    audit(event="listening", port=port, protocol=PROTOCOL, identities=sorted(SERVER.grants), people=sorted(SERVER.people))
     httpd.serve_forever()
 
 

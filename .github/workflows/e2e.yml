@@ -252,6 +252,13 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/gateway.sh
 
+      # Who the agent acts for (ADR 15): the MCP server as it runs, real
+      # tokens, no model. Here because this job runs once a day.
+      - name: Prove the agent acts for a person, with that person's rights
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/people.sh
+
       - name: What the cluster looked like
         if: failure()
         run: |

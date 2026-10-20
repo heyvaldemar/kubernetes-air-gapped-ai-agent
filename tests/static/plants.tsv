@@ -29,3 +29,8 @@
 "manifests/gateway/frontier.yaml"	"      secretRef: {name: anthropic-token}\n"	"      key: sk-ant-api03-planted\n"	"frontier"	"a key written into the gateway's backend"
 "admission/egress-node.yaml"	"values: [kube-system, gateway]"	"values: [kube-system, gateway, default]"	"frontier"	"a namespace let onto the egress node"
 "admission/egress-node.yaml"	"    - expression: request.operation != 'CREATE' || !has(object.spec.nodeName)\n"	""	"frontier"	"an egress policy that lets a pod name its node"
+"manifests/mcp/policy.json"	"\"system:serviceaccount:people:sam\": {\n   \"tools\": [\n    \"records_lookup\"\n"	"\"system:serviceaccount:people:sam\": {\n   \"tools\": [\n    \"records_lookup\",\n    \"delete_record\"\n"	"mcp"	"a destructive tool granted to a person"
+"manifests/mcp/policy.json"	"\"people_audience\": \"people.boundary.heyvaldemar.com\""	"\"people_audience\": \"mcp.boundary.heyvaldemar.com\""	"mcp"	"a person's token that would pass as the agent's"
+"manifests/mcp/server.py"	"return {\"tools\": [t for t in agent[\"tools\"] if t in mine.get(\"tools\", [])],"	"return {\"tools\": list(agent[\"tools\"]),"	"mcp"	"a server that gives the agent its whole grant whoever it acts for"
+"manifests/mcp/server.py"	"if \"customer_id\" in args and g[\"customers\"] != \"*\" and args[\"customer_id\"] not in g[\"customers\"]:"	"if False:"	"mcp"	"a server that reads any customer's record for anyone"
+"evals/tasks.json"	"\"as\": \"sam\",\n  \"user\": \"What revenue"	"\"as\": \"nobody\",\n  \"user\": \"What revenue"	"evals"	"a task asked for a person nobody knows"

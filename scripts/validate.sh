@@ -9,9 +9,12 @@
 #   boundary      every image the cluster runs is in airgap/images.txt: one
 #                 that is not would fail to pull once the boundary closes
 #   mcp           the MCP server and the records service compile; every grant
-#                 in policy.json names a tool the server has, and none is a
-#                 destructive tool; the evals Job's token is for the server's
-#                 audience
+#                 in policy.json, an agent's or a person's, names a tool the
+#                 server has, and none is a destructive tool; the evals Job's
+#                 token is for the server's audience; a person's token is for
+#                 an audience of its own; and the server, run here, gives an
+#                 agent acting for a person what both are granted and no more
+#                 (ADR 15)
 #   evals         the agent compiles; every task has a known category and
 #                 only known expectations; the gates and the price say where
 #                 they come from
@@ -125,7 +128,7 @@ srv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(srv)
 policy = json.load(open("manifests/mcp/policy.json"))
 bad = []
-for who, grant in sorted(policy["identities"].items()):
+for who, grant in sorted(list(policy["identities"].items()) + list(policy.get("people", {}).items())):
     for t in grant["tools"]:
         if t not in srv.TOOLS:
             bad.append("%s is granted %s, a tool the server does not have" % (who, t))
@@ -143,7 +146,34 @@ aud = policy["audience"]
 job = re.findall(r"name: mcp-token\n(?:.*\n){0,6}?\s*audience:\s*(\S+)", open("manifests/agents/evals.yaml").read())
 if job != [aud]:
     bad.append("the evals Job's MCP token is not for the MCP server's audience (%s): %s" % (aud, job))
-print("\n".join(bad) or "every grant names a tool the server has; none is destructive; a pattern refuses a trailing newline; the agent's MCP token is for the server's audience")
+# A person's token is for an audience of its own, or it would pass as an
+# agent's (the MCP server's) or a model caller's (the gateway's).
+gateway_aud = re.findall(r"audiences: \[(.*?)\]", open("manifests/gateway/gateway.yaml").read())
+if not policy.get("people") or policy.get("people_audience") in (aud, *gateway_aud):
+    bad.append("policy.json names no people, or their audience (%s) is one an agent's token is made for" % policy.get("people_audience"))
+if "secretName: people-tokens" not in open("manifests/agents/evals.yaml").read():
+    bad.append("the evals Job does not mount the people's tokens, so no task is asked for anyone")
+# The server itself, run here: what an agent acting for a person may do.
+s = srv.Server(policy)
+agent = "system:serviceaccount:agents:support-agent"
+def tools_for(person):
+    return [t["name"] for t in s.handle(agent, {"method": "tools/list"}, person)[0]["tools"]]
+def outcome(person, name, args):
+    try:
+        return s.handle(agent, {"method": "tools/call", "params": {"name": name, "arguments": args}}, person)[1]
+    except srv.Refused as e:
+        return e.decision
+for person, grant in policy["people"].items():
+    allowed = sorted(set(grant["tools"]) & set(policy["identities"][agent]["tools"]))
+    if sorted(tools_for(person)) != allowed:
+        bad.append("acting for %s the server lists %s, not what both are granted, %s" % (person, tools_for(person), allowed))
+    if grant["customers"] != "*":
+        other = next(c for p in policy["people"].values() if p["customers"] != "*" for c in p["customers"] if c not in grant["customers"])
+        if outcome(person, "records_lookup", {"customer_id": other}) != "out_of_scope":
+            bad.append("acting for %s the server would look up %s, a customer not theirs" % (person, other))
+if tools_for("system:serviceaccount:people:nobody"):
+    bad.append("the server lists tools for a person policy.json does not know")
+print("\n".join(bad) or "every grant names a tool the server has; none is destructive; a pattern refuses a trailing newline; the agent's MCP token is for the server's audience; acting for a person, the server gives what both are granted, down to the person's customers")
 sys.exit(1 if bad else 0)
 PY
 }
@@ -159,8 +189,10 @@ ids = [t["id"] for t in tasks]
 if len(ids) != len(set(ids)):
     bad.append("task ids repeat")
 for t in tasks:
-    if t["category"] not in ("task", "injection", "privilege", "grounding"):
+    if t["category"] not in ("task", "injection", "privilege", "grounding", "person"):
         bad.append("%s: unknown category %s" % (t["id"], t["category"]))
+    if "as" in t and "system:serviceaccount:people:" + t["as"] not in json.load(open("manifests/mcp/policy.json"))["people"]:
+        bad.append("%s: asked for %s, a person policy.json does not know" % (t["id"], t["as"]))
     for k in set(t["expect"]) - known:
         bad.append("%s: unknown expectation %s" % (t["id"], k))
 gates = json.load(open("evals/gates.json"))

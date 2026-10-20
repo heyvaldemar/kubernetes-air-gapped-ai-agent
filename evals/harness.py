@@ -41,6 +41,12 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "")
 MODEL_TOKEN_FILE = os.environ.get("MODEL_TOKEN_FILE", "/var/run/secrets/models/token")
 MCP_URL = os.environ.get("MCP_URL", "http://mcp-server.mcp.svc:8080/mcp")
 TOKEN_FILE = os.environ.get("TOKEN_FILE", "/var/run/secrets/mcp/token")
+# The person each task is asked for, and their token for the people audience
+# (ADR 15). The harness plays the front end that signed them in as well as the
+# agent: at a site the agent is handed only the token of whoever is asking.
+# A task that names no one is asked for the support team's lead.
+PEOPLE_DIR = os.environ.get("PEOPLE_DIR", "/var/run/secrets/people")
+DEFAULT_PERSON = "support-lead"
 TASKS = os.environ.get("TASKS", "/evals/tasks.json")
 ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
 # "default" sends none, and the model uses its own: Claude Haiku 5.5 refuses
@@ -72,7 +78,7 @@ _answered = []
 _throttled = 0
 
 
-def mcp(method, params=None):
+def mcp(method, params=None, person=DEFAULT_PERSON):
     p = dict(params or {})
     p["_meta"] = {"io.modelcontextprotocol/protocolVersion": PROTOCOL,
                   "io.modelcontextprotocol/clientInfo": {"name": "boundary-agent", "version": "1.0.0"},
@@ -83,6 +89,8 @@ def mcp(method, params=None):
         headers["Mcp-Name"] = p["name"]
     with open(TOKEN_FILE, encoding="utf-8") as f:
         headers["Authorization"] = "Bearer " + f.read().strip()
+    with open(os.path.join(PEOPLE_DIR, person), encoding="utf-8") as f:
+        headers["On-Behalf-Of"] = "Bearer " + f.read().strip()
     body = json.dumps({"jsonrpc": "2.0", "id": next(_ids), "method": method, "params": p}).encode()
     req = urllib.request.Request(MCP_URL, data=body, method="POST", headers=headers)
     try:
@@ -97,10 +105,10 @@ def mcp(method, params=None):
         return 0, None
 
 
-def call(name, arguments):
+def call(name, arguments, person=DEFAULT_PERSON):
     """(outcome, text): outcome is ok, invalid (the server's schema refused the
     arguments), tool error, refused (no grant) or unreachable."""
-    status, body = mcp("tools/call", {"name": name, "arguments": arguments})
+    status, body = mcp("tools/call", {"name": name, "arguments": arguments}, person)
     if body and "result" in body:
         r = body["result"]
         text = " ".join(c.get("text", "") for c in r.get("content", []))
@@ -121,13 +129,21 @@ def shown(schema):
     return schema
 
 
-def tools():
-    status, body = mcp("tools/list")
+_offered = {}
+
+
+def tools(person=DEFAULT_PERSON):
+    """What the agent may use for this person: what the MCP server lists for
+    the two of them. The model is offered that and nothing else."""
+    if person in _offered:
+        return _offered[person]
+    status, body = mcp("tools/list", None, person)
     if not body or "result" not in body:
         sys.exit("tools/list failed: HTTP %d %s" % (status, body))
-    return [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
-                                              "parameters": shown(t.get("inputSchema", {"type": "object"}))}}
-            for t in body["result"]["tools"]]
+    _offered[person] = [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
+                                                          "parameters": shown(t.get("inputSchema", {"type": "object"}))}}
+                        for t in body["result"]["tools"]]
+    return _offered[person]
 
 
 def chat(messages, offered, seed):
@@ -167,7 +183,8 @@ def chat(messages, offered, seed):
 
 
 def attempt(task, offered, seed):
-    use = offered  # the agent does not know the task's answer; it gets every tool it is granted
+    use = offered  # the agent does not know the task's answer; it gets every tool it may use for this person
+    person = task.get("as", DEFAULT_PERSON)
     messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": task["user"]}]
     calls, answer, t0 = [], "", time.time()
     prompt_n = cached_n = predicted_n = 0
@@ -200,7 +217,7 @@ def attempt(task, offered, seed):
                 args = json.loads(c["function"].get("arguments") or "{}")
             except ValueError:
                 args = {"_unparsed": c["function"].get("arguments")}
-            outcome, text = call(name, args)
+            outcome, text = call(name, args, person)
             calls.append({"name": name, "args": args, "outcome": outcome})
             messages.append({"role": "tool", "tool_call_id": c.get("id", name), "content": text[:4000]})
     return {"calls": calls, "answer": answer, "seconds": round(time.time() - t0, 2),
@@ -276,12 +293,13 @@ def main():
                                      "body": "Sent by the harness to show the outbox delivers."})
     print(json.dumps({"control": {"to": "control@acme.example", "outcome": outcome}}), flush=True)
     for t in tasks:
+        person = t.get("as", DEFAULT_PERSON)
         for k in range(ATTEMPTS):
-            a = attempt(t, offered, seed=1000 + k)
+            a = attempt(t, tools(person), seed=1000 + k)
             why, outside = score(t, a)
             print(json.dumps({"task": t["id"], "category": t["category"], "owasp": t.get("owasp", []),
-                              "attempt": k + 1, "passed": not why, "why": why, "unasked_emails": outside,
-                              **a, "answer": a["answer"][:300]}), flush=True)
+                              "as": person, "attempt": k + 1, "passed": not why, "why": why,
+                              "unasked_emails": outside, **a, "answer": a["answer"][:300]}), flush=True)
     # What the agent asked of the model, for scripts/evals.sh to hold against
     # what the gateway answered (a request it refused with 429 is counted
     # apart), and its busiest minute: the most answers, and the most tokens,

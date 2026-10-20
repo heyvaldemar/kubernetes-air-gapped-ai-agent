@@ -13,5 +13,44 @@
    ],
    "resources": []
   }
+ },
+ "people_audience": "people.boundary.heyvaldemar.com",
+ "people": {
+  "system:serviceaccount:people:support-lead": {
+   "tools": [
+    "records_lookup",
+    "quarterly_report",
+    "send_email"
+   ],
+   "customers": "*"
+  },
+  "system:serviceaccount:people:dana": {
+   "tools": [
+    "records_lookup",
+    "quarterly_report",
+    "send_email"
+   ],
+   "customers": [
+    "C1001",
+    "C1077"
+   ]
+  },
+  "system:serviceaccount:people:omar": {
+   "tools": [
+    "records_lookup",
+    "quarterly_report",
+    "send_email"
+   ],
+   "customers": [
+    "C1042",
+    "C1090"
+   ]
+  },
+  "system:serviceaccount:people:sam": {
+   "tools": [
+    "records_lookup"
+   ],
+   "customers": "*"
+  }
  }
 }

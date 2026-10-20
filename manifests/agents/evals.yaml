@@ -1,6 +1,8 @@
 # The agent, run through the evals: one Job, as the support-agent identity,
 # with one token for the MCP server's audience, one for the model gateway's,
-# and no Kubernetes API token. It reaches the MCP server and the model
+# and no Kubernetes API token. Beside them, the tokens of the people the tasks
+# are asked for (ADR 15), which scripts/evals.sh mints as a front end would at
+# sign-in: the harness plays that front end too. It reaches the MCP server and the model
 # gateway, and nothing else (network-policies.yaml, and the gateway's own
 # rule in manifests/gateway/gateway.yaml).
 apiVersion: batch/v1
@@ -50,6 +52,7 @@ spec:
             - {name: evals, mountPath: /evals, readOnly: true}
             - {name: mcp-token, mountPath: /var/run/secrets/mcp, readOnly: true}
             - {name: models-token, mountPath: /var/run/secrets/models, readOnly: true}
+            - {name: people, mountPath: /var/run/secrets/people, readOnly: true}
       volumes:
         - name: evals
           configMap: {name: evals}
@@ -60,6 +63,8 @@ spec:
                   path: token
                   audience: mcp.boundary.heyvaldemar.com
                   expirationSeconds: 3600
+        - name: people
+          secret: {secretName: people-tokens}
         - name: models-token
           projected:
             sources:

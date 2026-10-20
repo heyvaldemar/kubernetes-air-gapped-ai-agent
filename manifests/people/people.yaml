@@ -1,0 +1,48 @@
+# The people the agent works for (ADR 15). At a site they are the company's
+# own users, signed in through its identity provider, and the agent receives
+# the token of whoever is asking. Here a ServiceAccount in this namespace
+# stands in for each, and the cluster's issuer for the identity provider: a
+# token for the audience people.boundary.heyvaldemar.com says who the person
+# is, and manifests/mcp/policy.json says what each may do through the agent.
+# Nothing runs here. Only an administrator can mint these tokens
+# (serviceaccounts/token in this namespace); scripts/evals.sh does, for the
+# evals, as a front end would at sign-in.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: people
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# The support team's lead: every customer, every tool the agent has. The
+# evals' original fifteen tasks are asked on her behalf.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: support-lead
+  namespace: people
+automountServiceAccountToken: false
+---
+# Account managers: their own customers' records, the report, and email.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dana
+  namespace: people
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: omar
+  namespace: people
+automountServiceAccountToken: false
+---
+# First-line support: any customer's record, and nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sam
+  namespace: people
+automountServiceAccountToken: false

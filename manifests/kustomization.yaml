@@ -1,11 +1,12 @@
-# The tool side of the boundary: the agent's namespace and identity, the MCP
-# server, the records service it fronts, the report service, and the network
-# policies between them. The model server is applied by scripts/serve.sh,
-# which names the model by digest.
+# The tool side of the boundary: the agent's namespace and identity, the
+# people it works for, the MCP server, the records service it fronts, the
+# report service, and the network policies between them. The model server is
+# applied by scripts/serve.sh, which names the model by digest.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespaces.yaml
+  - people/people.yaml
   - mcp/mcp.yaml
   - tools/gateway.yaml
   - records/records.yaml
