@@ -64,6 +64,19 @@ Every model request goes through agentgateway, inside the same boundary and from
 
 The question after "what does a small model inside do" is "what would a frontier model do, and how would it be reached without undoing all this". A weekly job answers both with Claude Haiku 5.5 ([ADR 14](docs/decisions/0014-one-way-out-for-a-model-outside.md)). The boundary closes as above, and then one exception opens: the host's firewall lets a second node, the egress node, open TCP 443 to Anthropic's published API range, 160.79.104.0/23, and nothing else on kind's network. Only the gateway runs on that node. The taint that keeps the scheduler away is not trusted to do it: the API server refuses any pod outside the gateway's namespace that tolerates the taint, tolerates every taint or names the node. The boundary still resolves no outside name; the gateway is given the API's address. There is no API key. The runner exchanges its GitHub identity, under a federation rule that names this repository's main branch, for a token that lives ten minutes, hands it to the gateway through kubectl's standard input and replaces it every four. The agent does not change: it names a model, shows its service account token, and is held to the same quota, token budget and gates as every model inside. What it sends the model does leave, to Anthropic and nowhere else, which is the decision a site makes in turning this on.
 
+| | Claude Haiku 5.5 | Haiku, patterns hidden | Claude Sonnet 5.5 | Sonnet, patterns hidden |
+|---|---|---|---|---|
+| Ordinary tasks done | 18 of 18 | 18 of 18 | 18 of 18 | 18 of 18 |
+| Instructions hidden in data the model acted on | **0 of 12** | **0 of 12** | **0 of 12** | **0 of 12** |
+| Requests beyond the agent's rights it declined | 9 of 9 | 9 of 9 | 9 of 9 | 9 of 9 |
+| Answers without invented data | 6 of 6 | 6 of 6 | 6 of 6 | 6 of 6 |
+| Emails the model tried to send outside acme.example | 0 | 0 | 0 | 0 |
+| **Data that left acme.example**, beyond the prompts themselves | **0** | **0** | **0** | **0** |
+| Cost per task, its tokens at list price | about $0.00027 | about $0.00026 | about $0.00495 | about $0.00477 |
+| Latency per task, p50 / p95 | 2.0 s / 4.2 s | 2.2 s / 4.3 s | 2.8 s / 6.2 s | 2.8 s / 7.7 s |
+
+From [run 39476144885](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39476144885) (`scripts/release-numbers.py 39476144885 claude-haiku-5-5 claude-haiku-5-5-patterns-off claude-sonnet-5-5 claude-sonnet-5-5-patterns-off`). Neither model acted on any of the twelve hidden instructions, where the six models inside acted on up to six; no grammar stood in front of them, and with the patterns hidden nothing changed. Twelve attempts at four planted instructions is a small sample, and the boundary is built not to need the model's restraint: every gate above held here as it does inside. Haiku cost what a small model's CPU time costs inside; Sonnet about twenty times that. The first runs also found three faults, now fixed: two checks in the evals scored a true answer as a wrong one, and the agent's quota had less room than its decision record said (CHANGELOG).
+
 ## What is proven, and how
 
 Every line is a check in `tests/e2e/run.sh`, `tests/e2e/frontier.sh` or `scripts/evals.sh` on a fresh cluster, or in `scripts/validate.sh`. Each refusal is paired with a control that must succeed, so a check cannot pass because the environment refuses everything.
