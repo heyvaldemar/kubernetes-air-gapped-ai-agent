@@ -55,7 +55,7 @@ check_kubeconform() {
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
@@ -176,7 +176,11 @@ check_policies() {
     || { echo "verify-models.yaml does not verify the model's AI-BOM"; ok=1; }
   grep -q "c.licenses.exists(l, l.license.id in \['Apache-2.0', 'MIT'\])" admission/verify-models.yaml \
     || { echo "verify-models.yaml does not hold the model's licence to the allowlist"; ok=1; }
-  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, and read its AI-BOM's licence"
+  grep -q "variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))" admission/carried-images.yaml \
+    || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
+  grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
+    || { echo "carried-images.yaml admits everything when its list of digests is missing"; ok=1; }
+  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, read its AI-BOM's licence, and hold every pod to what the bundle carried"
   return "$ok"
 }
 

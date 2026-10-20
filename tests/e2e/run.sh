@@ -21,7 +21,10 @@
 #      signed by a key the cluster does not trust, or named by tag, or from
 #      anywhere but the models path inside, or with no AI-BOM, or with an
 #      AI-BOM whose licence the site does not allow; and admits the signed
-#      model with its AI-BOM
+#      model with its AI-BOM. It also refuses a pod whose image the bundle
+#      did not carry, by a digest of its own or by tag
+#  11. nothing that runs came from anywhere else: every pod outside the node
+#      image's own namespaces runs images whose digests the bundle carried
 #  10. everything inside came in one signed file: the registry inside held
 #      nothing when the bundle was loaded, it holds exactly what the bundle
 #      carried, and a bundle changed by one byte is refused and loads nothing
@@ -166,6 +169,26 @@ else
 fi
 mv "$STATE/bundle.loaded.kept" "$STATE/bundle.loaded"
 rm -f "$STATE/bundle.tampered" "$STATE/bundle.tampered.sigstore.json"
+
+step "11. nothing that runs came from anywhere else"
+# Read back, not assumed: every pod in the namespaces carried-images covers,
+# every container image, against the digests the policy was given.
+if [ -s "$STATE/carried-digests.txt" ]; then
+  stray="$(kubectl get pods -A -o json | jq -r --arg carried "$(cat "$STATE/carried-digests.txt")" '
+    ($carried | split(" ")) as $c
+    | .items[] | select(.metadata.namespace != "kube-system" and .metadata.namespace != "local-path-storage")
+    | . as $p | ([.spec.containers[], (.spec.initContainers // [])[]] | .[].image)
+    | select((split("@") | .[1] // "") as $d | ($c | index($d)) == null)
+    | "\($p.metadata.namespace)/\($p.metadata.name): \(.)"')"
+  running="$(kubectl get pods -A --no-headers 2>/dev/null | awk '$1 != "kube-system" && $1 != "local-path-storage"' | grep -c .)"
+  if [ -z "$stray" ] && [ "$running" -gt 0 ]; then
+    pass "every pod outside the node image's namespaces runs images the bundle carried ($running pods, $(wc -w <"$STATE/carried-digests.txt" | tr -d ' ') digests)"
+  else
+    fail "pods run images the bundle did not carry: $(head -c 300 <<<"$stray")"
+  fi
+else
+  fail "no list of the digests the bundle carried: scripts/admission.sh policy writes it"
+fi
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1
 printf '\n'; printf '%s\n' "${results[@]}"

@@ -1,0 +1,15 @@
+# an image the bundle carried, named by its tag alone
+# expect: named by digest
+apiVersion: v1
+kind: Pod
+metadata:
+  name: image-by-tag
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: docker.io/library/busybox:1.37
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}

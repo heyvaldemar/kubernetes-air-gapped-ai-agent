@@ -1,0 +1,52 @@
+# Nothing runs that the bundle did not carry, checked by the API server
+# itself on every pod: each image is named by digest, and the digest is one
+# of those scripts/bundle.sh loaded, listed in the ConfigMap carried-images
+# that scripts/admission.sh writes from the bundle after the load. A pod
+# with an image from anywhere else is refused, by tag or by a digest the
+# bundle never carried, whoever made it and however it got there.
+#
+# Not kube-system or local-path-storage: what runs there comes with the node
+# image (kind's control plane, CoreDNS, the CNI, the storage provisioner),
+# which reaches the cluster outside the bundle; the README says so. Kyverno
+# is not needed for this: it holds while Kyverno is down.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: carried-images
+spec:
+  failurePolicy: Fail
+  paramKind: {apiVersion: v1, kind: ConfigMap}
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, local-path-storage]}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+  variables:
+    - name: images
+      expression: >-
+        object.spec.containers.map(c, c.image) +
+        object.spec.?initContainers.orValue([]).map(c, c.image) +
+        object.spec.?ephemeralContainers.orValue([]).map(c, c.image)
+    - name: carried
+      expression: params.data.digests.split(' ')
+  validations:
+    - expression: variables.images.all(i, i.contains('@sha256:'))
+      message: every image a pod runs is named by digest
+    - expression: variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))
+      message: every image a pod runs is one the bundle carried
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: carried-images
+spec:
+  policyName: carried-images
+  paramRef:
+    name: carried-images
+    namespace: kube-system
+    parameterNotFoundAction: Deny
+  validationActions: [Deny]

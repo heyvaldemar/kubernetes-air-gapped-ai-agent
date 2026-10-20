@@ -1,0 +1,15 @@
+# an image the bundle never carried, by a digest of its own
+# expect: one the bundle carried
+apiVersion: v1
+kind: Pod
+metadata:
+  name: image-not-carried
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: docker.io/library/busybox:1.37@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}

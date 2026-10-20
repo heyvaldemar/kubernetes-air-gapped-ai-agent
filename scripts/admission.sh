@@ -46,13 +46,21 @@ case "${1:-}" in
     exit 1
     ;;
   policy)
+    # The digests the bundle carried, from the layouts bundle.sh load
+    # unpacked, as the parameter of the policy that holds every pod to them.
+    find "$STATE/bundle.inside/oci" -name index.json -exec jq -r '.manifests[].digest' {} + | sort -u | tr '\n' ' ' \
+      | sed 's/ $//' >"$STATE/carried-digests.txt"
+    [ -s "$STATE/carried-digests.txt" ] || { echo "no bundle loaded: run scripts/bundle.sh load first" >&2; exit 1; }
+    kubectl -n kube-system create configmap carried-images --from-file=digests="$STATE/carried-digests.txt" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    kubectl apply -f "$ROOT/admission/carried-images.yaml" >/dev/null
     kubectl apply -f "$ROOT/admission/model-volumes.yaml" >/dev/null
     render_policy | kubectl apply -f - >/dev/null
     for _ in $(seq 1 60); do
       [ "$(kubectl get imagevalidatingpolicy verify-models -o jsonpath='{.status.conditionStatus.ready}' 2>/dev/null)" = true ] && break
       sleep 2
     done
-    say "model-volumes and verify-models applied, the latter with the operator's key"
+    say "carried-images ($(wc -w <"$STATE/carried-digests.txt" | tr -d ' ') digests), model-volumes and verify-models applied, the last with the operator's key"
     ;;
   *) echo "usage: admission.sh <fetch|install|policy>" >&2; exit 2 ;;
 esac
