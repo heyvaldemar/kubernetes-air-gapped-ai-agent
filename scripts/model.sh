@@ -42,12 +42,19 @@ builder() {
     || docker buildx create --name boundary --driver docker-container --driver-opt "image=$BUILDKIT" >/dev/null
 }
 
-# attest <ref@digest> <bom.json>: the AI-BOM as an in-toto attestation,
-# signed with the operator's key and no transparency log, like the signature.
+# attest <ref@digest> <bom.json> [key]: the AI-BOM as an in-toto attestation,
+# signed with the operator's key (or the one named) and no transparency log,
+# like the signature.
 attest() {
   SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
-    cosign attest --key "$STATE/operator.key" --type cyclonedx --predicate "$2" \
+    cosign attest --key "$STATE/${3:-operator}.key" --type cyclonedx --predicate "$2" \
       --use-signing-config=false --tlog-upload=false --yes "$1" >/dev/null 2>&1
+}
+
+# signed <key> <ref@digest>: a signature with that key, no transparency log.
+signed() {
+  SSL_CERT_FILE="$STATE/bundle.pem" COSIGN_PASSWORD="" \
+    cosign sign --key "$STATE/$1.key" --use-signing-config=false --tlog-upload=false --yes "$2" >/dev/null
 }
 
 # image <dir> <repo:tag>: build <dir> reproducibly, push it, print its digest
@@ -88,7 +95,9 @@ case "${1:-}" in
     ;;
   sign)
     bundle
-    for who in operator stranger; do
+    # The operator's key, the one the operator rotates to (ADR 16), and a
+    # stranger's, which the cluster never trusts.
+    for who in operator next stranger; do
       [ -s "$STATE/$who.key" ] || COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix "$STATE/$who" >/dev/null
     done
     digest="$(cat "$STATE/$MODEL.digest")"
@@ -104,7 +113,7 @@ case "${1:-}" in
     ;;
   plants)
     bundle; builder
-    for name in unsigned stranger unlicensed nobom; do
+    for name in unsigned stranger unlicensed nobom retired next; do
       dir="$STATE/plant-$name"; mkdir -p "$dir"
       printf 'not a model: %s\n' "$name" >"$dir/model.gguf"
       cp "$ROOT/models/Dockerfile" "$dir/Dockerfile"
@@ -122,7 +131,18 @@ case "${1:-}" in
     python3 "$ROOT/scripts/mlbom.py" plant-unlicensed "https://huggingface.co/plant/unlicensed/resolve/0000000000000000000000000000000000000000/model.gguf" \
       "$(sha256 "$STATE/plant-unlicensed/model.gguf")" GPL-3.0-only >"$STATE/plant-unlicensed.mlbom.json"
     attest "$REG/models/plant-unlicensed@$(cat "$STATE/plant-unlicensed.digest")" "$STATE/plant-unlicensed.mlbom.json"
-    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust), models/plant-unlicensed (signed, AI-BOM says GPL-3.0-only), models/plant-nobom (signed, no AI-BOM)"
+    # For the key rotation drill (tests/e2e/rotation.sh): a model signed and
+    # attested with the operator's key alone, and one with the next key alone,
+    # each with an AI-BOM the site allows.
+    for pair in retired:operator next:next; do
+      name="${pair%%:*}" key="${pair#*:}"
+      ref="$REG/models/plant-$name@$(cat "$STATE/plant-$name.digest")"
+      signed "$key" "$ref"
+      python3 "$ROOT/scripts/mlbom.py" "plant-$name" "https://huggingface.co/plant/$name/resolve/0000000000000000000000000000000000000000/model.gguf" \
+        "$(sha256 "$STATE/plant-$name/model.gguf")" Apache-2.0 >"$STATE/plant-$name.mlbom.json"
+      attest "$ref" "$STATE/plant-$name.mlbom.json" "$key"
+    done
+    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust), models/plant-unlicensed (signed, AI-BOM says GPL-3.0-only), models/plant-nobom (signed, no AI-BOM), models/plant-retired and models/plant-next (signed and attested with the operator's key alone, and with the next key alone)"
     ;;
   *) echo "usage: model.sh <build|sign|plants>" >&2; exit 2 ;;
 esac

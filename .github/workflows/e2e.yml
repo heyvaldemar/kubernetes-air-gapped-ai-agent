@@ -204,12 +204,13 @@ jobs:
           ./scripts/airgap.sh seed
           ./scripts/airgap.sh mirror
 
-      - name: Two models, built reproducibly and signed
+      - name: Two models, built reproducibly and signed, and the plants
         run: |
           for m in granite-4.0-1b minicpm5-2b; do
             MODEL="$m" ./scripts/model.sh build
             MODEL="$m" ./scripts/model.sh sign
           done
+          ./scripts/model.sh plants
 
       - name: The admission chart and the gateway, fetched and checked
         run: |
@@ -258,6 +259,13 @@ jobs:
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/people.sh
+
+      # The operator's key, rotated with Granite served (ADR 16): last, since
+      # it restarts that model server and puts the policy back as it was.
+      - name: Rotate the operator's key with a model served
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/rotation.sh
 
       - name: What the cluster looked like
         if: failure()
