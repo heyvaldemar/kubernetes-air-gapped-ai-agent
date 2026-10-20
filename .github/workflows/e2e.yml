@@ -14,6 +14,12 @@ on:
   schedule:
     - cron: "29 4 * * *"
   workflow_dispatch:
+    inputs:
+      offer_patterns:
+        description: "on: the model sees the tools' full schemas. off: without their patterns, which the MCP server still checks (a branch experiment; the status page reads main)"
+        type: choice
+        options: ["on", "off"]
+        default: "on"
 
 permissions:
   contents: read
@@ -141,6 +147,7 @@ jobs:
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+          OFFER_PATTERNS: ${{ inputs.offer_patterns || 'on' }}
         run: ./scripts/evals.sh
 
       - name: What the cluster looked like

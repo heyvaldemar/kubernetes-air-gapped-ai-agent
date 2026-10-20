@@ -36,6 +36,7 @@ spec:
             - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
             - {name: ATTEMPTS, value: "3"}
             - {name: MODEL_THREADS, value: "2"}
+            - {name: OFFER_PATTERNS, value: "@OFFER_PATTERNS@"}
           resources:
             requests: {cpu: 20m, memory: 32Mi}
             limits: {cpu: 250m, memory: 128Mi}
