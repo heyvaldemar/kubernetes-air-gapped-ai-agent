@@ -61,6 +61,23 @@ jobs:
           RUN_ID="$run_id" RUN_CREATED="$created" RUN_COMMIT="$commit" \
             "$RUNNER_TEMP/inspect/bin/python" scripts/inspect-log.py "$RUNNER_TEMP/run" "$RUNNER_TEMP/status/inspect"
 
+      - name: Carry the run history forward
+        # The branch is one commit, so its history of runs lives in its files:
+        # history/<run id>.json for every finished run on main, carried from
+        # the branch as it was, any missing one filled in from its artifacts,
+        # and history.md rebuilt from them (scripts/status-history.py).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_WORKFLOW: e2e.yml
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/status/history"
+          if git clone -q --depth 1 -b status "https://github.com/$REPO.git" "$RUNNER_TEMP/prev" 2>/dev/null \
+             && [ -d "$RUNNER_TEMP/prev/history" ]; then
+            cp "$RUNNER_TEMP/prev/history/"*.json "$RUNNER_TEMP/status/history/" 2>/dev/null || true
+          fi
+          python3 scripts/status-history.py "$RUNNER_TEMP/status"
+
       - name: Replace the branch `status`
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -68,7 +85,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/status"
           # shellcheck disable=SC2016
-          printf '# status\n\nWritten by .github/workflows/status.yml from the e2e runs on main, every day. Not edited by hand.\n\n`inspect/` holds the latest run'"'"'s evals as Inspect logs, one per model: `inspect view --log-dir inspect`.\n' > README.md
+          printf '# status\n\nWritten by .github/workflows/status.yml from the e2e runs on main, every day. Not edited by hand.\n\n`inspect/` holds the latest run'"'"'s evals as Inspect logs, one per model: `inspect view --log-dir inspect`. `history.md` lists every run on main since 2026-10-20 and the runs before it whose artifacts GitHub still kept, one file each in `history/`.\n' > README.md
           git init -q -b status
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
