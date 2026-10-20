@@ -75,7 +75,9 @@ case "${1:-}" in
 import json, os, re, sys, urllib.error, urllib.parse, urllib.request
 
 def redacted(text):
-    return re.sub(r"sk-ant-[A-Za-z0-9_-]+", "<redacted>", str(text))[:200]
+    # A key, or a JWT (the runner's own identity token is one).
+    text = re.sub(r"sk-ant-[A-Za-z0-9_-]+", "<redacted>", str(text))
+    return re.sub(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+", "<redacted>", text)[:300]
 
 # The runner's identity: a JWT GitHub signs for this job, for Anthropic's
 # audience, valid about five minutes and good for one exchange.
@@ -93,14 +95,15 @@ try:
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
 except urllib.error.HTTPError as e:
-    # The status and the error's name, never the body as it came: some
-    # servers echo what they refused.
+    # The status, the error's name and its message, never the body as it
+    # came: some servers echo what they refused, so anything shaped like a
+    # key or a JWT is taken out first.
     try:
         err = json.loads(e.read())
         if isinstance(err.get("error"), str):  # OAuth's shape
-            why = err.get("error_description") or err["error"]
+            why = "%s: %s" % (err["error"], err.get("error_description", ""))
         else:                                  # the API's shape
-            why = (err.get("error") or {}).get("type")
+            why = "%s: %s" % ((err.get("error") or {}).get("type"), (err.get("error") or {}).get("message", ""))
     except ValueError:
         why = "no JSON in the answer"
     sys.exit("the token exchange was refused: HTTP %d, %s (request %s)" % (e.code, redacted(why), e.headers.get("request-id", "?")))
