@@ -110,6 +110,13 @@ case "${1:-}" in
     for t in iptables ip6tables; do
       sudo "$t" -C DOCKER-USER -i "$br" ! -o "$br" -j REJECT 2>/dev/null \
         || sudo "$t" -I DOCKER-USER 1 -i "$br" ! -o "$br" -j REJECT
+      # The host itself. Traffic addressed to the host takes INPUT, which the
+      # rule above (FORWARD) never sees: a resolver listening on the host
+      # answered a pod's query for a public name until this rule. Nothing in
+      # the cluster opens a connection to the host; replies to the host's own
+      # connections (kubectl to the API server) are not new, and pass.
+      sudo "$t" -C INPUT -i "$br" -m conntrack --ctstate NEW -j REJECT 2>/dev/null \
+        || sudo "$t" -I INPUT 1 -i "$br" -m conntrack --ctstate NEW -j REJECT
     done
     for node in $(nodes); do
       docker exec "$node" sh -c 'printf "nameserver 127.0.0.1\n" > /etc/resolv.conf'
@@ -128,13 +135,16 @@ case "${1:-}" in
       --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     kubectl -n kube-system rollout restart deployment/coredns >/dev/null
     kubectl -n kube-system rollout status deployment/coredns --timeout=120s >/dev/null
-    say "closed: nothing from $br leaves it, the node has no DNS, CoreDNS answers only for the cluster and $NAME"
+    say "closed: nothing from $br leaves it or opens a connection to the host, the node has no DNS, CoreDNS answers only for the cluster and $NAME"
     ;;
   open)
     if br="br-$(docker network inspect kind -f '{{.Id}}' 2>/dev/null | cut -c1-12)" && [ "$br" != "br-" ]; then
       for t in iptables ip6tables; do
         while sudo "$t" -C DOCKER-USER -i "$br" ! -o "$br" -j REJECT 2>/dev/null; do
           sudo "$t" -D DOCKER-USER -i "$br" ! -o "$br" -j REJECT
+        done
+        while sudo "$t" -C INPUT -i "$br" -m conntrack --ctstate NEW -j REJECT 2>/dev/null; do
+          sudo "$t" -D INPUT -i "$br" -m conntrack --ctstate NEW -j REJECT
         done
       done
     fi
