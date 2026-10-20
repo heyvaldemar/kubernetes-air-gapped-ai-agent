@@ -13,7 +13,7 @@ The model this repository ships acted on an instruction hidden in a quarterly re
 
 An AI agent deployed into a Kubernetes cluster with no route to the internet. The model runs inside the cluster on CPU, from an image built reproducibly and signed with the operator's key, and the cluster verifies the signature before the model server may mount it, with no network. The agent reaches its tools only through an MCP server that knows which agent is calling and checks every argument. On every run the agent goes through fifteen tasks, some with instructions planted in the data it reads, and the run reports two numbers side by side: how often the model was fooled, and whether anything happened because of it.
 
-It is a reference, not a product, and it does not run in production anywhere. It runs on kind, CPU only, at no cloud cost; one weekly job puts a model outside the boundary instead, for cents a run.
+It is a reference, not a product, and it does not run in production anywhere. It runs on kind, CPU only, at no cloud cost; one weekly job puts a model outside the boundary instead, for cents a run. For whoever signs off, [the brief](docs/brief.md) is one page.
 
 ![One model's job: the signed bundle loaded across the gap, the gateway, the boundary and admission checks, then the agent's evals](docs/demo/e2e.gif)
 
