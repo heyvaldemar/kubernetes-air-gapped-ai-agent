@@ -36,6 +36,9 @@ REGISTRY=kind-registry
 NAME=registry.boundary.internal
 STATE="$ROOT/.cache/airgap"
 CA="$STATE/ca.crt"
+# The registry's one account, "loader", logs in here: oras and cosign both
+# read this, and nothing else may write to the registry (ADR 2).
+export DOCKER_CONFIG="$STATE/docker"
 HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io cr.agentgateway.dev)
 say() { printf '== %s\n' "$*"; }
 nodes() { kind get nodes --name "$CLUSTER"; }
@@ -57,16 +60,29 @@ case "${1:-}" in
     openssl x509 -req -in "$STATE/tls.csr" -CA "$CA" -CAkey "$STATE/ca.key" -CAcreateserial -days 30 \
       -extfile "$STATE/tls.ext" -out "$STATE/tls.crt" 2>/dev/null
     chmod 644 "$STATE/tls.key"  # read by zot's non-root user inside its container
+    # Anyone may read, which is how the nodes pull and Kyverno reads a
+    # signature; only "loader" may write, with a password made for this run
+    # and kept beside the operator's key, like it. zot reads bcrypt alone, so
+    # the hash comes from a pinned htpasswd, the password on its stdin.
+    if [ ! -s "$STATE/registry.password" ]; then
+      (umask 077 && openssl rand -hex 24 >"$STATE/registry.password")
+    fi
+    htpasswd_image="$(sed -n 's/^HTPASSWD_IMAGE=//p' "$ROOT/ci-images.pins")"
+    tr -d '\n' <"$STATE/registry.password" | docker run --rm -i "$htpasswd_image" htpasswd -niB loader >"$STATE/htpasswd"
+    chmod 644 "$STATE/htpasswd"  # a bcrypt hash, read by zot's non-root user
     docker rm -f "$REGISTRY" >/dev/null 2>&1 || true
     docker run -d --name "$REGISTRY" --network kind --restart=always \
       -v "$ROOT/airgap/zot.json:/etc/zot/config.json:ro" -v "$STATE:/etc/zot/tls:ro" \
+      -v "$STATE/htpasswd:/etc/zot/htpasswd:ro" \
       -p 127.0.0.1:5000:5000 "$ref" >/dev/null
     # The host reaches it by the same name the cluster does, so a signature
     # names the image exactly as the admission policy will look it up.
     grep -q " $NAME$" /etc/hosts || echo "127.0.0.1 $NAME" | sudo tee -a /etc/hosts >/dev/null
     for _ in $(seq 1 30); do curl -fs --cacert "$CA" "https://$NAME:5000/v2/" >/dev/null && break; sleep 1; done
     curl -fs --cacert "$CA" "https://$NAME:5000/v2/" >/dev/null || { docker logs "$REGISTRY" | tail -20; exit 1; }
-    say "zot is up as https://$NAME:5000 ($(registry_ip) on kind's network)"
+    mkdir -p "$DOCKER_CONFIG"
+    oras login --ca-file "$CA" -u loader --password-stdin "$NAME:5000" <"$STATE/registry.password" >/dev/null
+    say "zot is up as https://$NAME:5000 ($(registry_ip) on kind's network): anyone reads, only loader writes"
     ;;
   seed)
     while read -r ref; do

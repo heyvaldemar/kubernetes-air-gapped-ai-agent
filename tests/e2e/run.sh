@@ -33,6 +33,10 @@
 #  10. everything inside came in one signed file: the registry inside held
 #      nothing when the bundle was loaded, it holds exactly what the bundle
 #      carried, and a bundle changed by one byte is refused and loads nothing
+#  12. only the loader writes to the registry inside: a push with no
+#      password, or a wrong one, is refused; with the loader's, it starts
+#      (the control) and is cancelled. Reads need none: the nodes pull, and
+#      checks 6 and 10 read, with no credential (ADR 2)
 #
 # The model's own answers are judged by scripts/evals.sh, from the agent's
 # side of the network policies.
@@ -256,6 +260,29 @@ if [ -s "$STATE/carried-digests.txt" ]; then
   fi
 else
   fail "no list of the digests the bundle carried: scripts/admission.sh policy writes it"
+fi
+
+step "12. only the loader writes to the registry inside"
+# After 10 and 11, which count what the registry holds. A write here starts
+# an upload and goes no further: the control's upload is cancelled, which
+# leaves the name in zot's catalog with no tag, and check 10 counts tags. The
+# password reaches curl on its stdin, never as an argument.
+up="https://$REG/v2/boundary-write-probe/blobs/uploads/"
+anon="$(curl -s -m 5 -o /dev/null -w '%{http_code}' --cacert "$STATE/ca.crt" -X POST "$up" || true)"
+wrong="$(printf 'user = "loader:not-the-password"\n' | curl -s -m 5 -o /dev/null -w '%{http_code}' --cacert "$STATE/ca.crt" -K - -X POST "$up" || true)"
+loader() { { printf 'user = "loader:'; tr -d '\n' <"$STATE/registry.password"; printf '"\n'; } | curl -s -m 5 --cacert "$STATE/ca.crt" -K - "$@"; }
+headers="$(loader -o /dev/null -D - -X POST "$up" || true)"
+code="$(awk 'NR == 1 {print $2}' <<<"$headers")"
+location="$(awk -F': ' 'tolower($1) == "location" {print $2}' <<<"$headers" | tr -d '\r')"
+if [ "$code" != 202 ]; then
+  fail "control: with the loader's password a push did not start (HTTP ${code:-no answer}), so the refusals below prove nothing"
+else
+  pass "control: with the loader's password, a push starts (HTTP 202); cancelled: HTTP $(loader -o /dev/null -w '%{http_code}' -X DELETE "https://$REG$location" || true)"
+fi
+if [ "$anon" = 401 ] && [ "$wrong" = 401 ]; then
+  pass "the registry inside refuses a push with no password (HTTP $anon) and with a wrong one (HTTP $wrong)"
+else
+  fail "the registry inside answered a push with no password HTTP ${anon:-none}, with a wrong one HTTP ${wrong:-none}: anything that reaches it can write"
 fi
 
 kubectl delete pod probe --wait=false >/dev/null 2>&1

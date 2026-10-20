@@ -20,6 +20,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
+# The registry's one account that may write, logged in by airgap.sh registry.
+export DOCKER_CONFIG="$STATE/docker"
 REG=registry.boundary.internal:5000
 CA="$STATE/ca.crt"
 BUILDKIT=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8

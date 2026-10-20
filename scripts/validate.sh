@@ -7,7 +7,9 @@
 #   images        every image a manifest, a pin file or a script names is
 #                 referenced by digest
 #   boundary      every image the cluster runs is in airgap/images.txt: one
-#                 that is not would fail to pull once the boundary closes
+#                 that is not would fail to pull once the boundary closes; the
+#                 registry inside lets anyone read and one account write, its
+#                 password handed over on stdin (ADR 2)
 #   mcp           the MCP server and the records service compile; every grant
 #                 in policy.json, an agent's or a person's, names a tool the
 #                 server has, and none is a destructive tool; the evals Job's
@@ -112,8 +114,21 @@ for line in open("gateway/gateway.lock"):
     f = line.split()
     if len(f) >= 4 and f[0] == "image":
         need.add(f[3])
-missing = sorted(need - inside)
-print("\n".join("not inside the boundary: " + m for m in missing) or "every image the cluster runs is in airgap/images.txt (%d)" % len(need))
+missing = ["not inside the boundary: " + m for m in sorted(need - inside)]
+# Who may write to the registry inside (ADR 2): anyone reads, one account
+# writes, with a password that is never an argument.
+import json
+zot = json.load(open("airgap/zot.json"))["http"]
+acl = zot.get("accessControl", {}).get("repositories", {})
+writers = {u for r in acl.values() for p in r.get("policies", []) for u in p.get("users", [])
+           if set(p.get("actions", [])) & {"create", "update", "delete"}}
+if not zot.get("auth", {}).get("htpasswd") or any(r.get("anonymousPolicy") != ["read"] for r in acl.values()) \
+        or not acl or writers != {"loader"}:
+    missing.append("airgap/zot.json does not hold writing to one account, loader, with reads open and nothing more")
+airgap = open("scripts/airgap.sh").read()
+if "--password-stdin" not in airgap or re.search(r"oras login[^\n]*\s-p\s", airgap):
+    missing.append("scripts/airgap.sh does not hand the registry's password to oras on stdin")
+print("\n".join(missing) or "every image the cluster runs is in airgap/images.txt (%d); the registry lets anyone read and only loader write" % len(need))
 sys.exit(1 if missing else 0)
 PY
 }

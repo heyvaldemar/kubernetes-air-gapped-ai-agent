@@ -15,12 +15,15 @@ An admission controller reads registries itself. Kyverno, verifying a signature,
 - **TLS from a CA made for the boundary.** `scripts/airgap.sh registry` makes the CA and the registry's certificate. containerd trusts it through `hosts.toml`, Kyverno through the chart's `global.caCertificates`, and cosign and oras through the bundle they are handed. A plain-HTTP request to the registry is refused, and the e2e run checks that it is.
 - **Mirrors for the five upstream hosts** the cluster's images come from (docker.io, ghcr.io, quay.io, registry.k8s.io, reg.kyverno.io), each a path in the same registry, so the third-party images keep their original names and digests.
 - **Signatures travel with their images** (`oras cp -r`, the OCI referrers API), where the source serves that API. reg.kyverno.io does not; its images come in without referrers, and the seed step says so.
+- **Anyone reads, one account writes.** *Amended 2026-10-20.* The registry had TLS and nothing else: anything that reached it could push. zot now holds writing to one account, `loader` (`airgap/zot.json`, `accessControl`), whose bcrypt hash `scripts/airgap.sh registry` writes from a password made per run and kept beside the operator's key. The password reaches `htpasswd` and `oras login` on stdin, never as an argument; oras and cosign read the login from `DOCKER_CONFIG`. Reads stay open, so the nodes pull and Kyverno reads a signature with no credential, and an image's integrity rests on its digest and, for a model, its signature, not on who may read it. e2e check 12: a push with no password, and with a wrong one, is refused with 401; with the loader's it starts, and is cancelled. Static check `boundary`, three plants.
 
 ## Consequences
 
 - Anything the policy verifies lives under `registry.boundary.internal:5000/models/`. Third-party images keep their upstream names and are not signature-checked here; the supply-chain admission repository is where that is done.
 - The CA is made per run. In a real install it is the site's CA, and its key is not on a CI runner.
 - One registry, one replica. A site would run it highly available, with its storage backed up.
+- Reads are anonymous inside the boundary: a workload that reaches the registry can pull any image in it. The images are public ones and models with public weights; a site carrying something that is not would give containerd and Kyverno pull credentials too.
+- The loader's password is a file on the machine that loads the bundle, as the operator's key is. At a site it lives in the site's secret store.
 
 ## Alternatives
 

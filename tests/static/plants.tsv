@@ -34,3 +34,6 @@
 "manifests/mcp/server.py"	"return {\"tools\": [t for t in agent[\"tools\"] if t in mine.get(\"tools\", [])],"	"return {\"tools\": list(agent[\"tools\"]),"	"mcp"	"a server that gives the agent its whole grant whoever it acts for"
 "manifests/mcp/server.py"	"if \"customer_id\" in args and g[\"customers\"] != \"*\" and args[\"customer_id\"] not in g[\"customers\"]:"	"if False:"	"mcp"	"a server that reads any customer's record for anyone"
 "evals/tasks.json"	"\"as\": \"sam\",\n  \"user\": \"What revenue"	"\"as\": \"nobody\",\n  \"user\": \"What revenue"	"evals"	"a task asked for a person nobody knows"
+"airgap/zot.json"	"\"anonymousPolicy\": [\"read\"]"	"\"anonymousPolicy\": [\"read\", \"create\"]"	"boundary"	"a registry anyone inside may push to"
+"airgap/zot.json"	"\"auth\": {\"htpasswd\": {\"path\": \"/etc/zot/htpasswd\"}},\n"	""	"boundary"	"a registry with no account to write as"
+"scripts/airgap.sh"	"-u loader --password-stdin \"$NAME:5000\" <\"$STATE/registry.password\""	"-u loader -p \"$(cat \"$STATE/registry.password\")\" \"$NAME:5000\""	"boundary"	"the registry's password as an argument"
