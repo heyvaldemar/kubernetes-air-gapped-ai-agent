@@ -102,6 +102,13 @@ gw="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}
 open_ports=""
 for port in 22 53 80 443 3128 8080; do reach "$gw" "$port" && open_ports="$open_ports $port"; done
 measured+=("ports a pod can open on the host:${open_ports:- none} (of 22 53 80 443 3128 8080, at $gw)")
+# Gated: a resolver on the host that a pod can ask is a way out by DNS, the
+# oldest exfiltration channel there is, whatever the forwarding rule says.
+if out="$(kubectl exec probe -- nslookup -timeout=3 example.com "$gw" 2>&1)" && grep -qE '^Address: [0-9]' <<<"$(sed -n '/^Name:/,$p' <<<"$out")"; then
+  fail "a pod resolved example.com by asking the host itself ($gw): a way out by DNS"
+else
+  pass "a pod cannot resolve an outside name through the host ($gw)"
+fi
 if curl -6 -g -s -m 5 -o /dev/null 'https://[2606:4700:4700::1111]/' 2>/dev/null; then
   measured+=("IPv6 route out from the runner: yes (the ip6tables rule is in place; the cluster is IPv4 only)")
 else
