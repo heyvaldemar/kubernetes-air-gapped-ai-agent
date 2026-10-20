@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `scripts/gateway.sh install` makes the models' namespace from the model server's manifest, and with `SERVED` set and empty serves no model inside.
+- `scripts/tools.sh` makes the models' namespace from the model server's manifest when no model server has, and `scripts/gateway.sh install` with `SERVED` set and empty serves no model inside.
 
 ## [1.5.0] - 2026-10-20
 

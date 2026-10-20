@@ -56,10 +56,6 @@ case "${1:-}" in
     mkdir -p "$STATE"
     kubectl get --raw /.well-known/openid-configuration >"$STATE/cluster-oidc.json"
     kubectl get --raw /openid/v1/jwks >"$STATE/cluster-jwks.json"
-    # The models' namespace, as the model server's manifest defines it: the
-    # gateway's grant and policy live there, and the frontier job (ADR 14)
-    # serves no model inside to have made it.
-    awk '/^---$/ {exit} {print}' "$ROOT/manifests/inference/llama.yaml" | kubectl apply -f - >/dev/null
     python3 - "$ROOT/manifests/gateway/gateway.yaml" "$STATE/cluster-oidc.json" "$STATE/cluster-jwks.json" <<'PY' | kubectl apply -f - >/dev/null
 import json, sys
 text, oidc, jwks = (open(f).read() for f in sys.argv[1:4])

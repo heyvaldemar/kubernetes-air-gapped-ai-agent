@@ -6,6 +6,10 @@
 # needs for TokenReview. Adapted from kubernetes-ai-agent-sandbox's installer.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The models' namespace, as the model server's manifest defines it: the
+# model server's network policy lives there. scripts/serve.sh has made it
+# when a model is served inside; the frontier job (ADR 14) serves none.
+awk '/^---$/ {exit} {print}' manifests/inference/llama.yaml | kubectl apply -f - >/dev/null
 kubectl apply -k manifests/ >/dev/null
 if ! kubectl -n corp get secret records-api-key >/dev/null 2>&1 || ! kubectl -n mcp get secret records-api-key >/dev/null 2>&1; then
   python3 - <<'PY' | kubectl apply -f - >/dev/null
