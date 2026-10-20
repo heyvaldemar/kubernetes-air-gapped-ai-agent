@@ -25,6 +25,8 @@ gh workflow run e2e.yml --ref <branch>
 
 The status page reads main only, so branch runs never touch the published numbers. GitHub serves a job's log only once the whole run has finished: to read one finished job early, cancel the rest.
 
+The frontier job (`.github/workflows/frontier.yml`, ADR 14) cannot run on a branch: the federation rule that mints its token names main alone. A change to it is held by static check `frontier` and its plants before main, and proven by `gh workflow run frontier.yml` on main after; each run spends cents from a workspace capped at $10 a month.
+
 ## Pins
 
 Everything is pinned and every pin has one home: images by digest in `airgap/images.txt` (the bundle is made from it), models by revision, sha256 and image digest in `models/models.lock`, the gateway in `gateway/gateway.lock`, CI images in `ci-images.pins`, tools in `tools.lock`, the admission chart in `admission/charts.lock`. A new model is `unpinned` until its first build prints a digest, and is pinned once two runners agree on it.
@@ -48,4 +50,4 @@ Plain and specific. No em dashes, no marketing words, no claim the evidence does
 
 - Print a secret, or put one in a file, a log or an argument. Keys and the boundary's CA are made per run.
 - Turn off or weaken a check, a policy or a gate to get a run green.
-- Touch anything outside this repository's own CI to test a change: no cloud resources, no outside services. The model runs inside the boundary.
+- Touch anything outside this repository's own CI to test a change: no cloud resources, no outside services. The model runs inside the boundary. The one exception is the frontier job's call to Anthropic's API, through the one way out ADR 14 opens, with a token minted per run; never an API key, here or in a repository secret.

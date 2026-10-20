@@ -1,0 +1,49 @@
+# 14. One way out, for a model outside
+
+- Status: accepted
+- Date: 2026-10-20
+
+## Context
+
+The boundary exists so that a model can run with nothing leaving. The question a customer asks next is what a frontier model would do with the same tasks, and, if they allow one, how it is reached without undoing the boundary. Six small models acted on a hidden instruction 0 to 6 times in 12 (run 39157806610). No model outside has been measured here.
+
+Letting a cluster call a model API brings three problems with it:
+
+- **A way out.** A pod that can reach `api.anthropic.com` can call it with a key of its own and send whatever it holds to that key's account. Opening the API to the cluster opens a channel to anyone with an Anthropic account.
+- **A credential.** An API key in a Secret or a CI secret does not expire. Whoever reads it once can spend with it, and stop only when someone notices and rotates it.
+- **Spend.** A loop that calls the API costs money for as long as it runs.
+
+Three facts made a narrow answer possible. Anthropic publishes the addresses its API receives on, 160.79.104.0/23, and says they "will not change without notice" ([IP addresses](https://platform.claude.com/docs/en/api/ip-addresses), read 2026-10-20). Anthropic exchanges an OIDC token from a trusted issuer for a short-lived API token (Workload Identity Federation). agentgateway 1.6.0, already the gateway here, has an Anthropic provider: it translates the OpenAI chat format the agent speaks, and keeps a token that starts `sk-ant-oat` in `Authorization: Bearer` where an API key would move to `x-api-key` (`set_required_fields` in `crates/agentgateway/src/llm/mod.rs` at v1.6.0, and checked on a local cluster before this was written).
+
+## Decision
+
+- **One way out, from one node.** `kind/frontier.yaml` adds a second node, labelled and tainted as the egress node. After `scripts/airgap.sh close`, `scripts/frontier.sh open` inserts one rule above the bridge's REJECT: from the egress node's address, to 160.79.104.0/23, TCP 443, accept. Pods leave a kind node with the node's address, so the rule covers what runs on that node and nothing on the other. IPv6 stays closed.
+- **Only the gateway runs there.** The taint keeps the scheduler from placing anything else on the node. A taint is not a control: any pod may tolerate it, tolerate every taint, or name the node and skip the scheduler. `admission/egress-node.yaml` refuses all three outside the namespace `gateway`, whose pods agentgateway's controller makes. `kube-system` is exempt, as in `admission/carried-images.yaml`: its node agents (kindnet, kube-proxy) run on every node with the host's network.
+- **No resolver for outside names.** The boundary still answers no outside name. The gateway's proxy is given the API's address as a host alias, resolved on the runner and refused unless it falls in the range.
+- **No key.** `scripts/frontier.sh token` asks GitHub for the job's OIDC token, for the audience `https://api.anthropic.com`, and exchanges it at `/v1/oauth/token` under a federation rule that accepts exactly `repo:heyvaldemar/kubernetes-air-gapped-ai-agent:ref:refs/heads/main`, for a service account in a workspace with a spend limit of $10 a month. The token it gets lives ten minutes. It goes to the gateway as the Secret `inference/anthropic-token` through kubectl's standard input: never an argument, a file or a log line. The script prints only how long the token lives and how many characters it has. While the evals run, it is replaced every four minutes, and agentgateway's controller pushes the new one to the proxy within a second (measured on a local cluster).
+- **The same gateway, the same rules.** The agent names a model and shows its service account token, and the gateway applies the same quota and token budget as for a model inside. The route for that name leads to an `AgentgatewayBackend` with the Anthropic provider and the model fixed in the backend. The gateway sets `anthropic-beta: oauth-2025-04-20`, which the API asks of a bearer token, and overwrites any value a client sends.
+- **The same harness and gates.** Nothing delivered outside, the harness's control email arrives, every request and every token counted at the gateway, the MCP audit matching the agent's log, no record deleted, no request refused by the quota or the budget. With the tools' patterns shown and hidden, as for the models inside (ADR 13). No grammar is built from a schema on this path, so the first job is the model reading the rule and the second the model without it.
+- **Weekly, on main only, Claude Haiku 5.5 first.** At $0.10 and $0.50 per million tokens in and out, a run costs cents. Larger models follow once a run has measured how many tokens the agent spends.
+- **Its own checks.** `tests/e2e/frontier.sh`: the gateway alone on the egress node; four admission plants (the three ways onto the node, and the same pod without them, which must be admitted); from the other node, no connection to the API, though the registry inside answers; from the egress node, the API on 443 and nothing else, its own port 80 included. Static check `frontier` holds the rule, the workflow, the backend and the policy, with eight plants.
+
+## Consequences
+
+- What the agent sends its model leaves the boundary: the customer's prompts, the records the tools return, the report's text. That is the trade a site makes in turning this on, and the reason the default here stays inside. The checks prove that nothing else leaves, and that it reaches Anthropic and nowhere else.
+- Residual paths, stated: the node agents in `kube-system` share the egress node's network and could reach the range; whoever may create pods in `gateway` may place one on the node; a token taken from the gateway spends the workspace's budget for up to ten minutes and reaches only that workspace.
+- The quota and the token budget were sized for models on CPU (ADR 11, 12). An API answers faster. The harness now waits and asks again on 429 and reports its busiest minute, and the gate still fails on any refusal: if the first runs refuse, the budget for this route is set from their measurement, as ADR 12 set the first one.
+- Cost per task is the tokens at Anthropic's list price (`evals/pricing.json`). The workspace refuses anything past its $10 limit: a run past it fails, it does not bill.
+- The status page reads the air-gapped e2e only. Numbers from this job are cited by run until they have a page of their own.
+
+## Alternatives
+
+- **An API key as a repository secret.** It does not expire, and a workflow on any branch can read it unless an environment holds it back.
+- **The range open to the whole bridge.** Every pod in a namespace with no egress policy could reach the API with a key of its own.
+- **Network policies alone.** `kube-system`, `kyverno` and `agentgateway-system` have no egress policy, and a NetworkPolicy cannot deny. A cluster-wide policy that can deny (the Network Policy API's AdminNetworkPolicy, since renamed ClusterNetworkPolicy) depends on the network plugin, and this repository has not tested kindnet's.
+- **A forward proxy with a name allowlist on the host.** One more service, and the gateway already sees every request by name and identity.
+- **api.anthropic.com in CoreDNS.** Every pod could resolve it, and only the gateway needs to.
+- **An egress gateway in the CNI or a mesh** (Cilium, Istio). The same idea at another layer; neither runs here.
+- **The cluster's own service account tokens, federated to Anthropic directly.** The gateway would mint its own token, with no runner involved. Anthropic would have to read the cluster's signing keys, and kind's are new with every cluster and published nowhere. On a site whose cluster has a public issuer (EKS, GKE, AKS), this is the better design.
+
+## How to explain this to a customer
+
+Your assistant can use a model in the cloud without the rest of the cluster getting a way out. One machine in the cluster may open a connection to Anthropic's published addresses, on the HTTPS port, and only the gateway runs on that machine. The cluster refuses to let anything else land there, and every check that shows nothing else leaves still runs. There is no API key to leak or rotate: each run proves to Anthropic who it is and gets a pass that expires in ten minutes. The assistant notices none of this. It asks the same gateway, under the same allowance, and every request and token is counted the same way. What it sends the model, your records included, does go to Anthropic. Turning this on is that decision.
