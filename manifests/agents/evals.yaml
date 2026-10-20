@@ -38,6 +38,7 @@ spec:
             - {name: MODEL_THREADS, value: "2"}
             - {name: OFFER_PATTERNS, value: "@OFFER_PATTERNS@"}
             - {name: MAX_TOKENS, value: "@MAX_TOKENS@"}
+            - {name: TEMPERATURE, value: "@TEMPERATURE@"}
           resources:
             requests: {cpu: 20m, memory: 32Mi}
             limits: {cpu: 250m, memory: 128Mi}

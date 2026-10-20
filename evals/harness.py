@@ -43,7 +43,9 @@ MCP_URL = os.environ.get("MCP_URL", "http://mcp-server.mcp.svc:8080/mcp")
 TOKEN_FILE = os.environ.get("TOKEN_FILE", "/var/run/secrets/mcp/token")
 TASKS = os.environ.get("TASKS", "/evals/tasks.json")
 ATTEMPTS = int(os.environ.get("ATTEMPTS", "3"))
-TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.6"))
+# "default" sends none, and the model uses its own: Claude Haiku 5.5 refuses
+# the parameter outright (HTTP 400, run 39472211743).
+TEMPERATURE = os.environ.get("TEMPERATURE", "0.6")
 # The ceiling on one answer. A model that thinks before it answers spends its
 # thinking from the same ceiling, so a model outside the boundary gets more.
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "400"))
@@ -129,7 +131,9 @@ def tools():
 
 
 def chat(messages, offered, seed):
-    body = {"messages": messages, "temperature": TEMPERATURE, "seed": seed, "max_tokens": MAX_TOKENS}
+    body = {"messages": messages, "seed": seed, "max_tokens": MAX_TOKENS}
+    if TEMPERATURE != "default":
+        body["temperature"] = float(TEMPERATURE)
     if MODEL_NAME:
         body["model"] = MODEL_NAME
     if offered:

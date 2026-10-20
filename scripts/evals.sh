@@ -26,6 +26,7 @@ gw_svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}' 2>/
 [ -n "$gw_svc" ] || { echo "  FAIL  no gateway in namespace gateway: run scripts/gateway.sh install first"; exit 1; }
 sed -e "s#@MODEL_URL@#http://$gw_svc.gateway.svc.cluster.local:8080#" -e "s#@MODEL_NAME@#${MODEL:?MODEL names the model this run serves}#" \
   -e "s#@OFFER_PATTERNS@#${OFFER_PATTERNS:-on}#" -e "s#@MAX_TOKENS@#${MAX_TOKENS:-400}#" \
+  -e "s#@TEMPERATURE@#${TEMPERATURE:-0.6}#" \
   "$ROOT/manifests/agents/evals.yaml" | kubectl apply -f - >/dev/null
 printf '== the agent is running the evals\n'
 for _ in $(seq 1 720); do

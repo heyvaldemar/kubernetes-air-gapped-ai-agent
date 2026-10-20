@@ -47,6 +47,10 @@ jobs:
       OFFER_PATTERNS: ${{ matrix.patterns }}
       # A model that thinks spends its thinking from the answer's ceiling.
       MAX_TOKENS: "4096"
+      # Claude Haiku 5.5 refuses a temperature (HTTP 400, run 39472211743):
+      # the model's own default, and the seed is dropped on the way, so the
+      # attempts of a task are separate samples, not repeats.
+      TEMPERATURE: "default"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
