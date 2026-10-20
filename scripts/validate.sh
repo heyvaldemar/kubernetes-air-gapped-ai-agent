@@ -30,7 +30,8 @@
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
-#                 ci-images.pins; needs Docker)
+#                 ci-images.pins; needs Docker), with every bom-ref unique and
+#                 every dependency naming one that exists
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -242,6 +243,27 @@ check_mlbom() {
     docker run --rm -v "$PWD/out/mlbom:/b:ro" "$img" validate --input-file "/b/$name.json" \
         --input-format json --input-version v1_6 --fail-on-errors >/dev/null 2>&1 \
       || { echo "$name: its AI-BOM is not valid CycloneDX 1.6"; ok=1; }
+    # The schema cannot see this: every bom-ref unique, and every dependency
+    # naming one that exists.
+    python3 - "out/mlbom/$name.json" <<'PY' || { echo "$name: its AI-BOM's references do not hold"; ok=1; }
+import json, sys
+bom = json.load(open(sys.argv[1]))
+refs = []
+def walk(c):
+    if isinstance(c, dict):
+        if "bom-ref" in c:
+            refs.append(c["bom-ref"])
+        for v in c.values():
+            walk(v)
+    elif isinstance(c, list):
+        for v in c:
+            walk(v)
+walk(bom)
+dupes = sorted({r for r in refs if refs.count(r) > 1})
+missing = sorted({r for d in bom.get("dependencies", []) for r in [d["ref"]] + d.get("dependsOn", []) if r not in refs})
+if dupes or missing:
+    sys.exit("duplicate bom-refs %s, dependencies on unknown refs %s" % (dupes, missing))
+PY
   done < <(grep -vE '^\s*(#|$)' models/models.lock)
   [ "$ok" = 0 ] && echo "every model's AI-BOM is valid CycloneDX 1.6 ($n models)"
   return "$ok"

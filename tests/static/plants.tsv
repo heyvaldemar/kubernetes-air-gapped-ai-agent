@@ -17,3 +17,4 @@
 "docs/engagement.md"	"./scripts/gateway.sh install"	"./scripts/gateway.sh deploy"	"docs"	"an engagement plan that runs a command the e2e never ran"
 "docs/engagement.md"	"git checkout v"	"git checkout v0."	"docs"	"an engagement plan pinned to a release that is not the latest"
 "README.md"	"| 1 | [The boundary is the host's firewall, the node's resolver and CoreDNS](docs/decisions/0001-the-boundary-is-the-runners-firewall.md) |\n"	""	"docs"	"a decision record the README's table leaves out"
+"scripts/mlbom.py"	"\"component\": {\"type\": \"container\", \"bom-ref\": \"image\","	"\"component\": {\"type\": \"container\", \"bom-ref\": \"model\","	"mlbom"	"an AI-BOM whose subject and model share one bom-ref"
