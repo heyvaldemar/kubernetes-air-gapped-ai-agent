@@ -1,0 +1,111 @@
+name: Release Evidence
+
+# THE RUN A RELEASE WAS CHECKED BY, KEPT WITH THE RELEASE.
+#
+# A release's notes name the e2e run it was cut from, and the README's numbers
+# are read from that run's artifacts by scripts/release-numbers.py. GitHub
+# deletes artifacts after 90 days, and with them the means to check a single
+# number. This job attaches the run's artifacts to the release as one archive,
+# signed keyless by this workflow like the source archive:
+#
+#   <repo>-<tag>-evidence.tar.gz               every artifact of the run, and
+#                                              EVIDENCE.md: the run, its commit,
+#                                              and every file's sha256
+#   <repo>-<tag>-evidence.tar.gz.sigstore.json cosign keyless signature
+#
+# Verifying it, from any machine:
+#
+#   cosign verify-blob <repo>-<tag>-evidence.tar.gz \
+#     --bundle <repo>-<tag>-evidence.tar.gz.sigstore.json \
+#     --certificate-identity-regexp '^https://github.com/heyvaldemar/<repo>/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#
+# Started by hand with the tag and the run, after the release is published.
+# It refuses a run that is not this repository's e2e on main, green, for the
+# tag's commit or the one before it (a release commit is docs only, right
+# after a green one).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag, vX.Y.Z"
+        required: true
+        type: string
+      run:
+        description: "The e2e run the release notes name"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-evidence-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: Attach the run's evidence to the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Add the archive to the release.
+      contents: write
+      # Read the run and download its artifacts.
+      actions: read
+      # Sign keyless.
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      RUN: ${{ inputs.run }}
+    steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: The run is the one the release was checked by
+        run: |
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a release tag: $TAG"; exit 1 ;; esac
+          case "$RUN" in *[!0-9]*|"") echo "not a run id: $RUN"; exit 1 ;; esac
+          read -r path branch conclusion head created < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" \
+            --jq '"\(.path) \(.head_branch) \(.conclusion) \(.head_sha) \(.created_at)"')
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
+          parent="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag_sha" --jq '.parents[0].sha')"
+          echo "run $RUN: $path on $branch, $conclusion, commit $head; $TAG is $tag_sha, after $parent"
+          [ "$path" = .github/workflows/e2e.yml ] || { echo "run $RUN is not the e2e workflow"; exit 1; }
+          [ "$branch" = main ] || { echo "run $RUN is not on main"; exit 1; }
+          [ "$conclusion" = success ] || { echo "run $RUN did not pass"; exit 1; }
+          [ "$head" = "$tag_sha" ] || [ "$head" = "$parent" ] \
+            || { echo "run $RUN checked $head, neither $TAG's commit nor the one before it"; exit 1; }
+          { echo "HEAD_SHA=$head"; echo "CREATED=$created"; } >> "$GITHUB_ENV"
+
+      - name: Every artifact of the run, with a manifest
+        run: |
+          name="${GITHUB_REPOSITORY#*/}-$TAG-evidence"
+          mkdir -p "out/$name"
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -D "out/$name/artifacts"
+          {
+            printf '# Evidence for %s\n\n' "$TAG"
+            printf 'Every artifact of e2e run %s (https://github.com/%s/actions/runs/%s),\n' "$RUN" "$GITHUB_REPOSITORY" "$RUN"
+            printf 'started %s on commit %s, downloaded and archived by\n' "$CREATED" "$HEAD_SHA"
+            printf '.github/workflows/evidence.yml. scripts/release-numbers.py reads the same files.\n\n'
+            printf '```\n'
+            (cd "out/$name" && find artifacts -type f | LC_ALL=C sort | xargs sha256sum)
+            printf '```\n'
+          } > "out/$name/EVIDENCE.md"
+          # The same bytes for the same files: sorted, owned by nobody, dated
+          # by the run.
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="$CREATED" \
+            -C out -czf "out/$name.tar.gz" "$name"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+          ls -l out
+
+      - name: Sign it, keyless
+        run: |
+          cosign sign-blob --yes "out/$NAME.tar.gz" --bundle "out/$NAME.tar.gz.sigstore.json"
+          cosign verify-blob "out/$NAME.tar.gz" --bundle "out/$NAME.tar.gz.sigstore.json" \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      - name: Attach it to the release
+        run: gh release upload "$TAG" "out/$NAME.tar.gz" "out/$NAME.tar.gz.sigstore.json" -R "$GITHUB_REPOSITORY" --clobber

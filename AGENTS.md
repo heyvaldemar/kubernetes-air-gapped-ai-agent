@@ -38,6 +38,7 @@ No number in the README or a release is typed by hand. `scripts/release-numbers.
 - Fill `CHANGELOG.md` `[Unreleased]` in the same commit as the change.
 - Tag only a commit whose e2e is green, or a docs-only commit right after one, and say which in the release notes: what is new, what was found while building it, how it was checked.
 - After publishing, verify the signed archive the way a stranger would: `cosign verify-blob` with the release's `.sigstore.json`.
+- Then attach the run the release was checked by: `gh workflow run evidence.yml -f tag=<tag> -f run=<run id>` adds every artifact of that run to the release as one signed archive, so its numbers outlive GitHub's 90 days. Verify that one too.
 
 ## Writing
 
