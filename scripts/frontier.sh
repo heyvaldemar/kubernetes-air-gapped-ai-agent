@@ -59,6 +59,12 @@ case "${1:-}" in
     # plant would be admitted and the check would say so, not this script.
     sed -e "s#@MODEL@#${MODEL:?MODEL names the model the agent asks for}#g" -e "s#@API_IP@#$ip#g" \
       "$ROOT/manifests/gateway/frontier.yaml" | kubectl apply -f - >/dev/null
+    # The controller rewrites the proxy's Deployment after it reads the new
+    # parameters, so a rollout check alone can pass on the old one.
+    for _ in $(seq 1 90); do
+      [ "$(kubectl -n gateway get pods --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u)" = "$node" ] && break
+      sleep 2
+    done
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
     say "one way out: $node ($(node_ip "$node")) to $RANGE on TCP 443, nothing else on kind's network; the gateway runs there and routes $MODEL to api.anthropic.com ($ip)"
     ;;

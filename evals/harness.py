@@ -152,7 +152,11 @@ def chat(messages, offered, seed):
             # again, as a client of any rate-limited API does. Counted, and
             # scripts/evals.sh fails the run on it all the same.
             if e.code != 429:
-                raise
+                # What the model's side said, for the log: an API's error
+                # names the parameter it refused. Never a credential.
+                with e:
+                    said = re.sub(r"sk-ant-[A-Za-z0-9_-]+", "<redacted>", e.read().decode("utf-8", "replace"))[:600]
+                sys.exit("the model answered HTTP %d: %s" % (e.code, said))
             _throttled += 1
             time.sleep(min(60, int(e.headers.get("Retry-After") or 10)))
     sys.exit("the gateway refused the agent ten times running")
