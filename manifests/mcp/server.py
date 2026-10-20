@@ -390,6 +390,18 @@ def audit(**line):
     print(json.dumps(line, sort_keys=True), flush=True)
 
 
+def detail(msg):
+    """What an audit line keeps of a call's arguments: an email's recipient,
+    and a hash of its body, never the body. Enough to say which address a
+    refusal was for, and to match a delivered email to the call that sent it."""
+    params = (msg.get("params") or {}) if isinstance(msg, dict) else {}
+    if params.get("name") != "send_email" or not isinstance(params.get("arguments"), dict):
+        return {}
+    args = params["arguments"]
+    return {"to": str(args.get("to", ""))[:120],
+            "body_sha256": hashlib.sha256(str(args.get("body", "")).encode()).hexdigest()[:16]}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "sandbox-mcp"
@@ -457,13 +469,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(202)
             SERVER.check_protocol(self.headers, msg)
             result, decision, name = SERVER.handle(who, msg)
-            audit(identity=who, pod=pod, method=msg["method"], name=name, decision=decision)
+            audit(identity=who, pod=pod, method=msg["method"], name=name, decision=decision, **detail(msg))
             self.send(200, {"jsonrpc": "2.0", "id": msg["id"], "result": result})
         except Refused as r:
             params = msg.get("params") if isinstance(msg, dict) else None
             name = (params or {}).get("name") or (params or {}).get("uri") or ""
             audit(identity=who, pod=pod, method=msg.get("method", "") if isinstance(msg, dict) else "",
-                  name=name, decision=r.decision, reason=r.message, status=r.status)
+                  name=name, decision=r.decision, reason=r.message, status=r.status, **detail(msg))
             extra = {"WWW-Authenticate": 'Bearer realm="sandbox-mcp"'} if r.status == 401 else None
             body = None
             if r.code is not None:
