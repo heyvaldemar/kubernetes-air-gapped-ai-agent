@@ -14,9 +14,14 @@
 #      Kyverno can refuse them); the signed model is refused too, which is
 #      the outage, not a hole; the model already served keeps answering.
 #      Then Kyverno back, and the seconds until the signed model is admitted
-#   2. the gateway's proxy pod lost. Until it is back, a request is not
-#      answered, and the model servers still cannot be reached around it;
-#      then the seconds until the gateway answers again
+#   2. the gateway's proxy pod killed, with no grace period: the way a node
+#      loses it, not the way a rollout replaces it (a graceful delete keeps
+#      the old pod serving until the new one is up, and measured nothing the
+#      first time this ran). While it is gone the model servers still cannot
+#      be reached around it; then how many requests failed and the seconds
+#      until the gateway answers again. One replica here, on one kind node:
+#      on a real cluster two replicas and a disruption budget are what make
+#      this a non-event
 #
 # Each refusal sits beside a control that must succeed: the served model
 # answering, and admission and the gateway coming back. Appends its checks to
@@ -150,20 +155,23 @@ else
 fi
 kubectl -n kyverno rollout status deployment/kyverno-admission-controller --timeout=300s >/dev/null 2>&1
 
-step "2. the gateway's proxy pod lost"
+step "2. the gateway's proxy pod killed"
 pod="$(kubectl -n gateway get pod -o jsonpath='{.items[0].metadata.name}')"
-kubectl -n gateway delete pod "$pod" --wait=false >/dev/null
-code="$(ask)"
-reach="$(direct)"
-if [ "$reach" = blocked ]; then pass "with the gateway's pod gone, the model server still cannot be reached around it"
-else fail "with the gateway's pod gone, the model server answered directly ($reach)"; fi
-measure "the first request after the gateway's pod was deleted: HTTP $code"
-# shellcheck disable=SC2329  # called by name, through seconds_until
-gw_up() { [ "$(ask)" = 200 ]; }
-if s="$(seconds_until gw_up)"; then
-  pass "the gateway answers again, ${s}s after its pod was deleted"
+kubectl -n gateway delete pod "$pod" --grace-period=0 --force --wait=false >/dev/null 2>&1
+t0=$SECONDS; failed_calls=0; back=""; reach=""
+for _ in $(seq 1 150); do
+  if [ "$(ask)" = 200 ]; then back=$((SECONDS - t0)); break; fi
+  failed_calls=$((failed_calls + 1))
+  [ -n "$reach" ] || reach="$(direct)"
+  sleep 1
+done
+[ -n "$reach" ] || reach="$(direct)"
+if [ "$reach" = blocked ]; then pass "with the gateway's pod killed, the model server still cannot be reached around it"
+else fail "with the gateway's pod killed, the model server answered directly ($reach)"; fi
+if [ -n "$back" ]; then
+  pass "the gateway answers again, ${back}s after its pod was killed, $failed_calls request(s) failed in between"
 else
-  fail "the gateway does not answer five minutes after its pod was deleted"
+  fail "the gateway does not answer five minutes after its pod was killed"
 fi
 
 kubectl -n agents delete pod gameday-client --ignore-not-found --wait=false >/dev/null 2>&1

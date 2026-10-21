@@ -241,6 +241,12 @@ check_policies() {
     || { echo "verify-models.yaml does not hold every model in the AI-BOM to it"; ok=1; }
   grep -qF "c.?licenses.orValue([]).all(l, !has(l.expression))" admission/verify-models.yaml \
     || { echo "verify-models.yaml reads past an SPDX expression instead of refusing it"; ok=1; }
+  # Fail closed: with Kyverno down its webhooks stay, and the API server
+  # refuses what it cannot ask about (tests/e2e/gameday.sh). Ignore would
+  # admit every model unchecked for as long as Kyverno is away.
+  for f in admission/verify-models.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml; do
+    grep -qE '^  failurePolicy: Fail$' "$f" || { echo "$f does not fail closed (failurePolicy: Fail)"; ok=1; }
+  done
   grep -q "variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))" admission/carried-images.yaml \
     || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
   grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
