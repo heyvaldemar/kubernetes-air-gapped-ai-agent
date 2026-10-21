@@ -41,7 +41,7 @@ The schedule is on from here (`AWS_VALIDATION_ENABLED`). The README says weekly 
 
 ## Consequences
 
-- About $0.11 a passing run, measured (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, six interface endpoints in two zones for under an hour, and the DNS Firewall's queries. Weekly, under the $5 a month the maintainer set.
+- About $0.11 a passing run, measured (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, five interface endpoints in two zones for under an hour, and the DNS Firewall's queries. Weekly, under the $5 a month the maintainer set.
 - No KMS key for Secrets here: a key cannot be deleted sooner than seven days, so a weekly run would keep paying for keys it no longer uses, and envelope encryption is shown in `aws-eks-reference-platform`.
 - The operator's public endpoint is a way in, from one address, for the length of a run. A site whose operator sits inside would turn public access off and reach the API from the VPC.
 - Allowing the region's AWS service zone in DNS lets a workload resolve any AWS endpoint name in the region, which is how the endpoints work; it does not give it a route to anything without an endpoint.
