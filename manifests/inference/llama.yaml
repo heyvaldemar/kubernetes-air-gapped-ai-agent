@@ -25,13 +25,18 @@ spec:
       labels: {app: llama, server: @NAME@}
     spec:
       automountServiceAccountToken: false
-      # LONG ENOUGH TO FINISH AN ANSWER. On a rollout the old pod is told to
-      # stop as soon as the new one is ready, and llama-server keeps writing
-      # the answer it is on; the default 30 seconds then killed one 37.7
-      # seconds in, HTTP 503 to the agent, with a request queued behind it
-      # lost too (game day, run 39550842207). The longest answer is 400
-      # tokens (evals/harness.py MAX_TOKENS) at the slowest rate measured
-      # here, about 8 a second on two threads: under a minute. Twice that.
+      # THE ANSWER IS FINISHED BEFORE THE SERVER IS TOLD TO STOP. On a
+      # rollout the old pod is deleted as soon as the new one is ready, and
+      # llama-server, sent SIGTERM, stops working on the answer it is writing
+      # but holds the connection until it is killed: HTTP 503 to the agent at
+      # 37.7 s with the default 30 s grace period (game day, run
+      # 39550842207), and at 127.9 s with 120 (run 39552546515). A longer
+      # grace period alone only makes the agent wait longer for the same
+      # failure. So the pod waits before the signal (preStop, below): already
+      # out of the Service's endpoints, it takes nothing new, and the answer
+      # in progress is written in full. The longest answer is 400 tokens
+      # (evals/harness.py MAX_TOKENS) at the slowest rate measured here,
+      # about 8 a second on two threads: under a minute.
       terminationGracePeriodSeconds: 120
       securityContext:
         runAsNonRoot: true
@@ -46,6 +51,9 @@ spec:
           args: ["-m", "/models/model.gguf", "--alias", "@ALIAS@", "--jinja", "-c", "8192", "-np", "1", "-t", "2",
                  "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
           ports: [{name: http, containerPort: 8080}]
+          lifecycle:
+            preStop:
+              sleep: {seconds: 60}
           # A small request so it schedules beside Kyverno on a 2-vCPU runner,
           # and no CPU limit, so it takes whatever cores are idle. The memory
           # ceiling fits the largest model in the matrix: a 4B model at
