@@ -21,4 +21,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 15 | [The agent acts for a person, with that person's rights](0015-the-agent-acts-for-a-person.md) | accepted |
 | 16 | [Rotating the operator's key with the model served](0016-rotating-the-operators-key.md) | accepted |
 | 17 | [No model is mounted while Kyverno is away](0017-no-model-while-kyverno-is-away.md) | accepted |
-| 18 | [The boundary on AWS: a VPC with no route out, and no name lookup out](0018-the-boundary-on-aws.md) | proposed |
+| 18 | [The boundary on AWS: a VPC with no route out, and no name lookup out](0018-the-boundary-on-aws.md) | accepted for phase 1 |

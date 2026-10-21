@@ -1,6 +1,6 @@
 # 18. The boundary on AWS: a VPC with no route out, and no name lookup out
 
-- Status: proposed
+- Status: accepted for phase 1, 2026-10-21; phase 2 proposed
 - Date: 2026-10-21
 
 ## Context
@@ -29,9 +29,19 @@ In two phases, the first proven before the second is built.
 
 **The run** (`.github/workflows/aws.yml`): weekly and by hand, on main only, in the `aws-validation` environment, behind the repository variable `AWS_VALIDATION_ENABLED`, with GitHub's OIDC token for the creation role and no stored credential. One Terraform state per run in the account's state bucket under its own prefix, `airgap-runs/`, so the other repository's sweeper never reads it; the run destroys what it made, looks for residue by its tag, and reports what it cost. A run first destroys any of its own states older than three hours that an earlier run left.
 
+## Phase 1 on AWS, 2026-10-21
+
+Three runs by hand, each destroyed afterwards with nothing left by tag or name:
+
+- [39624648738](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39624648738): the node never joined. All three add-ons waited for the node group, and a node is never Ready without the network plugin; EKS gave up on it as unhealthy. The plugin and kube-proxy now go on before the node, CoreDNS after. About $0.26.
+- [39632816543](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39632816543), the DNS check shown its violation, `dns_firewall = false`: everything else held. A pod started from the run's ECR through the endpoints; the pod and the node resolved ECR's name to an address inside the VPC and reached it on 443; neither could open TCP to 1.1.1.1, 8.8.8.8 or 151.101.0.81, or ask 8.8.8.8 directly. And both resolved example.com: a VPC with no internet gateway and no NAT still let a name lookup out. About $0.11.
+- [39636241165](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39636241165), the firewall on: all 16 checks passed, the pod and the node refused example.com, every control answered. About $0.11, 0.37 h.
+
+The schedule is on from here (`AWS_VALIDATION_ENABLED`). The README says weekly once a scheduled run has passed, as `aws-eks-reference-platform` held its own word back.
+
 ## Consequences
 
-- About $0.30 to $0.50 a run: the EKS control plane, one node, six interface endpoints in two zones for under an hour, and the DNS Firewall's queries. Weekly, under the $5 a month the maintainer set.
+- About $0.11 a passing run, measured (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, six interface endpoints in two zones for under an hour, and the DNS Firewall's queries. Weekly, under the $5 a month the maintainer set.
 - No KMS key for Secrets here: a key cannot be deleted sooner than seven days, so a weekly run would keep paying for keys it no longer uses, and envelope encryption is shown in `aws-eks-reference-platform`.
 - The operator's public endpoint is a way in, from one address, for the length of a run. A site whose operator sits inside would turn public access off and reach the API from the VPC.
 - Allowing the region's AWS service zone in DNS lets a workload resolve any AWS endpoint name in the region, which is how the endpoints work; it does not give it a route to anything without an endpoint.
