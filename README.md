@@ -154,6 +154,22 @@ make down                    # delete the cluster and undo the boundary on this 
 
 `make down` is the teardown: it deletes the cluster and the registry, removes the firewall rules, and takes the registry's name out of the host's `/etc/hosts`.
 
+## Sizing
+
+What one model server sustains on four vCPUs, from [run 39541814938](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39541814938) of `.github/workflows/capacity.yml`, which sends the agent's own first calls (the system prompt, an eval task, the three tools it is offered) at rising concurrency. The table is what `scripts/capacity.py table` prints from that run's artifacts (`gh run download 39541814938 -p 'capacity-*' -D capacity`); the slots and threads that matter for the decision:
+
+| Model | Slots x threads | Concurrency | Calls a minute | p50 | p95 | Output tokens/s |
+|---|---|---|---|---|---|---|
+| granite-4.0-1b | 1 x 4 | 1 | 45.7 | 1.44 s | 1.58 s | 14.9 |
+| granite-4.0-1b | 1 x 4 | 8 | 45.1 | 10.62 s | 11.15 s | 15.7 |
+| granite-4.0-1b | 2 x 2 | 8 | 46.1 | 10.55 s | 11.75 s | 16.0 |
+| granite-4.0-1b | 4 x 1 | 8 | 24.9 | 19.48 s | 21.89 s | 8.7 |
+| qwen3.5-2b | 1 x 4 | 1 | 7.3 | 6.42 s | 19.78 s | 19.4 |
+| qwen3.5-2b | 1 x 4 | 8 | 8.3 | 57.8 s | 75.09 s | 18.9 |
+| qwen3.5-2b | 4 x 1 | 8 | 5.0 | 84.81 s | 184.32 s | 11.2 |
+
+On CPU a server's throughput is fixed, and parallel slots do not raise it: they split the same cores, and four slots of one thread did half the work of one slot with four. Concurrency only queues. Granite's p95 goes from 1.6 s with one caller to 11 s with eight, at the same 45 calls a minute. So a node is sized by replicas, one slot each with every core it has (the cluster here runs `-np 1`), and by the calls a minute its agents make at their busiest, which the evals report. Qwen3.5-2B writes about eight times as much per call, which is why it manages a sixth of the calls on the same cores. Not every run is clean: the first attempt of the Qwen one-slot job ran 30 times slower on one runner, 0.3 tokens a second, and was cancelled at its hour; its rerun is the row above. The workflow runs weekly, so a number taken from here is a measurement with a date, not a constant.
+
 ## Cost
 
 Nothing in a cloud. The model runs on CPU inside kind, and the daily runs call no model provider. In the run v1.1.0 was cut from, a task cost the model server between 7.8 and 27.1 vCPU-seconds across the six models, $0.0001 to $0.0003 at the on-demand list price of a c7i.large in us-east-1; the badges above carry the latest run's. The price is the model server's busy time at that list price: marginal compute at full use, not a bill. The weekly job with a model outside is priced by its tokens at Anthropic's list price ([`evals/pricing.json`](evals/pricing.json)), from a workspace whose monthly limit refuses anything past $10. CI is a fresh cluster per model on a GitHub-hosted runner; the eight green runs on main before 2026-10-20 took 18 to 37 minutes, most of it the evals. The model server gets two threads on any runner; what moves the price from run to run is how fast those two threads are. On the 2-vCPU runners this repository had while it was private, the same tasks took two to three times longer.

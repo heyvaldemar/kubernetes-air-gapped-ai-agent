@@ -57,6 +57,9 @@ jobs:
         # 8192 times the slots: llama-server divides -c between them.
         run: |
           image="$(grep -E '^ghcr.io/ggml-org/llama.cpp:' airgap/images.txt)"
+          # The runner's CPU, in the log: one attempt of this job ran 30 times
+          # slower than its rerun on another runner (run 39541814938).
+          lscpu | grep -E 'Model name|^CPU\(s\)' || true
           echo "RUNNER_CPUS=$(nproc)" >>"$GITHUB_ENV"
           echo "CONTEXT=$((8192 * SLOTS))" >>"$GITHUB_ENV"
           docker run -d --name llm -p 8080:8080 -v "$RUNNER_TEMP:/models:ro" "$image" \
