@@ -13,7 +13,10 @@ running this twice changes nothing.
 It also writes DIR/series.json: the same runs, oldest first, with the
 numbers a chart needs as numbers ("6 of 21 attempts" as [6, 21], a cost as
 dollars, a latency as seconds), so a page can draw them without reading the
-sentences. A value a run did not print is null, never zero.
+sentences. A value a run did not print is null, never zero, and so are the
+check counts of a run that recorded none: one that stopped before its checks
+ran, or whose results GitHub no longer keeps. "schema" is 1; a change to the
+shape changes it, so a reader can refuse a file it does not know.
 
 With GITHUB_TOKEN, GITHUB_REPOSITORY and E2E_WORKFLOW set, it also fills in
 any finished run on main in the status window that history/ does not have
@@ -155,16 +158,20 @@ def main(out):
             r["checks_passed"], r["checks_passed"] + r["checks_failed"], " | ".join(cells)))
     with open(os.path.join(out, "history.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
+    def counted(r):
+        return r["checks_passed"] + r["checks_failed"] > 0 or bool(r["models"])
     series = [{"run": r["run"], "url": r["url"], "at": r["at"], "commit": r["commit"],
-               "conclusion": r["conclusion"], "checks_passed": r["checks_passed"],
-               "checks_failed": r["checks_failed"],
+               "conclusion": r["conclusion"],
+               "checks_passed": r["checks_passed"] if counted(r) else None,
+               "checks_failed": r["checks_failed"] if counted(r) else None,
                "models": {m: numbers(v) for m, v in sorted(r["models"].items())}}
               for r in reversed(runs)]
     with open(os.path.join(out, "series.json"), "w") as f:
         json.dump({"_about": "Every e2e run on main, oldest first, as numbers: [n, of] counts, "
-                             "dollars and seconds; null where a run printed nothing. Written by "
+                             "dollars and seconds; null where a run printed nothing, and null check "
+                             "counts for a run that recorded no checks. Written by "
                              "scripts/status-history.py from history/.",
-                   "runs": series}, f, indent=1, sort_keys=True)
+                   "schema": 1, "runs": series}, f, indent=1, sort_keys=True)
     print("history: %d runs, %d filled in from their artifacts" % (len(runs), added))
 
 
