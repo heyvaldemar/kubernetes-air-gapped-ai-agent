@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The boundary on AWS, phase 1 (ADR 18, proposed): `aws/` makes a VPC with private subnets only, no internet gateway and no NAT, the AWS services the cluster needs reached through endpoints (ECR, STS, EC2, EKS, and S3 through a gateway endpoint), a Route 53 Resolver DNS Firewall that answers AWS's names and the VPC's internal ones and refuses every other name with NXDOMAIN, fail-open off, and EKS whose API answers the runner's own address. `.github/workflows/aws.yml` applies it in the validation account `aws-eks-reference-platform` set up, through its creation role and GitHub's OIDC token, weekly and by hand on main, copies the probe image into the run's ECR by digest, runs `tests/e2e/aws.sh` (a pod and the node's own network try the internet by address and by name, each beside a control), destroys, looks for residue and reports the cost. `dns_firewall=false` on a dispatch shows the DNS check its violation. Static check `aws`: no way out declared, the Terraform tests against a mocked provider (nine), the run held to main with no stored secret; six plants (49 in all).
+
 ### Fixed
 
 - Verify failed on main from ced42b8 to 2d78ce4, the v1.6.0 release commit, on one shellcheck finding (SC2015, info) in the guard's static check in `scripts/validate.sh`: three greps chained with `&&` before an `||`. Its meaning was what it said, and every static check and plant passed; the shellcheck step runs first and stopped the job. It is an `if` now. v1.6.0 was released on a green e2e without its Verify run being read; the release notes say so.

@@ -41,6 +41,13 @@
 #                 key written in; and the egress node's admission policy
 #                 still refuses all three ways onto the node, exempting only
 #                 kube-system and the gateway's namespace
+#   aws           the AWS run (ADR 18): aws/ declares no internet gateway, NAT,
+#                 egress-only gateway, peering, transit attachment or route;
+#                 its Terraform tests pass against a mocked provider (no route
+#                 out, endpoints from the VPC only, a resolver that refuses
+#                 names outside AWS and fails closed, the API from the
+#                 operator's /32, every role under the boundary); and the
+#                 workflow runs on main only and reads no stored secret
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -262,6 +269,23 @@ check_policies() {
   return "$ok"
 }
 
+check_aws() {
+  local ok=0 out
+  if grep -nE 'resource "aws_(internet_gateway|egress_only_internet_gateway|nat_gateway|route|vpc_peering_connection|ec2_transit_gateway_vpc_attachment)"' aws/*.tf; then
+    echo "aws/ declares a way out of the VPC"; ok=1
+  fi
+  if grep -nE '^[[:space:]]+route[[:space:]]*\{' aws/*.tf; then echo "aws/ declares a route"; ok=1; fi
+  grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AWS_VALIDATION_ENABLED == 'true'))" .github/workflows/aws.yml \
+    || { echo "the AWS run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
+  if grep -n 'secrets\.' .github/workflows/aws.yml; then echo "the AWS run reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
+  if ! command -v terraform >/dev/null; then echo "check aws needs terraform"; return 1; fi
+  if ! out="$(cd aws && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then
+    echo "aws/'s tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "the VPC declares no way out, the resolver refuses names outside AWS and fails closed, the API answers the operator alone, and the run is main's, with no stored secret"
+  return "$ok"
+}
+
 check_gateway() {
   local ok=0 aud keys requests budgets backends
   { grep -q '^    jwtAuthentication:$' manifests/gateway/gateway.yaml && grep -q '^      mode: Strict$' manifests/gateway/gateway.yaml; } \
@@ -436,7 +460,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

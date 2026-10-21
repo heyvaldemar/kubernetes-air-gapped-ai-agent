@@ -1,3 +1,8 @@
 .cache/
 __pycache__/
 out/
+
+# Terraform for the AWS run (aws/): providers and plans stay local
+aws/.terraform/
+aws/*.tfplan
+aws/*.tfstate*
