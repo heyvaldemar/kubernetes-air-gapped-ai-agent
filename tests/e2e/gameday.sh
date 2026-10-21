@@ -7,13 +7,16 @@
 # scripts/model.sh plants makes.
 #
 #   1. the admission controller down. Kyverno verifies the model's signature
-#      and reads its AI-BOM in a webhook; the native policies (path, digest,
-#      what the bundle carried) need nothing running. With Kyverno at zero
-#      replicas: a model nobody signed, and one signed under a licence the
-#      site does not allow, are refused (both are in the bundle, so only
-#      Kyverno can refuse them); the signed model is refused too, which is
-#      the outage, not a hole; the model already served keeps answering.
-#      Then Kyverno back, and the seconds until the signed model is admitted
+#      and reads its AI-BOM in a webhook, and scaled to zero it deletes its
+#      own webhook configurations on the way down: in run 39543289132 five of
+#      seven went, and a model nobody signed was admitted. The native guard
+#      (admission/kyverno-guard.yaml) refuses every model while Kyverno's
+#      webhook for verify-models is missing. With Kyverno at zero replicas: a
+#      model nobody signed, and one signed under a licence the site does not
+#      allow, are refused (both are in the bundle, so only Kyverno or the
+#      guard can refuse them); the signed model is refused too, the outage,
+#      not a hole; the model already served keeps answering. Then Kyverno
+#      back, and the seconds until the signed model is admitted
 #   2. the gateway's proxy pod killed, with no grace period: the way a node
 #      loses it, not the way a rollout replaces it (a graceful delete keeps
 #      the old pod serving until the new one is up, and measured nothing the
@@ -138,9 +141,21 @@ step "1. the admission controller down"
 hooks_before="$(kubectl get validatingwebhookconfigurations -o name | grep -c kyverno)"
 kubectl -n kyverno scale deployment/kyverno-admission-controller --replicas=0 >/dev/null
 kubectl -n kyverno wait pod -l app.kubernetes.io/component=admission-controller --for=delete --timeout=180s >/dev/null 2>&1
-sleep 15  # what Kyverno does to its own webhooks on the way down, it has done by now
+# Kyverno deletes its webhooks only if it has seen its own Deployment at
+# zero by the time it stops, which it does not always have (run 39541542574
+# kept all seven). Wait for them to go, up to half a minute, so the case the
+# guard exists for is the one tested; say which it was either way.
+for _ in $(seq 1 15); do
+  kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg >/dev/null 2>&1 || break
+  sleep 2
+done
 hooks_after="$(kubectl get validatingwebhookconfigurations -o name | grep -c kyverno)"
 measure "Kyverno's validating webhook configurations: $hooks_before before its admission controller stopped, $hooks_after after"
+if kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg >/dev/null 2>&1; then
+  measure "its webhook for verify-models stayed: the API server refuses by failing to call it"
+else
+  measure "its webhook for verify-models went with it: only the native guard is left to refuse"
+fi
 refused "$unsigned" "with Kyverno down, a model nobody signed is refused"
 refused "$unlicensed" "with Kyverno down, a model signed under a licence the site does not allow is refused"
 if admitted "$served"; then fail "with Kyverno down, the signed model was admitted: nothing checked its signature, so the refusals above are luck"

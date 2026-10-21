@@ -60,7 +60,22 @@ case "${1:-}" in
       [ "$(kubectl get imagevalidatingpolicy verify-models -o jsonpath='{.status.conditionStatus.ready}' 2>/dev/null)" = true ] && break
       sleep 2
     done
-    say "carried-images ($(wc -w <"$STATE/carried-digests.txt" | tr -d ' ') digests), model-volumes and verify-models applied, the last with the operator's key"
+    # The guard that refuses every model while Kyverno is away
+    # (admission/kyverno-guard.yaml) reads Kyverno's webhook for
+    # verify-models, so it goes on once that webhook is there. If it never
+    # appears under that name, the guard would refuse every model for good:
+    # stop here and say so.
+    hook=ivpol.validate.kyverno.svc-fail-finegrained-verify-models
+    for _ in $(seq 1 60); do
+      kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg -o jsonpath='{.webhooks[*].name}' 2>/dev/null \
+        | tr ' ' '\n' | grep -qx "$hook" && break
+      sleep 2
+    done
+    kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg -o jsonpath='{.webhooks[*].name}' 2>/dev/null \
+      | tr ' ' '\n' | grep -qx "$hook" \
+      || { echo "Kyverno never registered $hook in kyverno-resource-validating-webhook-cfg; the guard would refuse every model" >&2; exit 1; }
+    kubectl apply -f "$ROOT/admission/kyverno-guard.yaml" >/dev/null
+    say "carried-images ($(wc -w <"$STATE/carried-digests.txt" | tr -d ' ') digests), model-volumes and verify-models applied, the last with the operator's key; models-need-kyverno on $hook"
     ;;
   *) echo "usage: admission.sh <fetch|install|policy>" >&2; exit 2 ;;
 esac

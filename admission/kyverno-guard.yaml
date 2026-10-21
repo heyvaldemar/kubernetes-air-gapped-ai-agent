@@ -1,0 +1,52 @@
+# No model is mounted unless Kyverno is there to check it. Kyverno verifies
+# the model's signature and reads its AI-BOM in a webhook, and when its
+# Deployment is scaled to zero or deleted it removes its own webhook
+# configurations on the way down (pkg/webhooks/server.go, cleanup, when
+# runtime.IsGoingDown(); Kyverno 1.19.1). From then on the API server asks
+# nobody, and a model nobody signed is admitted: the game day saw it in run
+# 39543289132 (tests/e2e/gameday.sh).
+#
+# This policy is the API server's own and needs nothing running. Its
+# parameter is Kyverno's resource webhook configuration, and a pod that
+# mounts an image in a verified namespace is admitted only while that
+# configuration exists and still holds the webhook for verify-models, failing
+# closed. Kyverno gone, its configuration gone, the webhook dropped or turned
+# to Ignore: refused, here, before Kyverno would have been asked. Kyverno
+# back, it writes the configuration again and models are admitted again.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: models-need-kyverno
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: admissionregistration.k8s.io/v1
+    kind: ValidatingWebhookConfiguration
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        boundary.heyvaldemar.com/models: verified
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: mounts-an-image
+      expression: object.spec.?volumes.orValue([]).exists(v, has(v.image))
+  validations:
+    - expression: >-
+        params.webhooks.exists(w, w.name == 'ivpol.validate.kyverno.svc-fail-finegrained-verify-models' &&
+          w.failurePolicy == 'Fail')
+      message: no model is mounted while Kyverno is not there to verify it (its webhook for verify-models is missing)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: models-need-kyverno
+spec:
+  policyName: models-need-kyverno
+  validationActions: [Deny]
+  paramRef:
+    name: kyverno-resource-validating-webhook-cfg
+    parameterNotFoundAction: Deny

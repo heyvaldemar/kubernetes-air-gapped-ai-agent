@@ -244,9 +244,15 @@ check_policies() {
   # Fail closed: with Kyverno down its webhooks stay, and the API server
   # refuses what it cannot ask about (tests/e2e/gameday.sh). Ignore would
   # admit every model unchecked for as long as Kyverno is away.
-  for f in admission/verify-models.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml; do
+  for f in admission/verify-models.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml admission/kyverno-guard.yaml; do
     grep -qE '^  failurePolicy: Fail$' "$f" || { echo "$f does not fail closed (failurePolicy: Fail)"; ok=1; }
   done
+  # And when Kyverno takes its webhooks away as it stops, the API server's
+  # own guard refuses every model until they are back.
+  grep -qF "w.name == 'ivpol.validate.kyverno.svc-fail-finegrained-verify-models' &&" admission/kyverno-guard.yaml \
+    && grep -qE '^    name: kyverno-resource-validating-webhook-cfg$' admission/kyverno-guard.yaml \
+    && grep -qE '^    parameterNotFoundAction: Deny$' admission/kyverno-guard.yaml \
+    || { echo "kyverno-guard.yaml does not refuse models while Kyverno's webhook for verify-models is missing"; ok=1; }
   grep -q "variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))" admission/carried-images.yaml \
     || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
   grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
