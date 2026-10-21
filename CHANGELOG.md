@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_(no unreleased changes yet)_
+
+## [1.6.0] - 2026-10-21
+
 ### Added
 
 - A game day, daily, in the gateway job (`tests/e2e/gameday.sh`): parts of the boundary taken down while Granite is served, to show which way each fails. It found a hole on its second run (39543289132): Kyverno, scaled to zero, deletes its own webhook configurations on the way down (`pkg/webhooks/server.go`, when `runtime.IsGoingDown()`, Kyverno 1.19.1), five of seven went, and the API server admitted a model nobody signed and one under a licence the site does not allow. Its first run (39541542574) had kept all seven, by timing. The fix is ADR 17: `admission/kyverno-guard.yaml`, a ValidatingAdmissionPolicy whose parameter is Kyverno's own webhook configuration, refuses every model while the webhook for `verify-models` is missing, `parameterNotFoundAction: Deny`; `scripts/admission.sh` installs it once Kyverno has registered that webhook. With Kyverno at zero the game day now waits for the webhooks to go, then requires both plants and the signed model refused, the model already served answering, and the seconds until the signed model is admitted after Kyverno is back. In run 39546414520, with the guard: seven configurations down to two, all three refused by the guard, the signed model admitted again 31 seconds after Kyverno was back, and the key rotation drill unchanged. The gateway's pod killed with no grace period: the model server stays unreachable around it, and the run counts the failed requests and the seconds until the gateway answers (a graceful delete, tried first, kept the old pod serving and measured nothing). Static check `policies` holds every admission policy to `failurePolicy: Fail` and the guard to its parameter, two plants (43 in all). The threat model gains the row it pointed to and never had.
@@ -157,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.2.0...v1.3.0
