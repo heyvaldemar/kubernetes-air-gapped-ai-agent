@@ -1,0 +1,19 @@
+# model weights signed by the operator, whose AI-BOM lists Apache-2.0 beside CC-BY-NC-4.0
+# expect: every model in the AI-BOM declares only licences the site allows
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-licence-mixed
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@MIXED@", pullPolicy: IfNotPresent}

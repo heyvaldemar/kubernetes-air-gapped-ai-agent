@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/release-numbers.py` reads a frontier run's artifacts and prices a model outside by its tokens.
 - `scripts/tools.sh` makes the models' namespace from the model server's manifest when no model server has, and `scripts/gateway.sh install` with `SERVED` set and empty serves no model inside.
 
+### Fixed
+
+- The model's licence is held for every model in its AI-BOM and every licence entry on each, not any one of them (ADR 9, amended). The rule admitted a BOM if any machine-learning component had any entry on the site's list: Apache-2.0 beside CC-BY-NC-4.0 passed, and so did a second model with no licence. An SPDX expression was refused only because evaluating it raised an error. Pointed out in a reader's reply: OR and AND carry different obligations. Now:
+  - `admission/verify-models.yaml` needs at least one model, and every model needs at least one entry, each an SPDX id on the list; an SPDX expression, and a component nested where the rule does not look, are refused on purpose, with their own message;
+  - `scripts/mlbom.py` evaluates an SPDX expression from the lock line and writes the first reading the site's list allows as ids marked `concluded`, keeping the declared expression as the property `license-declared`, or writes no BOM when no reading is allowed. A lock line's licence may now hold spaces; `scripts/model.sh`, `scripts/serve.sh` and static check `mlbom` read the digest as the last field. The six models' AI-BOMs are byte for byte what they were;
+  - e2e check 9 has four new plants: `model-licence-mixed`, `model-licence-second` and `model-licence-expression`, refused, and `model-licence-concluded` (declared `Apache-2.0 OR CC-BY-NC-4.0`), admitted;
+  - static check `mlbom` holds nine expressions to their conclusions, and holds a concluded BOM to the CycloneDX 1.6 schema; four new static plants (41 in all).
+
+  Before the change, the old rule's own CEL, run in cel-go v0.30.0 (what Kyverno 1.19.1 builds with) against 13 bills, admitted four that it should refuse: an allowed licence beside one that is not, a second model with no licence, and a model nested in a component or in the metadata; it refused the expression with "no such key: license". The new rule gives all 13 the answer they should have.
+
 ## [1.5.0] - 2026-10-20
 
 ### Security

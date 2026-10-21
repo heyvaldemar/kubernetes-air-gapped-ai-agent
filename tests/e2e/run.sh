@@ -25,9 +25,11 @@
 #   9. admission refuses a pod that mounts model weights nobody signed, or
 #      signed by a key the cluster does not trust, or named by tag, or from
 #      anywhere but the models path inside, or with no AI-BOM, or with an
-#      AI-BOM whose licence the site does not allow; and admits the signed
-#      model with its AI-BOM. It also refuses a pod whose image the bundle
-#      did not carry, by a digest of its own or by tag
+#      AI-BOM that lists any licence the site does not allow, a model with
+#      none, or an SPDX expression; and admits the signed model with its
+#      AI-BOM, and one whose expression was concluded to an allowed id. It
+#      also refuses a pod whose image the bundle did not carry, by a digest
+#      of its own or by tag
 #  11. nothing that runs came from anywhere else: every pod outside the node
 #      image's own namespaces runs images whose digests the bundle carried
 #  10. everything inside came in one signed file: the registry inside held
@@ -191,7 +193,11 @@ for plant in "$ROOT"/tests/e2e/plants/*.yaml; do
              -e "s#@UNSIGNED@#$REG/models/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")#g" \
              -e "s#@STRANGER@#$REG/models/plant-stranger@$(cat "$STATE/plant-stranger.digest")#g" \
              -e "s#@UNLICENSED@#$REG/models/plant-unlicensed@$(cat "$STATE/plant-unlicensed.digest")#g" \
-             -e "s#@NOBOM@#$REG/models/plant-nobom@$(cat "$STATE/plant-nobom.digest")#g" "$plant" \
+             -e "s#@NOBOM@#$REG/models/plant-nobom@$(cat "$STATE/plant-nobom.digest")#g" \
+             -e "s#@MIXED@#$REG/models/plant-mixed@$(cat "$STATE/plant-mixed.digest")#g" \
+             -e "s#@SECOND@#$REG/models/plant-second@$(cat "$STATE/plant-second.digest")#g" \
+             -e "s#@EXPRESSION@#$REG/models/plant-expression@$(cat "$STATE/plant-expression.digest")#g" \
+             -e "s#@CONCLUDED@#$REG/models/plant-concluded@$(cat "$STATE/plant-concluded.digest")#g" "$plant" \
          | kubectl apply --dry-run=server -f - 2>&1)"; rc=$?
   if [ "$expect" = admitted ]; then
     if [ $rc -eq 0 ]; then pass "$name: admitted"; else fail "$name was refused: $(head -c 300 <<<"$out")"; fi

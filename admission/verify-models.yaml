@@ -73,8 +73,27 @@ spec:
     - expression: >-
         images.volumes.map(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator])).all(n, n > 0)
       message: model weights carry an AI-BOM signed with the operator's key
+    # The licence. An SPDX expression is not read here: "A OR B" offers a
+    # choice and "A AND B" adds an obligation, and a rule that looked for an
+    # allowed id inside one would admit "Apache-2.0 AND CC-BY-NC-4.0".
+    # scripts/mlbom.py evaluates the expression where the BOM is made and
+    # writes the licences it concluded as ids, so an expression here is
+    # refused on purpose, and so is a component nested where the next rule
+    # would not look.
     - expression: >-
         images.volumes.all(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator]) > 0 &&
-          extractPayload(i, attestations.mlbom).predicate.components.exists(c, c.type == 'machine-learning-model' &&
-            c.licenses.exists(l, l.license.id in ['Apache-2.0', 'MIT'])))
-      message: the model's AI-BOM declares a licence the site allows (Apache-2.0, MIT)
+          extractPayload(i, attestations.mlbom).predicate.?metadata.?component.?components.orValue([]).size() == 0 &&
+          extractPayload(i, attestations.mlbom).predicate.?components.orValue([]).all(c, !has(c.components) &&
+            c.?licenses.orValue([]).all(l, !has(l.expression))))
+      message: the model's AI-BOM names each licence by its SPDX id, with no expression and no nested component (scripts/mlbom.py concludes an expression to ids)
+    # Every model in the BOM, and at least one; every licence entry on each,
+    # and at least one. CycloneDX does not say whether two entries mean both
+    # apply or either may be chosen, and "every entry allowed" is the one
+    # reading safe under both.
+    - expression: >-
+        images.volumes.all(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator]) > 0 &&
+          extractPayload(i, attestations.mlbom).predicate.?components.orValue([]).exists(c, c.type == 'machine-learning-model') &&
+          extractPayload(i, attestations.mlbom).predicate.components.all(c, c.type != 'machine-learning-model' ||
+            (c.?licenses.orValue([]).size() > 0 &&
+             c.licenses.all(l, has(l.license) && has(l.license.id) && l.license.id in ['Apache-2.0', 'MIT']))))
+      message: every model in the AI-BOM declares only licences the site allows (Apache-2.0, MIT)

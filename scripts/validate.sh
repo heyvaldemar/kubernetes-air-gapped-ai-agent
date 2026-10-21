@@ -22,7 +22,8 @@
 #                 they come from
 #   policies      the signature policy extracts image volumes and verifies
 #                 them, and the native policy holds them to the models path,
-#                 by digest
+#                 by digest; every licence of every model in the AI-BOM must
+#                 be on the list, and an SPDX expression is refused
 #   gateway       every caller of the model gateway needs a token for its
 #                 audience, the evals Job holds one, and every quota is keyed
 #                 on the token's subject, never on a header the caller writes;
@@ -44,7 +45,9 @@
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
 #                 ci-images.pins; needs Docker), with every bom-ref unique and
-#                 every dependency naming one that exists
+#                 every dependency naming one that exists; and an SPDX
+#                 expression is concluded to the ids the site allows, or
+#                 refused, as nine cases say it must be
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -232,13 +235,17 @@ check_policies() {
     || { echo "model-volumes.yaml does not hold image volumes to the models path, by digest"; ok=1; }
   grep -q "verifyAttestationSignatures(i, attestations.mlbom, \[attestors.operator\])" admission/verify-models.yaml \
     || { echo "verify-models.yaml does not verify the model's AI-BOM"; ok=1; }
-  grep -q "c.licenses.exists(l, l.license.id in \['Apache-2.0', 'MIT'\])" admission/verify-models.yaml \
-    || { echo "verify-models.yaml does not hold the model's licence to the allowlist"; ok=1; }
+  grep -qF "c.licenses.all(l, has(l.license) && has(l.license.id) && l.license.id in ['Apache-2.0', 'MIT'])" admission/verify-models.yaml \
+    || { echo "verify-models.yaml does not hold every licence entry to the allowlist"; ok=1; }
+  grep -qF "predicate.components.all(c, c.type != 'machine-learning-model' ||" admission/verify-models.yaml \
+    || { echo "verify-models.yaml does not hold every model in the AI-BOM to it"; ok=1; }
+  grep -qF "c.?licenses.orValue([]).all(l, !has(l.expression))" admission/verify-models.yaml \
+    || { echo "verify-models.yaml reads past an SPDX expression instead of refusing it"; ok=1; }
   grep -q "variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))" admission/carried-images.yaml \
     || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
   grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
     || { echo "carried-images.yaml admits everything when its list of digests is missing"; ok=1; }
-  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, read its AI-BOM's licence, and hold every pod to what the bundle carried"
+  [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, hold every licence of every model in its AI-BOM to the list, and hold every pod to what the bundle carried"
   return "$ok"
 }
 
@@ -338,10 +345,11 @@ PY
 }
 
 check_mlbom() {
-  local img ok=0 n=0 name url sha lic
+  local img ok=0 n=0 name url sha lic rest
   img="$(sed -n 's/^CYCLONEDX_IMAGE=//p' ci-images.pins)"
   mkdir -p out/mlbom
-  while read -r name url sha lic _; do
+  while read -r name url sha rest; do
+    lic="${rest% *}"  # an SPDX expression may hold spaces; the digest is last
     n=$((n + 1))
     python3 scripts/mlbom.py "$name" "$url" "$sha" "$lic" >"out/mlbom/$name.json" || { echo "$name: no AI-BOM could be written"; ok=1; continue; }
     docker run --rm -v "$PWD/out/mlbom:/b:ro" "$img" validate --input-file "/b/$name.json" \
@@ -369,7 +377,48 @@ if dupes or missing:
     sys.exit("duplicate bom-refs %s, dependencies on unknown refs %s" % (dupes, missing))
 PY
   done < <(grep -vE '^\s*(#|$)' models/models.lock)
-  [ "$ok" = 0 ] && echo "every model's AI-BOM is valid CycloneDX 1.6 ($n models)"
+  # An SPDX expression is concluded where the BOM is made: to the first
+  # reading the site's list allows, in the order written, or to no BOM at
+  # all. One concluded BOM is held to the schema too.
+  python3 - <<'PY' || ok=1
+import json, subprocess, sys
+url = "https://huggingface.co/plant/x/resolve/0000000000000000000000000000000000000000/model.gguf"
+sha = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+cases = [
+    ("Apache-2.0 OR CC-BY-NC-4.0", ["Apache-2.0"]),
+    ("CC-BY-NC-4.0 OR MIT", ["MIT"]),
+    ("Apache-2.0 AND MIT", ["Apache-2.0", "MIT"]),
+    ("(GPL-3.0-only OR MIT) AND Apache-2.0", ["MIT", "Apache-2.0"]),
+    ("GPL-2.0-only WITH Classpath-exception-2.0 OR MIT", ["MIT"]),
+    ("Apache-2.0 AND CC-BY-NC-4.0", None),
+    ("CC-BY-NC-4.0 OR GPL-3.0-only", None),
+    ("Apache-2.0 WITH LLVM-exception", None),
+    ("Apache-2.0 or MIT", None),
+]
+bad = []
+for expr, want in cases:
+    r = subprocess.run([sys.executable, "scripts/mlbom.py", "x", url, sha, expr], capture_output=True, text=True)
+    if want is None:
+        if r.returncode == 0:
+            bad.append("%r was written; it should have been refused" % expr)
+        continue
+    if r.returncode != 0:
+        bad.append("%r was refused: %s" % (expr, r.stderr.strip()))
+        continue
+    c = json.loads(r.stdout)["components"][0]
+    got = [e["license"]["id"] for e in c["licenses"] if e["license"].get("acknowledgement") == "concluded"]
+    kept = [p["value"] for p in c["properties"] if p["name"] == "license-declared"]
+    if got != want or kept != [expr]:
+        bad.append("%r concluded to %s, declared %s; expected %s" % (expr, got, kept, want))
+    else:
+        open("out/mlbom/concluded.json", "w").write(r.stdout)
+print("\n".join("mlbom.py: " + b for b in bad))
+sys.exit(1 if bad else 0)
+PY
+  docker run --rm -v "$PWD/out/mlbom:/b:ro" "$img" validate --input-file /b/concluded.json \
+      --input-format json --input-version v1_6 --fail-on-errors >/dev/null 2>&1 \
+    || { echo "an AI-BOM with a concluded licence is not valid CycloneDX 1.6"; ok=1; }
+  [ "$ok" = 0 ] && echo "every model's AI-BOM is valid CycloneDX 1.6 ($n models), and nine SPDX expressions conclude, or are refused, as they should"
   return "$ok"
 }
 

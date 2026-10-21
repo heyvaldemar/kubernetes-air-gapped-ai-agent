@@ -12,9 +12,11 @@
 #           pair per run; in a real install the key is the operator's. cosign
 #           3 refuses --tlog-upload=false under its default signing config,
 #           so the key path turns that config off
-#   plants  two small images the admission policy must refuse when a pod
+#   plants  small images the admission policy must refuse when a pod
 #           mounts them: one nobody signed, one signed by a key the cluster
-#           does not trust
+#           does not trust, and signed ones whose AI-BOM is missing or
+#           declares what the site does not allow; and the controls it must
+#           admit (the rotation drill's two, a concluded licence)
 #
 # Runs before the boundary closes: build fetches the model from upstream.
 set -euo pipefail
@@ -27,8 +29,10 @@ CA="$STATE/ca.crt"
 BUILDKIT=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
 say() { printf '== %s\n' "$*"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-# MODEL picks a line of models/models.lock; the first is the default.
-read -r MODEL URL SHA _license PINNED < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
+# MODEL picks a line of models/models.lock; the first is the default. The
+# licence may be an SPDX expression, spaces and all; the digest is last.
+read -r MODEL URL SHA _rest < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
+PINNED="${_rest##* }" _license="${_rest% *}"
 
 # cosign and oras read the registry's CA from the bundle they are given.
 bundle() {
@@ -113,7 +117,7 @@ case "${1:-}" in
     ;;
   plants)
     bundle; builder
-    for name in unsigned stranger unlicensed nobom retired next; do
+    for name in unsigned stranger unlicensed nobom mixed second expression concluded retired next; do
       dir="$STATE/plant-$name"; mkdir -p "$dir"
       printf 'not a model: %s\n' "$name" >"$dir/model.gguf"
       cp "$ROOT/models/Dockerfile" "$dir/Dockerfile"
@@ -131,6 +135,25 @@ case "${1:-}" in
     python3 "$ROOT/scripts/mlbom.py" plant-unlicensed "https://huggingface.co/plant/unlicensed/resolve/0000000000000000000000000000000000000000/model.gguf" \
       "$(sha256 "$STATE/plant-unlicensed/model.gguf")" GPL-3.0-only >"$STATE/plant-unlicensed.mlbom.json"
     attest "$REG/models/plant-unlicensed@$(cat "$STATE/plant-unlicensed.digest")" "$STATE/plant-unlicensed.mlbom.json"
+    # What a rule that admits on any one matching licence would let through
+    # (ADR 9, amended): an allowed licence beside one that is not, a second
+    # model with no licence beside a licensed one, and an SPDX expression,
+    # which admission never reads. These BOMs are not ones scripts/mlbom.py
+    # would write; they stand for a BOM from anywhere else the operator's key
+    # signs. The control: a licence declared as "Apache-2.0 OR CC-BY-NC-4.0",
+    # concluded by scripts/mlbom.py to Apache-2.0, is admitted.
+    for pair in 'mixed:.components[0].licenses += [{"license": {"id": "CC-BY-NC-4.0"}}]' \
+                'second:.components += [{"type": "machine-learning-model", "bom-ref": "second", "name": "plant-second-adapter"}]' \
+                'expression:.components[0].licenses = [{"expression": "Apache-2.0 AND MIT"}]' \
+                'concluded:.'; do
+      name="${pair%%:*}" edit="${pair#*:}" lic=Apache-2.0
+      [ "$name" = concluded ] && lic="Apache-2.0 OR CC-BY-NC-4.0"
+      ref="$REG/models/plant-$name@$(cat "$STATE/plant-$name.digest")"
+      signed operator "$ref"
+      python3 "$ROOT/scripts/mlbom.py" "plant-$name" "https://huggingface.co/plant/$name/resolve/0000000000000000000000000000000000000000/model.gguf" \
+        "$(sha256 "$STATE/plant-$name/model.gguf")" "$lic" | jq "$edit" >"$STATE/plant-$name.mlbom.json"
+      attest "$ref" "$STATE/plant-$name.mlbom.json"
+    done
     # For the key rotation drill (tests/e2e/rotation.sh): a model signed and
     # attested with the operator's key alone, and one with the next key alone,
     # each with an AI-BOM the site allows.
@@ -142,7 +165,7 @@ case "${1:-}" in
         "$(sha256 "$STATE/plant-$name/model.gguf")" Apache-2.0 >"$STATE/plant-$name.mlbom.json"
       attest "$ref" "$STATE/plant-$name.mlbom.json" "$key"
     done
-    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust), models/plant-unlicensed (signed, AI-BOM says GPL-3.0-only), models/plant-nobom (signed, no AI-BOM), models/plant-retired and models/plant-next (signed and attested with the operator's key alone, and with the next key alone)"
+    say "plants: models/plant-unsigned (no signature), models/plant-stranger (signed by a key the cluster does not trust), models/plant-unlicensed (signed, AI-BOM says GPL-3.0-only), models/plant-nobom (signed, no AI-BOM), models/plant-mixed, plant-second and plant-expression (signed, AI-BOMs a rule reading any one licence would admit), models/plant-concluded (signed, "Apache-2.0 OR CC-BY-NC-4.0" concluded to Apache-2.0), models/plant-retired and models/plant-next (signed and attested with the operator's key alone, and with the next key alone)"
     ;;
   *) echo "usage: model.sh <build|sign|plants>" >&2; exit 2 ;;
 esac

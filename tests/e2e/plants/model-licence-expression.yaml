@@ -1,0 +1,19 @@
+# model weights signed by the operator, whose AI-BOM gives its licence as an SPDX expression, Apache-2.0 AND MIT
+# expect: names each licence by its SPDX id, with no expression
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-licence-expression
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@EXPRESSION@", pullPolicy: IfNotPresent}

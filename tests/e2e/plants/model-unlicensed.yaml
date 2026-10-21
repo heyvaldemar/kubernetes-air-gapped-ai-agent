@@ -1,5 +1,5 @@
 # model weights signed by the operator, whose AI-BOM declares a licence the site does not allow
-# expect: the model's AI-BOM declares a licence the site allows
+# expect: every model in the AI-BOM declares only licences the site allows
 apiVersion: v1
 kind: Pod
 metadata:

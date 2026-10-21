@@ -1,0 +1,19 @@
+# the control: model weights signed by the operator, declared Apache-2.0 OR CC-BY-NC-4.0 and concluded to Apache-2.0
+# expect: admitted
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-licence-concluded
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: model, mountPath: /models, readOnly: true}]
+  volumes:
+    - name: model
+      image: {reference: "@CONCLUDED@", pullPolicy: IfNotPresent}
