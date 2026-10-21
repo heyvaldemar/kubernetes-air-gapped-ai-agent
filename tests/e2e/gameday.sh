@@ -130,7 +130,9 @@ except Exception:
 }
 # watch_calls <seconds>: from the client, one short request through the
 # gateway every 0.75 s for that long, inside the agent's quota of 100 a
-# minute; prints "<sent> <answered> <not answered> <longest gap, s> <codes>".
+# minute, each allowed two minutes the way the agent allows ten: a request
+# queued behind a long answer is a wait, and shows in the longest gap, not a
+# failure. Prints "<sent> <answered> <not answered> <longest gap, s> <codes>".
 watch_calls() {
   kubectl -n agents create token support-agent --audience "$AUDIENCE" --duration 10m \
     | kubectl -n agents exec -i gameday-client -- python3 -c '
@@ -146,7 +148,7 @@ while time.monotonic() - start < secs:
     req = urllib.request.Request(url + "/v1/chat/completions", data=body, method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             code = r.status
     except urllib.error.HTTPError as e:
         code = e.code

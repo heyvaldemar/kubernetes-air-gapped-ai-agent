@@ -25,6 +25,14 @@ spec:
       labels: {app: llama, server: @NAME@}
     spec:
       automountServiceAccountToken: false
+      # LONG ENOUGH TO FINISH AN ANSWER. On a rollout the old pod is told to
+      # stop as soon as the new one is ready, and llama-server keeps writing
+      # the answer it is on; the default 30 seconds then killed one 37.7
+      # seconds in, HTTP 503 to the agent, with a request queued behind it
+      # lost too (game day, run 39550842207). The longest answer is 400
+      # tokens (evals/harness.py MAX_TOKENS) at the slowest rate measured
+      # here, about 8 a second on two threads: under a minute. Twice that.
+      terminationGracePeriodSeconds: 120
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
