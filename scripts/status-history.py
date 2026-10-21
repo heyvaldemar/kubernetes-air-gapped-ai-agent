@@ -10,6 +10,11 @@ DIR/status.json, then rewrites DIR/history.md, a table of all of them, newest
 first. A run already in history/ is written again from the same record, so
 running this twice changes nothing.
 
+It also writes DIR/series.json: the same runs, oldest first, with the
+numbers a chart needs as numbers ("6 of 21 attempts" as [6, 21], a cost as
+dollars, a latency as seconds), so a page can draw them without reading the
+sentences. A value a run did not print is null, never zero.
+
 With GITHUB_TOKEN, GITHUB_REPOSITORY and E2E_WORKFLOW set, it also fills in
 any finished run on main in the status window that history/ does not have
 yet, from that run's own artifacts while GitHub still keeps them (the
@@ -88,6 +93,36 @@ def cell(value, name):
     return value.split(" attempts")[0]
 
 
+def numbers(m):
+    """The numbers in one model's lines, for series.json."""
+    import re
+
+    def of(name):
+        x = re.search(r"(\d+) of (\d+)", m.get(name) or "")
+        return [int(x.group(1)), int(x.group(2))] if x else None
+
+    def num(name, pattern):
+        x = re.search(pattern, m.get(name) or "")
+        return float(x.group(1)) if x else None
+
+    outside = m.get("emails the model tried to send outside acme.example") or ""
+    tried = re.match(r"(\d+)", outside)
+    delivered = re.search(r"delivered: (\d+)", outside)
+    return {
+        "acted_on": of("injected instructions the model acted on"),
+        "tasks": of("task success"),
+        "declined": of("requests beyond the agent's rights it declined"),
+        "grounded": of("answers without invented data"),
+        "for_a_person": of("acting for a person, tasks handled within that person's rights"),
+        "outside_tried": int(tried.group(1)) if tried else None,
+        "outside_delivered": int(delivered.group(1)) if delivered else None,
+        "cost_usd": num("cost per task", r"\$([0-9.]+)"),
+        "p50_s": num("latency per task", r"p50 ([0-9.]+) s"),
+        "p95_s": num("latency per task", r"p95 ([0-9.]+) s"),
+        "tokens": num("tokens per task", r"about ([0-9.]+)"),
+    }
+
+
 def main(out):
     hist = os.path.join(out, "history")
     os.makedirs(hist, exist_ok=True)
@@ -120,6 +155,16 @@ def main(out):
             r["checks_passed"], r["checks_passed"] + r["checks_failed"], " | ".join(cells)))
     with open(os.path.join(out, "history.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
+    series = [{"run": r["run"], "url": r["url"], "at": r["at"], "commit": r["commit"],
+               "conclusion": r["conclusion"], "checks_passed": r["checks_passed"],
+               "checks_failed": r["checks_failed"],
+               "models": {m: numbers(v) for m, v in sorted(r["models"].items())}}
+              for r in reversed(runs)]
+    with open(os.path.join(out, "series.json"), "w") as f:
+        json.dump({"_about": "Every e2e run on main, oldest first, as numbers: [n, of] counts, "
+                             "dollars and seconds; null where a run printed nothing. Written by "
+                             "scripts/status-history.py from history/.",
+                   "runs": series}, f, indent=1, sort_keys=True)
     print("history: %d runs, %d filled in from their artifacts" % (len(runs), added))
 
 
