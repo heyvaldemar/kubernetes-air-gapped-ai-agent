@@ -28,7 +28,10 @@
 #   3. the model server rolled to a new pod and rolled back, the way an
 #      upgrade and its undo go, with a request through the gateway every
 #      three quarters of a second the whole time: how many were not
-#      answered, and the longest wait between two answers
+#      answered, and the longest wait between two answers. And one long
+#      answer, a few hundred tokens, started just before the rollout and
+#      still being written when the old pod is told to stop: an agent in the
+#      middle of a task when the upgrade lands
 #
 # Each refusal sits beside a control that must succeed: the served model
 # answering, and admission and the gateway coming back. Appends its checks to
@@ -160,15 +163,44 @@ print(sent, codes[200], sent - codes[200], round(gap, 1), ",".join("%s:%d" % kv 
 ' "$GW" "$MODEL_NAME" "$1" 2>/dev/null || echo "0 0 0 0 exec-failed"
 }
 
+# long_call: one request for a long answer through the gateway; prints
+# "<status> <seconds> <completion tokens>".
+long_call() {
+  kubectl -n agents create token support-agent --audience "$AUDIENCE" --duration 10m \
+    | kubectl -n agents exec -i gameday-client -- python3 -c '
+import json, sys, time, urllib.error, urllib.request
+url, model = sys.argv[1:3]
+tok = sys.stdin.read().strip()
+body = json.dumps({"model": model, "max_tokens": 300, "temperature": 0,
+                   "messages": [{"role": "user", "content": "Write three paragraphs about how a support team should hand a case over between shifts."}]}).encode()
+req = urllib.request.Request(url + "/v1/chat/completions", data=body, method="POST",
+                             headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
+t = time.monotonic()
+try:
+    with urllib.request.urlopen(req, timeout=300) as r:
+        out = json.loads(r.read())
+        print(r.status, round(time.monotonic() - t, 1), (out.get("usage") or {}).get("completion_tokens", 0))
+except urllib.error.HTTPError as e:
+    print(e.code, round(time.monotonic() - t, 1), 0)
+except Exception as e:
+    print(0, round(time.monotonic() - t, 1), type(e).__name__)
+' "$GW" "$MODEL_NAME" 2>/dev/null || echo "0 0 exec-failed"
+}
+
 # roll <what> <kubectl rollout ...>: that rollout of the served model, under
-# watch_calls, judged on the requests nobody answered.
+# watch_calls and with one long answer in flight, judged on the requests
+# nobody answered and on whether the long answer was finished.
 roll() {
   local what="$1" out sent answered missed gap codes
   shift
   out="$(mktemp)"
+  local long; long="$(mktemp)"
   watch_calls 120 >"$out" &
   local watcher=$!
   sleep 5
+  long_call >"$long" &
+  local longer=$!
+  sleep 2
   kubectl -n inference "$@" "deployment/$SERVED" >/dev/null
   local t0=$SECONDS
   if kubectl -n inference rollout status "deployment/$SERVED" --timeout=110s >/dev/null 2>&1; then
@@ -177,6 +209,14 @@ roll() {
     fail "$what: the rollout did not finish within 110s"
   fi
   wait "$watcher"
+  wait "$longer"
+  local lcode lsecs ltokens
+  read -r lcode lsecs ltokens <"$long"; rm -f "$long"
+  if [ "$lcode" = 200 ] && [ "${ltokens:-0}" -gt 0 ] 2>/dev/null; then
+    pass "$what: the long answer in flight when it started was finished ($ltokens tokens in ${lsecs}s)"
+  else
+    fail "$what: the long answer in flight when it started was cut off (HTTP $lcode after ${lsecs}s, $ltokens)"
+  fi
   read -r sent answered missed gap codes <"$out"; rm -f "$out"
   if [ "${sent:-0}" -gt 0 ] && [ "$missed" = 0 ]; then
     pass "$what under traffic: $answered of $sent requests answered, the longest wait between two answers ${gap}s"
