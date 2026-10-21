@@ -65,14 +65,19 @@ case "${1:-}" in
               --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v '^$' || true)"
     roles="$(aws iam list-roles --query "Roles[?starts_with(RoleName, '$CLUSTER')].RoleName" --output text | tr '\t' '\n' | grep -v '^$' || true)"
     cluster="$(aws eks describe-cluster --name "$CLUSTER" --query cluster.status --output text 2>/dev/null || true)"
-    # The tagging API keeps a deleted resource's tags for a while; a VPC or an
-    # endpoint it lists is asked about directly before it counts.
+    # The tagging API keeps a deleted resource's tags for a while; a VPC, an
+    # endpoint or a security group it lists is asked about directly before it
+    # counts.
     really=""
     while read -r arn; do
       [ -n "$arn" ] || continue
       case "$arn" in
         *:vpc/*) aws ec2 describe-vpcs --vpc-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
         *:vpc-endpoint/*) [ "$(aws ec2 describe-vpc-endpoints --vpc-endpoint-ids "${arn##*/}" --query 'VpcEndpoints[0].State' --output text 2>/dev/null)" = available ] && really="$really $arn" ;;
+        # Run 39624648738 listed a security group and its rule that no longer
+        # existed: the tagging API had not caught up with the delete.
+        *:security-group/*) aws ec2 describe-security-groups --group-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
         *) really="$really $arn" ;;
       esac
     done <<<"$left"

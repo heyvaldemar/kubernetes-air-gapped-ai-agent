@@ -59,6 +59,7 @@ resource "aws_eks_node_group" "this" {
   }
 
   depends_on = [
+    aws_eks_addon.before_nodes,
     aws_iam_role_policy_attachment.node,
     aws_vpc_endpoint.interface,
     aws_vpc_endpoint.s3,

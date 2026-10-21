@@ -74,15 +74,24 @@ resource "aws_eks_access_policy_association" "operator" {
   }
 }
 
-# The networking add-ons EKS manages: their images come from AWS's own
-# registries in the region, through the ECR endpoints.
-resource "aws_eks_addon" "this" {
-  for_each                    = toset(["vpc-cni", "kube-proxy", "coredns"])
+# The add-ons EKS manages: their images come from AWS's own registries in the
+# region, through the ECR endpoints. The network plugin and kube-proxy go on
+# before the node, which is never Ready without them: the first run on AWS
+# made all three wait for the node, and EKS gave up on it as unhealthy
+# (run 39624648738). CoreDNS goes on after, since it needs a node to run on.
+resource "aws_eks_addon" "before_nodes" {
+  for_each                    = toset(["vpc-cni", "kube-proxy"])
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = each.value
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
+}
 
-  # CoreDNS needs a node to run on.
-  depends_on = [aws_eks_node_group.this]
+resource "aws_eks_addon" "after_nodes" {
+  for_each                    = toset(["coredns"])
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = each.value
+  resolve_conflicts_on_create = "OVERWRITE"
+  resolve_conflicts_on_update = "OVERWRITE"
+  depends_on                  = [aws_eks_node_group.this]
 }
