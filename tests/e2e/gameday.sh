@@ -25,6 +25,10 @@
 #      until the gateway answers again. One replica here, on one kind node:
 #      on a real cluster two replicas and a disruption budget are what make
 #      this a non-event
+#   3. the model server rolled to a new pod and rolled back, the way an
+#      upgrade and its undo go, with a request through the gateway every
+#      three quarters of a second the whole time: how many were not
+#      answered, and the longest wait between two answers
 #
 # Each refusal sits beside a control that must succeed: the served model
 # answering, and admission and the gateway coming back. Appends its checks to
@@ -121,6 +125,66 @@ except Exception:
     print("blocked")
 ' 2>/dev/null || echo "exec-failed"
 }
+# watch_calls <seconds>: from the client, one short request through the
+# gateway every 0.75 s for that long, inside the agent's quota of 100 a
+# minute; prints "<sent> <answered> <not answered> <longest gap, s> <codes>".
+watch_calls() {
+  kubectl -n agents create token support-agent --audience "$AUDIENCE" --duration 10m \
+    | kubectl -n agents exec -i gameday-client -- python3 -c '
+import collections, json, sys, time, urllib.error, urllib.request
+url, model, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
+tok = sys.stdin.read().strip()
+body = json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "Say OK."}]}).encode()
+codes = collections.Counter()
+start = last = time.monotonic()
+gap = 0.0
+while time.monotonic() - start < secs:
+    t = time.monotonic()
+    req = urllib.request.Request(url + "/v1/chat/completions", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "Authorization": "Bearer " + tok})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            code = r.status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    except Exception:
+        code = 0
+    codes[code] += 1
+    now = time.monotonic()
+    if code == 200:
+        gap, last = max(gap, now - last), now
+    time.sleep(max(0.0, 0.75 - (now - t)))
+gap = max(gap, time.monotonic() - last)
+sent = sum(codes.values())
+print(sent, codes[200], sent - codes[200], round(gap, 1), ",".join("%s:%d" % kv for kv in sorted(codes.items())))
+' "$GW" "$MODEL_NAME" "$1" 2>/dev/null || echo "0 0 0 0 exec-failed"
+}
+
+# roll <what> <kubectl rollout ...>: that rollout of the served model, under
+# watch_calls, judged on the requests nobody answered.
+roll() {
+  local what="$1" out sent answered missed gap codes
+  shift
+  out="$(mktemp)"
+  watch_calls 120 >"$out" &
+  local watcher=$!
+  sleep 5
+  kubectl -n inference "$@" "deployment/$SERVED" >/dev/null
+  local t0=$SECONDS
+  if kubectl -n inference rollout status "deployment/$SERVED" --timeout=110s >/dev/null 2>&1; then
+    measure "$what: the rollout finished in $((SECONDS - t0))s"
+  else
+    fail "$what: the rollout did not finish within 110s"
+  fi
+  wait "$watcher"
+  read -r sent answered missed gap codes <"$out"; rm -f "$out"
+  if [ "${sent:-0}" -gt 0 ] && [ "$missed" = 0 ]; then
+    pass "$what under traffic: $answered of $sent requests answered, the longest wait between two answers ${gap}s"
+  else
+    fail "$what under traffic: $missed of $sent requests not answered ($codes), the longest wait between two answers ${gap}s"
+  fi
+}
+
 # seconds_until <command...>: run it every two seconds, up to five minutes,
 # until it succeeds; print the seconds it took, or nothing.
 seconds_until() {
@@ -188,6 +252,10 @@ if [ -n "$back" ]; then
 else
   fail "the gateway does not answer five minutes after its pod was killed"
 fi
+
+step "3. the model server rolled to a new pod, and back, under traffic"
+roll "the model server rolled to a new pod" rollout restart
+roll "the model server rolled back" rollout undo
 
 kubectl -n agents delete pod gameday-client --ignore-not-found --wait=false >/dev/null 2>&1
 
