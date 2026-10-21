@@ -267,6 +267,15 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/rotation.sh
 
+      # Game day: Kyverno's admission controller stopped, then the gateway's
+      # pod deleted, with a model served. Which way each fails, an outage or
+      # a hole, and how long until it is back. After the rotation, which it
+      # must not disturb, and last, since it takes the cluster apart.
+      - name: Game day, parts of the boundary taken down while it serves
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/gameday.sh
+
       - name: What the cluster looked like
         if: failure()
         run: |
