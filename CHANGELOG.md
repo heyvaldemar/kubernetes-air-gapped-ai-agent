@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_(no unreleased changes yet)_
+### Fixed
+
+- Verify failed on main from ced42b8 to 2d78ce4, the v1.6.0 release commit, on one shellcheck finding (SC2015, info) in the guard's static check in `scripts/validate.sh`: three greps chained with `&&` before an `||`. Its meaning was what it said, and every static check and plant passed; the shellcheck step runs first and stopped the job. It is an `if` now. v1.6.0 was released on a green e2e without its Verify run being read; the release notes say so.
 
 ## [1.6.0] - 2026-10-21
 

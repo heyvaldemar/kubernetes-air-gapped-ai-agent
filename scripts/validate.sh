@@ -249,10 +249,11 @@ check_policies() {
   done
   # And when Kyverno takes its webhooks away as it stops, the API server's
   # own guard refuses every model until they are back.
-  grep -qF "w.name == 'ivpol.validate.kyverno.svc-fail-finegrained-verify-models' &&" admission/kyverno-guard.yaml \
-    && grep -qE '^    name: kyverno-resource-validating-webhook-cfg$' admission/kyverno-guard.yaml \
-    && grep -qE '^    parameterNotFoundAction: Deny$' admission/kyverno-guard.yaml \
-    || { echo "kyverno-guard.yaml does not refuse models while Kyverno's webhook for verify-models is missing"; ok=1; }
+  if ! { grep -qF "w.name == 'ivpol.validate.kyverno.svc-fail-finegrained-verify-models' &&" admission/kyverno-guard.yaml \
+          && grep -qE '^    name: kyverno-resource-validating-webhook-cfg$' admission/kyverno-guard.yaml \
+          && grep -qE '^    parameterNotFoundAction: Deny$' admission/kyverno-guard.yaml; }; then
+    echo "kyverno-guard.yaml does not refuse models while Kyverno's webhook for verify-models is missing"; ok=1
+  fi
   grep -q "variables.images.all(i, variables.carried.exists(d, i.endsWith('@' + d)))" admission/carried-images.yaml \
     || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
   grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
