@@ -62,6 +62,10 @@ pass "control: a pod starts from this run's ECR, through the endpoints, by diges
 inpod() { local pod="$1"; shift; kubectl -n probe exec "$pod" -- sh -c "$*" 2>&1; }
 resolves() { inpod "$1" "nslookup $2 ${3:-}" >/dev/null; }
 opens() { inpod "$1" "nc -w 5 $2 $3 </dev/null" >/dev/null; }
+# The node's processor, for the record: the same model on the same threads
+# answered at half the rate on an m7i.xlarge as on the GitHub runner's AMD
+# EPYC 9V45 (runs 39700915485 and 39644276886), and a sizing is read against it.
+printf '  the node: %s, %s vCPU\n' "$(inpod probe "grep -m1 'model name' /proc/cpuinfo" | cut -d: -f2- | sed 's/^ *//')" "$(inpod probe nproc)"
 
 for pod in probe probe-node; do
   where="a pod"; [ "$pod" = probe-node ] && where="the node"

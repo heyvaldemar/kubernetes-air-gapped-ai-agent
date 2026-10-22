@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type SPEND to create billed AWS resources (about $0.11 for the boundary alone, $0.40 with the agent)"
+        description: "Type SPEND to create billed AWS resources (about $0.11 for the boundary alone, $0.30 with the agent)"
         required: true
         type: string
       agent:
