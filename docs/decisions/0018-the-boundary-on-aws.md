@@ -59,7 +59,7 @@ The schedule is on from here (`AWS_VALIDATION_ENABLED`). The README says weekly 
 
 One number moved, and the record says what changed: the same model on the same two threads answered at half the rate, p50 5.4 s a task against 2.7 s on the GitHub runner (run 39644276886). The runner's processor was an AMD EPYC 9V45, the node's an m7i's. `tests/e2e/aws.sh` now prints the node's processor, and a sizing is read against the node it was measured on. The README's Sizing figures are the runner's.
 
-The schedule runs phase 2 from here (`AWS_AGENT_ENABLED`).
+The schedule runs phase 2 from here (`AWS_AGENT_ENABLED`). Its first run, [39744285464](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39744285464), created at 07:58 UTC for the 02:47 cron, passed all 56 checks the same day, about $0.29 for 0.69 h, with nothing left behind. The node's processor was an Intel Xeon Platinum 8488C, and the model's p50 was 5.5 s a task: the half rate is the node's, not the run's. Weekly on AWS from 22 October 2026.
 
 ## Consequences
 
