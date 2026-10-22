@@ -3,12 +3,13 @@ name: Status
 # Writes what the e2e workflow has shown lately (scripts/status.py) to the
 # branch `status`, where the README's badges and the fleet read it: green
 # days in the last 30, the streak, and the latest run's checks and
-# measurements. After every e2e run on main, and daily in case one was
-# missed. The branch holds one commit, replaced each time, so main's history
+# measurements, and the same for the runs on AWS in eks/ (ADR 18), where the
+# fleet's catalog reads a repository's AWS runs. After every e2e or AWS run
+# on main, and daily in case one was missed. The branch holds one commit, replaced each time, so main's history
 # stays the code's and nothing here starts the e2e run again.
 on:
   workflow_run:
-    workflows: ["Air-gapped e2e"]
+    workflows: ["Air-gapped e2e", "The boundary on AWS"]
     types: [completed]
     branches: [main]
   schedule:
@@ -43,6 +44,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           E2E_WORKFLOW: e2e.yml
         run: python3 scripts/status.py "$RUNNER_TEMP/status"
+
+      - name: Read the runs on AWS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_WORKFLOW: aws.yml
+          BADGE_LABEL: on AWS
+        run: python3 scripts/status.py "$RUNNER_TEMP/status/eks"
 
       - name: The latest run's evals, as Inspect logs
         # One Inspect log per model job (scripts/inspect-log.py), each read back

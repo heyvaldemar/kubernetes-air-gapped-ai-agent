@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The status branch carries the runs on AWS too, in `eks/` (`status.json` and a badge), from `.github/workflows/aws.yml`, which also starts the status workflow now; the README shows the badge, and the fleet's catalog reads `eks/status.json` the way it reads `aws-eks-reference-platform`'s. `scripts/status.py` takes the badge's label from `BADGE_LABEL`.
 - cosign 3.1.4 (from 3.1.3) and oras 1.3.5 (from 1.3.4) in `tools.lock`, each hash read from the publisher's own checksum file. `scripts/check-freshness.py` no longer reads the pods under `tests/e2e/plants/` as pins: one names an image by a digest nobody ever pushed on purpose, and the weekly report called it a busybox behind upstream.
 
 ### Security

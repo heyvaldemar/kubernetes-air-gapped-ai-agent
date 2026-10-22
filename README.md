@@ -6,6 +6,7 @@
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15713/badge)](https://www.bestpractices.dev/projects/15713)
 [![e2e, last 30 days](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-days.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
 [![checks](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Fbadge-checks.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/status.json)
+[![on AWS](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheyvaldemar%2Fkubernetes-air-gapped-ai-agent%2Fstatus%2Feks%2Fbadge-days.json)](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/blob/status/eks/status.json)
 
 The last two badges are not typed by hand: they are the e2e workflow's days on main, the last 30 or since its first run, rewritten after every run by [`.github/workflows/status.yml`](.github/workflows/status.yml) into the [`status`](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/tree/status) branch.
 

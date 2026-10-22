@@ -236,9 +236,11 @@ def main(out):
     else:
         color, msg = "lightgrey", "no runs yet"
     # The label says how much history there is: "last 30 days" only once a
-    # run is that old, "since <first day>" before.
-    label = f"e2e, last {WINDOW_DAYS} days" if days and days[0] <= since.isoformat() else (
-        f"e2e, since {days[0]}" if days else f"e2e, last {WINDOW_DAYS} days")
+    # run is that old, "since <first day>" before. BADGE_LABEL names the
+    # workflow: e2e, or the runs on AWS.
+    what = os.environ.get("BADGE_LABEL", "e2e")
+    label = f"{what}, last {WINDOW_DAYS} days" if days and days[0] <= since.isoformat() else (
+        f"{what}, since {days[0]}" if days else f"{what}, last {WINDOW_DAYS} days")
     json.dump(badge(label, msg, color), open(os.path.join(out, "badge-days.json"), "w"))
     if checks:
         color = "brightgreen" if not failed else "red"
