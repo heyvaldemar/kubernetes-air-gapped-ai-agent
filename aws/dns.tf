@@ -4,7 +4,8 @@
 # way out left. This rule group answers the region's AWS service names and
 # the VPC's own internal names, which AWS's servers answer, and refuses
 # everything else with NXDOMAIN; fail-open is off, so a firewall that cannot
-# decide refuses too.
+# decide refuses too. One AWS name is outside amazonaws.com: EKS Auth's, which
+# its endpoint answers inside the VPC, and it is allowed by its full name.
 
 resource "aws_route53_resolver_firewall_domain_list" "aws" {
   name = "${var.cluster_name}-aws"
@@ -15,6 +16,7 @@ resource "aws_route53_resolver_firewall_domain_list" "aws" {
     "*.ec2.internal",
     "compute.internal",
     "*.compute.internal",
+    "eks-auth.${var.region}.api.aws",
   ]
 }
 

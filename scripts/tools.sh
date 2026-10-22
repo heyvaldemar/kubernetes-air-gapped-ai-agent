@@ -6,11 +6,13 @@
 # needs for TokenReview. Adapted from kubernetes-ai-agent-sandbox's installer.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/inside.sh
+. scripts/inside.sh
 # The models' namespace, as the model server's manifest defines it: the
 # model server's network policy lives there. scripts/serve.sh has made it
 # when a model is served inside; the frontier job (ADR 14) serves none.
 awk '/^---$/ {exit} {print}' manifests/inference/llama.yaml | kubectl apply -f - >/dev/null
-kubectl apply -k manifests/ >/dev/null
+kubectl kustomize manifests/ | relocate | kubectl apply -f - >/dev/null
 if ! kubectl -n corp get secret records-api-key >/dev/null 2>&1 || ! kubectl -n mcp get secret records-api-key >/dev/null 2>&1; then
   python3 - <<'PY' | kubectl apply -f - >/dev/null
 import json, secrets
@@ -23,18 +25,20 @@ PY
 fi
 svc_ip="$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')"
 svc_port="$(kubectl -n default get service kubernetes -o jsonpath='{.spec.ports[0].port}')"
-ep_ip="$(kubectl -n default get endpointslices -l kubernetes.io/service-name=kubernetes -o jsonpath='{.items[0].endpoints[0].addresses[0]}')"
+# Every address the API server answers on: one on kind, one per zone on EKS,
+# whichever a connection to the Service's address is sent to.
+ep_ips="$(kubectl -n default get endpointslices -l kubernetes.io/service-name=kubernetes -o jsonpath='{.items[*].endpoints[*].addresses[*]}')"
 ep_port="$(kubectl -n default get endpointslices -l kubernetes.io/service-name=kubernetes -o jsonpath='{.items[0].ports[0].port}')"
-python3 - "$svc_ip" "$svc_port" "$ep_ip" "$ep_port" <<'PY' | kubectl apply -f - >/dev/null
+python3 - "$svc_ip" "$svc_port" "$ep_ips" "$ep_port" <<'PY' | kubectl apply -f - >/dev/null
 import json, sys
-svc_ip, svc_port, ep_ip, ep_port = sys.argv[1:]
+svc_ip, svc_port, ep_ips, ep_port = sys.argv[1:]
 print(json.dumps({
     "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
     "metadata": {"name": "mcp-server-to-api-server", "namespace": "mcp"},
     "spec": {"podSelector": {"matchLabels": {"app.kubernetes.io/name": "mcp-server"}},
              "policyTypes": ["Egress"],
              "egress": [{"to": [{"ipBlock": {"cidr": svc_ip + "/32"}}], "ports": [{"protocol": "TCP", "port": int(svc_port)}]},
-                        {"to": [{"ipBlock": {"cidr": ep_ip + "/32"}}], "ports": [{"protocol": "TCP", "port": int(ep_port)}]}]}}))
+                        {"to": [{"ipBlock": {"cidr": ip + "/32"}} for ip in ep_ips.split()], "ports": [{"protocol": "TCP", "port": int(ep_port)}]}]}}))
 PY
 for d in tools/tool-gateway corp/records-api mcp/mcp-server; do
   kubectl -n "${d%/*}" rollout status "deployment/${d#*/}" --timeout=300s >/dev/null

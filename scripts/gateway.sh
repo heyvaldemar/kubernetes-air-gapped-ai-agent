@@ -17,6 +17,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
+# shellcheck source=scripts/inside.sh
+. "$ROOT/scripts/inside.sh"
 DIR="$STATE/charts"
 LOCK="$ROOT/gateway/gateway.lock"
 say() { printf '== %s\n' "$*"; }
@@ -47,8 +49,10 @@ case "${1:-}" in
       --namespace agentgateway-system --create-namespace --wait >/dev/null
     # The images by digest, from the lock: the chart writes the tag as given,
     # so tag@digest is what the controller's pod and the proxy it starts run.
+    # Under INSIDE when it is set, where the registry inside is not a mirror.
+    registry=(); [ -z "${INSIDE:-}" ] || registry=(--set "image.registry=$(relocated cr.agentgateway.dev)")
     helm upgrade --install agentgateway "$(chart_file agentgateway)" \
-      --namespace agentgateway-system --wait --timeout 5m \
+      --namespace agentgateway-system --wait --timeout 5m "${registry[@]}" \
       --set "controller.image.tag=$(tag_of controller)" --set "proxy.image.tag=$(tag_of proxy)" >/dev/null
     # The cluster's service account issuer and its public keys, read once
     # from the API server: the gateway checks a token against them with

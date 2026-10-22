@@ -14,6 +14,8 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
+# shellcheck source=scripts/inside.sh
+. "$ROOT/scripts/inside.sh"
 mkdir -p "$STATE"
 
 kubectl -n agents create configmap evals --from-file="$ROOT/evals/harness.py" --from-file="$ROOT/evals/tasks.json" \
@@ -41,7 +43,7 @@ gw_svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}' 2>/
 sed -e "s#@MODEL_URL@#http://$gw_svc.gateway.svc.cluster.local:8080#" -e "s#@MODEL_NAME@#${MODEL:?MODEL names the model this run serves}#" \
   -e "s#@OFFER_PATTERNS@#${OFFER_PATTERNS:-on}#" -e "s#@MAX_TOKENS@#${MAX_TOKENS:-400}#" \
   -e "s#@TEMPERATURE@#${TEMPERATURE:-0.6}#" \
-  "$ROOT/manifests/agents/evals.yaml" | kubectl apply -f - >/dev/null
+  "$ROOT/manifests/agents/evals.yaml" | relocate | kubectl apply -f - >/dev/null
 printf '== the agent is running the evals\n'
 for _ in $(seq 1 720); do
   done_="$(kubectl -n agents get job evals -o jsonpath='{.status.succeeded}{.status.failed}' 2>/dev/null)"

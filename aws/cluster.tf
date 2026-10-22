@@ -79,10 +79,20 @@ resource "aws_eks_access_policy_association" "operator" {
 # before the node, which is never Ready without them: the first run on AWS
 # made all three wait for the node, and EKS gave up on it as unhealthy
 # (run 39624648738). CoreDNS goes on after, since it needs a node to run on.
+#
+# The VPC CNI enforces the agent's NetworkPolicies itself (eBPF), as kindnet
+# does on kind: without enableNetworkPolicy they would be accepted and
+# enforce nothing. The Pod Identity agent hands Kyverno its role's
+# credential (admission.tf), from EKS Auth through its endpoint.
 resource "aws_eks_addon" "before_nodes" {
-  for_each                    = toset(["vpc-cni", "kube-proxy"])
+  for_each = {
+    vpc-cni                = jsonencode({ enableNetworkPolicy = "true" })
+    kube-proxy             = null
+    eks-pod-identity-agent = null
+  }
   cluster_name                = aws_eks_cluster.this.name
-  addon_name                  = each.value
+  addon_name                  = each.key
+  configuration_values        = each.value
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 }

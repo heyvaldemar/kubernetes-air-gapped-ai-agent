@@ -36,13 +36,15 @@
 # Each refusal sits beside a control that must succeed: the served model
 # answering, and admission and the gateway coming back. Appends its checks to
 # $E2E_RESULTS (JSON) when set; the seconds are in the checks' names, and the
-# lines marked MEASURED are for the log.
+# lines marked MEASURED are for the log. The images and the models come from
+# the registry inside (scripts/inside.sh): kind's, or ECR on AWS (ADR 18).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 STATE="$ROOT/.cache/airgap"
-REG=registry.boundary.internal:5000
-BUSYBOX="$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt")"
-PY="$(grep -E '^docker.io/library/python:' "$ROOT/airgap/images.txt")"
+# shellcheck source=scripts/inside.sh
+. "$ROOT/scripts/inside.sh"
+BUSYBOX="$(relocated "$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt")")"
+PY="$(relocated "$(grep -E '^docker.io/library/python:' "$ROOT/airgap/images.txt")")"
 AUDIENCE=models.boundary.heyvaldemar.com
 SERVED="${SERVED_DEPLOYMENT:-granite}"
 MODEL_NAME="${SERVED_MODEL:-granite-4.0-1b}"

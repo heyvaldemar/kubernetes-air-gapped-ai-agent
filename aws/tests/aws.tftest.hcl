@@ -43,8 +43,8 @@ run "aws_reached_privately" {
   command = plan
 
   assert {
-    condition     = toset(keys(aws_vpc_endpoint.interface)) == toset(["ecr.api", "ecr.dkr", "sts", "ec2", "eks"])
-    error_message = "ECR, STS, EC2 and EKS each through an interface endpoint"
+    condition     = toset(keys(aws_vpc_endpoint.interface)) == toset(["ecr.api", "ecr.dkr", "sts", "ec2", "eks", "eks-auth"])
+    error_message = "ECR, STS, EC2, EKS and EKS Auth each through an interface endpoint"
   }
   assert {
     condition     = alltrue([for e in aws_vpc_endpoint.interface : e.private_dns_enabled])
@@ -72,8 +72,8 @@ run "no_name_lookup_out" {
     error_message = "the AWS names are allowed before everything else is refused"
   }
   assert {
-    condition     = alltrue([for d in aws_route53_resolver_firewall_domain_list.aws.domains : endswith(d, "amazonaws.com") || endswith(d, ".internal")])
-    error_message = "the allow list holds AWS's names and the VPC's internal ones, nothing on the open internet"
+    condition     = alltrue([for d in aws_route53_resolver_firewall_domain_list.aws.domains : endswith(d, "amazonaws.com") || endswith(d, ".internal") || d == "eks-auth.us-east-1.api.aws"])
+    error_message = "the allow list holds AWS's names, the VPC's internal ones and EKS Auth's by its full name, nothing on the open internet"
   }
   assert {
     condition     = length(aws_route53_resolver_firewall_rule_group_association.this) == 1
@@ -126,11 +126,11 @@ run "every_role_carries_the_boundary" {
   command = plan
 
   assert {
-    condition     = aws_iam_role.cluster.permissions_boundary == var.iam_permissions_boundary && aws_iam_role.node.permissions_boundary == var.iam_permissions_boundary
+    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno] : r.permissions_boundary == var.iam_permissions_boundary])
     error_message = "every role a run makes carries the account's permissions boundary"
   }
   assert {
-    condition     = startswith(aws_iam_role.cluster.name, "reference-platform") && startswith(aws_iam_role.node.name, "reference-platform")
+    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno] : startswith(r.name, "reference-platform")])
     error_message = "every role is under the prefix the account's guardrails allow"
   }
 }
@@ -156,4 +156,73 @@ run "the_node" {
     condition     = aws_eks_node_group.this.scaling_config[0].max_size == 1
     error_message = "one node"
   }
+}
+
+# Phase 2: what the agent needs on top of the boundary.
+run "kyverno_reads_this_runs_images_as_itself" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role.kyverno.assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com"
+    error_message = "Kyverno's role is assumed through EKS Pod Identity, by no one else"
+  }
+  assert {
+    condition     = aws_eks_pod_identity_association.kyverno.namespace == "kyverno" && aws_eks_pod_identity_association.kyverno.service_account == "kyverno-admission-controller"
+    error_message = "the role goes to the admission controller's service account and no other"
+  }
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.kyverno.policy).Statement :
+      s.Action == "ecr:GetAuthorizationToken" || s.Resource == "arn:aws:ecr:us-east-1:123456789012:repository/reference-platform-airgap-12345678901/*"
+    ])
+    error_message = "Kyverno reads this run's repositories and nothing else"
+  }
+  assert {
+    condition = alltrue(flatten([
+      for s in jsondecode(aws_iam_role_policy.kyverno.policy).Statement : [
+        for a in flatten([s.Action]) : contains(["ecr:GetAuthorizationToken", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability", "ecr:DescribeImages", "ecr:ListImages"], a)
+      ]
+    ]))
+    error_message = "Kyverno's role reads images; it can write, delete or change nothing"
+  }
+}
+
+run "network_policies_are_enforced" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_eks_addon.before_nodes["vpc-cni"].configuration_values).enableNetworkPolicy == "true"
+    error_message = "the VPC CNI enforces NetworkPolicies; without it the agent's would be accepted and enforce nothing"
+  }
+  assert {
+    condition     = contains(keys(aws_eks_addon.before_nodes), "eks-pod-identity-agent")
+    error_message = "the Pod Identity agent is on, before the node"
+  }
+}
+
+run "the_registry_inside" {
+  command = plan
+
+  variables {
+    images = ["docker.io/library/busybox", "models/granite-4.0-1b", "ghcr.io/ggml-org/llama.cpp"]
+  }
+
+  assert {
+    condition     = toset([for r in aws_ecr_repository.this : r.name]) == toset(["reference-platform-airgap-12345678901/docker.io/library/busybox", "reference-platform-airgap-12345678901/models/granite-4.0-1b", "reference-platform-airgap-12345678901/ghcr.io/ggml-org/llama.cpp"])
+    error_message = "one repository per image the bundle carries, under the cluster's name by the image's original path"
+  }
+  assert {
+    condition     = alltrue([for r in aws_ecr_repository.this : r.image_tag_mutability == "IMMUTABLE"])
+    error_message = "a tag in the registry inside, once loaded, names the same bytes for the rest of the run"
+  }
+}
+
+run "an_image_ecr_cannot_name_is_refused" {
+  command = plan
+
+  variables {
+    images = ["Docker.io/library/busybox"]
+  }
+
+  expect_failures = [var.images]
 }

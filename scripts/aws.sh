@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# aws.sh <images|sweep|residue|cost> - the parts of the AWS run (ADR 18) that
-# are not Terraform. .github/workflows/aws.yml calls them; each reads the
-# environment the workflow sets: AWS_REGION, TF_STATE_BUCKET, CLUSTER (the
-# run's cluster name), and REGISTRY for images.
+# aws.sh <repositories|login|images|sweep|residue|cost> - the parts of the AWS
+# run (ADR 18) that are not Terraform. .github/workflows/aws.yml calls them;
+# each reads the environment the workflow sets: AWS_REGION, TF_STATE_BUCKET,
+# CLUSTER (the run's cluster name), and REGISTRY, the account's ECR.
 #
-#   images   copy what the cluster pulls into this run's ECR repositories,
-#            by the digest airgap/images.txt pins: the connected side, before
-#            anything inside can ask for it
+#   repositories  the ECR repositories the run makes, as JSON: every one the
+#            bundle carries (scripts/bundle.sh create), under its original
+#            path, or only busybox's for a run of the boundary alone
+#   login    ECR's credential for this run, into the DOCKER_CONFIG the bundle
+#            and the checks read, on oras's stdin; never printed
+#   images   the boundary alone: copy busybox into this run's ECR by the
+#            digest airgap/images.txt pins, the connected side, before
+#            anything inside can ask for it. With the agent, the bundle
+#            carries everything instead (bundle.sh load)
 #   sweep    destroy this workflow's own runs that an earlier run left: any
 #            state under airgap-runs/ older than three hours that still holds
 #            resources. The other repository's sweeper reads runs/ only
@@ -16,21 +22,34 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX=airgap-runs
+# The credential store bundle.sh and the checks read, as on kind.
+export DOCKER_CONFIG="$ROOT/.cache/airgap/docker"
 say() { printf '== %s\n' "$*"; }
 
 case "${1:-}" in
+  repositories)
+    bundle="$ROOT/.cache/airgap/bundle.tar"
+    if [ -s "$bundle" ]; then
+      tar -tf "$bundle" | grep -v '/blobs/' | sed -n 's#^\./oci/\(.*\)/index\.json$#\1#p'
+    else
+      echo docker.io/library/busybox
+    fi | sort -u | python3 -c 'import json, sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))'
+    ;;
+  login)
+    : "${REGISTRY:?}" "${AWS_REGION:?}"
+    mkdir -p "$DOCKER_CONFIG"
+    aws ecr get-login-password --region "$AWS_REGION" | oras login --username AWS --password-stdin "$REGISTRY" >/dev/null
+    say "logged in to $REGISTRY for this run"
+    ;;
   images)
     : "${REGISTRY:?}" "${CLUSTER:?}" "${AWS_REGION:?}"
-    aws ecr get-login-password --region "$AWS_REGION" | oras login --username AWS --password-stdin "$REGISTRY" >/dev/null
-    # The images the run's Terraform made repositories for (var.images).
-    for name in ${IMAGES:-busybox}; do
-      src="$(grep -E "^docker.io/library/$name:" "$ROOT/airgap/images.txt")"
-      tag="${src#*:}"; tag="${tag%@*}"
-      oras cp "$src" "$REGISTRY/$CLUSTER/$name:$tag" >/dev/null
-      got="$(oras manifest fetch --descriptor "$REGISTRY/$CLUSTER/$name:$tag" | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')"
-      [ "$got" = "${src#*@}" ] || { echo "$name: ECR holds $got, the pin is ${src#*@}" >&2; exit 1; }
-      say "$name copied into $REGISTRY/$CLUSTER/$name, by digest $got"
-    done
+    "$0" login
+    src="$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt")"
+    repo="${src%%:*}"; tag="${src#*:}"; tag="${tag%@*}"
+    oras cp "$src" "$REGISTRY/$CLUSTER/$repo:$tag" >/dev/null
+    got="$(oras manifest fetch --descriptor "$REGISTRY/$CLUSTER/$repo:$tag" | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')"
+    [ "$got" = "${src#*@}" ] || { echo "$repo: ECR holds $got, the pin is ${src#*@}" >&2; exit 1; }
+    say "$repo copied into $REGISTRY/$CLUSTER/$repo, by digest $got"
     ;;
   sweep)
     : "${TF_STATE_BUCKET:?}" "${AWS_REGION:?}"
@@ -78,6 +97,10 @@ case "${1:-}" in
         # existed: the tagging API had not caught up with the delete.
         *:security-group/*) aws ec2 describe-security-groups --group-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
         *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        # The registry inside, and Kyverno's Pod Identity association, which
+        # goes with its cluster.
+        *:repository/*) aws ecr describe-repositories --repository-names "${arn#*:repository/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        *:podidentityassociation/*) [ -n "$cluster" ] && really="$really $arn" ;;
         *) really="$really $arn" ;;
       esac
     done <<<"$left"
@@ -87,14 +110,17 @@ case "${1:-}" in
     ;;
   cost)
     # List prices, us-east-1, per hour, read from the AWS price list on
-    # 2026-10-21: the EKS control plane, an m7i.large on demand, and an
-    # interface endpoint per zone (five endpoints, two zones). The DNS
-    # Firewall's $0.60 a million queries rounds to nothing for one run.
+    # 2026-10-21: the EKS control plane, the node on demand, and an
+    # interface endpoint per zone (six endpoints, two zones). The DNS
+    # Firewall's $0.60 a million queries, ECR's storage for an hour and the
+    # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" <<'PY'
 import sys
 hours = (int(sys.argv[2]) - int(sys.argv[1])) / 3600
-rates = {"EKS control plane": 0.10, "one m7i.large node": 0.1008, "five interface endpoints in two zones": 5 * 2 * 0.01}
+node = sys.argv[3]
+per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016}[node]
+rates = {"EKS control plane": 0.10, "one %s node" % node: per_node, "six interface endpoints in two zones": 6 * 2 * 0.01}
 total = sum(rates.values()) * hours
 print("| What | Per hour | This run |\n|---|---|---|")
 for what, rate in rates.items():
@@ -102,5 +128,5 @@ for what, rate in rates.items():
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, total))
 PY
     ;;
-  *) echo "usage: aws.sh <images|sweep|residue|cost>" >&2; exit 2 ;;
+  *) echo "usage: aws.sh <repositories|login|images|sweep|residue|cost>" >&2; exit 2 ;;
 esac

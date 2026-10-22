@@ -16,8 +16,9 @@ locals {
   subnets = [for i, _ in local.azs : cidrsubnet(var.vpc_cidr, 4, i)]
   # What the nodes and pods reach in AWS, each through an interface endpoint
   # in the VPC: the image registry (its API and its Docker endpoint), STS,
-  # EC2 for the node's own bootstrap, and EKS.
-  interface_endpoints = ["ecr.api", "ecr.dkr", "sts", "ec2", "eks"]
+  # EC2 for the node's own bootstrap, EKS, and EKS Auth, where the Pod
+  # Identity agent gets Kyverno its role's credential.
+  interface_endpoints = ["ecr.api", "ecr.dkr", "sts", "ec2", "eks", "eks-auth"]
 }
 
 resource "aws_vpc" "this" {

@@ -21,13 +21,18 @@ metadata:
 ---
 # The proxy the controller starts for the Gateway runs under the namespace's
 # restricted Pod Security profile; its generated Deployment sets everything
-# that profile asks but the seccomp profile, which this adds.
+# that profile asks but the seccomp profile, which this adds. Its Service is
+# the cluster's alone: the default is a LoadBalancer, which a cloud account
+# would try to build a load balancer for, a way in from outside the boundary.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
 metadata:
   name: restricted
   namespace: gateway
 spec:
+  service:
+    spec:
+      type: ClusterIP
   deployment:
     spec:
       template:

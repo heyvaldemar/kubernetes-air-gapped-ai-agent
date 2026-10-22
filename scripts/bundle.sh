@@ -19,6 +19,9 @@
 #
 #   BUNDLE  the file (default .cache/airgap/bundle.tar; its signature is
 #           BUNDLE.sigstore.json beside it)
+#   INSIDE  where `load` puts it, when that is not the kind registry: the
+#           run's path in ECR on AWS (ADR 18, scripts/inside.sh), with the
+#           credential `aws.sh login` wrote into DOCKER_CONFIG
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -31,6 +34,8 @@ BUNDLE="${BUNDLE:-$STATE/bundle.tar}"
 CHART_DIR="$STATE/charts"
 say() { printf '== %s\n' "$*"; }
 api() { curl -fsS --cacert "$CA" "https://$REG/v2/$1"; }
+# repos <dir>: the repositories an unpacked bundle carries, one per line
+repos() { find "$1/oci" -name index.json -not -path '*/blobs/*' | sed -e "s#^$1/oci/##" -e 's#/index\.json$##' | sort -u; }
 
 case "${1:-}" in
   create)
@@ -66,19 +71,29 @@ case "${1:-}" in
       echo "refused: $BUNDLE does not verify against the operator's key; nothing loaded" >&2
       exit 1
     fi
-    # What the registry held before this file went in, for the acceptance
-    # test: on a fresh boundary it must be nothing.
-    before="$(api "_catalog?n=10000" | jq -r '.repositories | length')"
     inside="$STATE/bundle.inside"
     rm -rf "$inside" && mkdir -p "$inside"
     tar -xf "$BUNDLE" -C "$inside"
     (cd "$inside" && sha256sum --quiet -c SHA256SUMS) || { echo "refused: a checksum in the bundle does not match; nothing loaded" >&2; exit 1; }
+    # What the registry inside held before this file went in, for the
+    # acceptance test: on a fresh boundary it must be nothing. ECR has no
+    # catalog to ask; there, the tags already in the repositories this file
+    # fills, which the run made empty.
+    to="${INSIDE:-$REG}"; ca=(--to-ca-file "$CA"); [ -z "${INSIDE:-}" ] || ca=()
+    if [ -z "${INSIDE:-}" ]; then
+      before="$(api "_catalog?n=10000" | jq -r '.repositories | length')"
+    else
+      before=0
+      for repo in $(repos "$inside"); do
+        before=$((before + $(oras repo tags "$to/$repo" 2>/dev/null | grep -c . || true)))
+      done
+    fi
     n=0
     while IFS= read -r index; do
       layout="$(dirname "$index")"
       repo="${layout#"$inside/oci/"}"
       for tag in $(jq -r '.manifests[].annotations["org.opencontainers.image.ref.name"] // empty' "$index" | sort -u); do
-        oras cp -r --from-oci-layout "$layout:$tag" --to-ca-file "$CA" "$REG/$repo:$tag" >/dev/null
+        oras cp -r --from-oci-layout "$layout:$tag" "${ca[@]}" "$to/$repo:$tag" >/dev/null
         n=$((n + 1))
       done
     done < <(find "$inside/oci" -name index.json | sort)
@@ -87,7 +102,7 @@ case "${1:-}" in
     # test can compare what the registry holds with what the file carried.
     find "$inside/oci" -path '*/blobs/*' -type f -delete
     printf 'repositories_before=%s\ntags_loaded=%s\nsha256=%s\n' "$before" "$n" "$(sha256sum "$BUNDLE" | cut -d' ' -f1)" >"$STATE/bundle.loaded"
-    say "loaded $n image tags into https://$REG from a bundle that verified, and the chart into .cache/airgap/charts"
+    say "loaded $n image tags into $to from a bundle that verified, and the chart into .cache/airgap/charts"
     ;;
   *)
     echo "usage: bundle.sh <create|load>" >&2

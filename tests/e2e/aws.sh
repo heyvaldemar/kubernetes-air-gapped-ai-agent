@@ -17,7 +17,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 : "${REGISTRY:?}" "${CLUSTER:?}" "${REGION:?}" "${VPC_CIDR:?}"
 digest="$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt" | sed 's/.*@//')"
-BUSYBOX="$REGISTRY/$CLUSTER/busybox@$digest"
+# Under its original path in the run's ECR, as everything inside is (scripts/inside.sh).
+BUSYBOX="$REGISTRY/$CLUSTER/docker.io/library/busybox@$digest"
 ECR_API="api.ecr.$REGION.amazonaws.com"
 prefix="$(cut -d. -f1-2 <<<"${VPC_CIDR%/*}")."
 results=(); failed=0

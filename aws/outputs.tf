@@ -7,6 +7,11 @@ output "registry" {
   value       = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com"
 }
 
+output "inside" {
+  description = "The registry inside for scripts/inside.sh: this run's path in ECR."
+  value       = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/${var.cluster_name}"
+}
+
 output "repositories" {
   value = { for k, r in aws_ecr_repository.this : k => r.repository_url }
 }

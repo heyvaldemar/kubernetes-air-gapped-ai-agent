@@ -6,12 +6,20 @@ name: The boundary on AWS
 # refuses every name outside AWS, and EKS whose API answers the runner's own
 # address only. tests/e2e/aws.sh tries the ways out, each beside a control.
 #
+# Phase 2, the agent on it: the model built, signed and given its AI-BOM on
+# the connected side, everything the cluster runs carried in one signed file
+# into the run's ECR, Kyverno reading signatures there as itself, the model
+# server, the MCP server and the gateway, then the checks the kind e2e runs
+# on what is inside, the evals, and the game day. AGENT says whether a run
+# does it: by hand unless the dispatch says false, and on the schedule once
+# the repository variable AWS_AGENT_ENABLED is true.
+#
 # In the validation account aws-eks-reference-platform set up (its ADR 10),
 # through its creation role, which trusts this repository's aws-validation
 # environment and nothing else here: GitHub's OIDC token, no stored
 # credential. The account's guardrails, permissions boundary, budgets and $30
 # kill-switch hold this run as they hold that one. The maintainer approved
-# it weekly, up to $5 a month (2026-10-21).
+# it weekly, up to $5 a month, $15 if it needs it (2026-10-21).
 #
 # Weekly on a schedule, and by hand on main when the dispatch says SPEND. The
 # schedule does nothing until the repository variable AWS_VALIDATION_ENABLED
@@ -26,9 +34,15 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type SPEND to create billed AWS resources (about $0.30 to $0.50 a run)"
+        description: "Type SPEND to create billed AWS resources (about $0.11 for the boundary alone, $0.40 with the agent)"
         required: true
         type: string
+      agent:
+        description: "true runs the agent on the boundary (phase 2); false, the boundary alone"
+        required: false
+        type: choice
+        options: ["true", "false"]
+        default: "true"
       dns_firewall:
         description: "false only to show the DNS check its violation (ADR 18)"
         required: false
@@ -48,7 +62,11 @@ env:
   CLUSTER: reference-platform-airgap-${{ github.run_id }}
   TF_IN_AUTOMATION: "1"
   TERRAFORM_VERSION: 1.16.5
-  IMAGES: busybox
+  AGENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.agent != 'false') || (github.event_name == 'schedule' && vars.AWS_AGENT_ENABLED == 'true') }}
+  # The model a release ships with, held to the same gates as in the kind e2e.
+  MODEL: granite-4.0-1b
+  TASK_FLOOR: "on"
+  OFFER_PATTERNS: "on"
 
 jobs:
   up:
@@ -56,7 +74,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AWS_VALIDATION_ENABLED == 'true'))
     runs-on: ubuntu-latest
     environment: aws-validation
-    timeout-minutes: 75
+    timeout-minutes: 100
     permissions:
       contents: read
       # The OIDC token the creation role trusts, for this environment only.
@@ -64,10 +82,6 @@ jobs:
     outputs:
       started: ${{ steps.start.outputs.at }}
     steps:
-      - name: Start the clock
-        id: start
-        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,6 +95,25 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+
+      # The vendor's side, before anything is billed: a staging registry on
+      # the runner, the model built reproducibly, signed and attested, the
+      # plants, the charts, and all of it in one signed file. The staging
+      # registry is gone before the file crosses, as on kind.
+      - name: Everything the cluster runs, in one signed file
+        if: env.AGENT == 'true'
+        run: |
+          df -h / | tail -1
+          NETWORK=bridge ./scripts/airgap.sh registry
+          ./scripts/airgap.sh seed
+          ./scripts/model.sh build
+          ./scripts/model.sh sign
+          ./scripts/model.sh plants
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+          ./scripts/bundle.sh create
+          ./scripts/airgap.sh open
+          df -h / | tail -1
 
       - name: Assume the creation role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -97,7 +130,7 @@ jobs:
 
       # The run's variables go to the state bucket beside its state, so the
       # teardown job, and a later run's sweep, destroy exactly what this
-      # job applied.
+      # job applied. The repositories are the ones the bundle carries.
       - name: The run's variables
         env:
           BOUNDARY: ${{ vars.IAM_PERMISSIONS_BOUNDARY }}
@@ -105,7 +138,8 @@ jobs:
           DNS_FIREWALL: ${{ inputs.dns_firewall != 'false' }}
         run: |
           ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
-          python3 - "$ip" > run.tfvars.json <<'PY'
+          node=m7i.large; [ "$AGENT" = true ] && node=m7i.xlarge
+          python3 - "$ip" "$node" "$(./scripts/aws.sh repositories)" > run.tfvars.json <<'PY'
           import json, os, sys
           print(json.dumps({
               "run_id": os.environ["RUN_ID"],
@@ -113,11 +147,12 @@ jobs:
               "iam_permissions_boundary": os.environ["BOUNDARY"],
               "operator_cidrs": [sys.argv[1] + "/32"],
               "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
-              "images": os.environ["IMAGES"].split(),
+              "node_instance_type": sys.argv[2],
+              "images": json.loads(sys.argv[3]),
           }, indent=1))
           PY
           aws s3 cp run.tfvars.json "s3://$BUCKET/airgap-runs/$RUN_ID.tfvars.json"
-          echo "dns_firewall: $DNS_FIREWALL"
+          echo "agent: $AGENT, dns_firewall: $DNS_FIREWALL, node: $node, repositories: $(jq '.images | length' run.tfvars.json)"
 
       - name: Terraform init, one state per run
         env:
@@ -129,18 +164,59 @@ jobs:
             -backend-config="bucket=$BUCKET" -backend-config="key=airgap-runs/$RUN_ID.tfstate" \
             -backend-config="region=$REGION" -backend-config="use_lockfile=true"
 
+      # From here the run is billed: the cost table counts from this clock.
+      - name: Start the clock
+        id: start
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Apply
         run: terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json"
 
-      - name: Across the gap, into ECR, by digest
+      # With the agent, the file that crossed is checked and loaded into the
+      # run's repositories, which hold nothing until then; without it, busybox
+      # alone, by digest.
+      - name: Across the gap, into ECR
         run: |
-          REGISTRY="$(terraform -chdir=aws output -raw registry)" ./scripts/aws.sh images
+          REGISTRY="$(terraform -chdir=aws output -raw registry)"; export REGISTRY
+          INSIDE="$(terraform -chdir=aws output -raw inside)"
+          echo "INSIDE=$INSIDE" >> "$GITHUB_ENV"
+          if [ "$AGENT" = true ]; then
+            ./scripts/aws.sh login
+            INSIDE="$INSIDE" ./scripts/bundle.sh load
+          else
+            ./scripts/aws.sh images
+          fi
 
       - name: The cluster, from the operator's address
         run: |
           aws eks update-kubeconfig --name "$CLUSTER" >/dev/null
           kubectl wait nodes --all --for=condition=Ready --timeout=600s
           kubectl -n kube-system rollout status deployment/coredns --timeout=300s
+          kubectl get nodes -L node.kubernetes.io/instance-type,topology.kubernetes.io/zone
+
+      # Kyverno reads signatures from ECR with its own role's credential
+      # (aws/admission.tf, EKS Pod Identity), named in the policy.
+      - name: Kyverno and the model policies, from ECR
+        if: env.AGENT == 'true'
+        env:
+          REGISTRY_CREDENTIALS: amazon
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: The model server, the tool side and the gateway, from ECR
+        if: env.AGENT == 'true'
+        run: |
+          ./scripts/serve.sh
+          ./scripts/tools.sh
+          ./scripts/gateway.sh install
+
+      - name: What is inside, and that nothing else runs
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          CHECKS: inside
+        run: ./tests/e2e/run.sh
 
       - name: The boundary, tried from inside
         env:
@@ -149,12 +225,44 @@ jobs:
         run: |
           REGISTRY="$(terraform -chdir=aws output -raw registry)" REGION="$AWS_REGION" ./tests/e2e/aws.sh
 
+      - name: Run the agent through the evals
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+        run: ./scripts/evals.sh
+
+      # Last, since it takes the cluster apart.
+      - name: Game day, parts of the boundary taken down while it serves
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          SERVED_DEPLOYMENT: llama
+          SERVED_MODEL: ${{ env.MODEL }}
+        run: ./tests/e2e/gameday.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=60 || true
+          kubectl -n inference describe pod -l app=llama | tail -30 || true
+          kubectl -n agents logs job/evals --tail=20 || true
+          kubectl -n mcp logs deploy/mcp-server --tail=20 || true
+          kubectl -n agentgateway-system logs deploy/agentgateway --tail=40 || true
+
       - name: Keep the checks
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-results-aws
-          path: ${{ runner.temp }}/e2e-results.json
+          path: |
+            ${{ runner.temp }}/e2e-results.json
+            ${{ runner.temp }}/evals-results.json
+            .cache/airgap/evals.jsonl
+            .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore
           retention-days: 90
 
@@ -201,6 +309,7 @@ jobs:
             exit 0
           fi
           echo "applied=true" >> "$GITHUB_OUTPUT"
+          echo "node=$(jq -r '.node_instance_type // "m7i.large"' run.tfvars.json)" >> "$GITHUB_OUTPUT"
           printf 'terraform {\n  backend "s3" {}\n}\n' > aws/ci_backend.tf
           terraform -chdir=aws init -input=false -lockfile=readonly \
             -backend-config="bucket=$BUCKET" -backend-config="key=airgap-runs/$RUN_ID.tfstate" \
@@ -215,7 +324,8 @@ jobs:
         run: ./scripts/aws.sh residue
 
       - name: What the run cost
-        if: always()
+        if: always() && needs.up.outputs.started != ''
         env:
           STARTED: ${{ needs.up.outputs.started }}
+          NODE_TYPE: ${{ steps.state.outputs.node }}
         run: ./scripts/aws.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true

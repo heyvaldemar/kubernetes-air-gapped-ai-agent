@@ -29,9 +29,14 @@
 #
 # Linux only for `close`: it needs the host's iptables (CI runs it on the
 # GitHub runner). The other steps run anywhere Docker does.
+#
+# NETWORK is the Docker network the registry joins: kind's, unless there is
+# no kind cluster. The AWS run (ADR 18) uses `registry` and `seed` alone, for
+# the staging registry the bundle is made from, on Docker's default bridge.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLUSTER="${CLUSTER:-air-gapped}"
+NETWORK="${NETWORK:-kind}"
 REGISTRY=kind-registry
 NAME=registry.boundary.internal
 STATE="$ROOT/.cache/airgap"
@@ -42,7 +47,7 @@ export DOCKER_CONFIG="$STATE/docker"
 HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io cr.agentgateway.dev)
 say() { printf '== %s\n' "$*"; }
 nodes() { kind get nodes --name "$CLUSTER"; }
-registry_ip() { docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' "$REGISTRY"; }
+registry_ip() { docker inspect -f "{{(index .NetworkSettings.Networks \"$NETWORK\").IPAddress}}" "$REGISTRY"; }
 
 case "${1:-}" in
   registry)
@@ -71,7 +76,7 @@ case "${1:-}" in
     tr -d '\n' <"$STATE/registry.password" | docker run --rm -i "$htpasswd_image" htpasswd -niB loader >"$STATE/htpasswd"
     chmod 644 "$STATE/htpasswd"  # a bcrypt hash, read by zot's non-root user
     docker rm -f "$REGISTRY" >/dev/null 2>&1 || true
-    docker run -d --name "$REGISTRY" --network kind --restart=always \
+    docker run -d --name "$REGISTRY" --network "$NETWORK" --restart=always \
       -v "$ROOT/airgap/zot.json:/etc/zot/config.json:ro" -v "$STATE:/etc/zot/tls:ro" \
       -v "$STATE/htpasswd:/etc/zot/htpasswd:ro" \
       -p 127.0.0.1:5000:5000 "$ref" >/dev/null
@@ -82,7 +87,7 @@ case "${1:-}" in
     curl -fs --cacert "$CA" "https://$NAME:5000/v2/" >/dev/null || { docker logs "$REGISTRY" | tail -20; exit 1; }
     mkdir -p "$DOCKER_CONFIG"
     oras login --ca-file "$CA" -u loader --password-stdin "$NAME:5000" <"$STATE/registry.password" >/dev/null
-    say "zot is up as https://$NAME:5000 ($(registry_ip) on kind's network): anyone reads, only loader writes"
+    say "zot is up as https://$NAME:5000 ($(registry_ip) on $NETWORK's network): anyone reads, only loader writes"
     ;;
   seed)
     while read -r ref; do
