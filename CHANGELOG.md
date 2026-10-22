@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Verify failed on main from ced42b8 to 2d78ce4, the v1.6.0 release commit, on one shellcheck finding (SC2015, info) in the guard's static check in `scripts/validate.sh`: three greps chained with `&&` before an `||`. Its meaning was what it said, and every static check and plant passed; the shellcheck step runs first and stopped the job. It is an `if` now. v1.6.0 was released on a green e2e without its Verify run being read; the release notes say so.
 
+### Changed
+
+- cosign 3.1.4 (from 3.1.3) and oras 1.3.5 (from 1.3.4) in `tools.lock`, each hash read from the publisher's own checksum file. `scripts/check-freshness.py` no longer reads the pods under `tests/e2e/plants/` as pins: one names an image by a digest nobody ever pushed on purpose, and the weekly report called it a busybox behind upstream.
+
 ### Security
 
 - certifi 2026.10.19 in `scripts/inspect-requirements.txt`, which the status workflow installs to write the evals as Inspect logs: earlier releases bundle emSign root CAs whose intermediate CA keys were compromised (GHSA-6q48-6c7w-9gw2, Dependabot alert 1, 2026-10-20). Moved by hand with both hashes from PyPI, as the file's other pins are.

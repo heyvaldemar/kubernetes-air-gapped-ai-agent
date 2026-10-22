@@ -37,6 +37,9 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOKEN = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
 SKIP_FILES = {"tests/static/plants.tsv"}
+# The pods admission must refuse name images on purpose, one by a digest
+# nobody ever pushed (tests/e2e/plants/image-not-carried.yaml): not pins.
+SKIP_DIRS = ("tests/e2e/plants/", "tests/e2e/plants-frontier/")
 TOOL_RELEASES = {
     "kind": ("kubernetes-sigs/kind", r"(v\d+\.\d+\.\d+)"),
     "oras": ("oras-project/oras", r"(v\d+\.\d+\.\d+)"),
@@ -84,7 +87,7 @@ def gh_releases(repo, pattern):
 
 def tracked():
     out = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True, check=True).stdout
-    return [p for p in out.splitlines() if p not in SKIP_FILES]
+    return [p for p in out.splitlines() if p not in SKIP_FILES and not p.startswith(SKIP_DIRS)]
 
 
 def index_versions(text, chart):

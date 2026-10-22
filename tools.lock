@@ -9,11 +9,11 @@ kind v0.33.0 linux-amd64 https://github.com/kubernetes-sigs/kind/releases/downlo
 kind v0.33.0 darwin-arm64 https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-arm64 kind 0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f
 kubectl v1.37.1 linux-amd64 https://dl.k8s.io/release/v1.37.1/bin/linux/amd64/kubectl kubectl 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
 kubectl v1.37.1 darwin-arm64 https://dl.k8s.io/release/v1.37.1/bin/darwin/arm64/kubectl kubectl fd65982c97ddad3106754b69ffa196d0e543aa591930ae52aed1adfb92f8c77f
-oras v1.3.4 linux-amd64 https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_linux_amd64.tar.gz oras f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
-oras v1.3.4 darwin-arm64 https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_darwin_arm64.tar.gz oras 217761a9500242ff473de8656b5aca21136ff39e17e9e61fd8936bbfd902704c
+oras v1.3.5 linux-amd64 https://github.com/oras-project/oras/releases/download/v1.3.5/oras_1.3.5_linux_amd64.tar.gz oras f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22
+oras v1.3.5 darwin-arm64 https://github.com/oras-project/oras/releases/download/v1.3.5/oras_1.3.5_darwin_arm64.tar.gz oras bd164bc9d08e9c5edb918f76e0cf92ecc61f6a50a4a6709b1cb06cf6721b4610
 helm v4.3.1 linux-amd64 https://get.helm.sh/helm-v4.3.1-linux-amd64.tar.gz linux-amd64/helm 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
 helm v4.3.1 darwin-arm64 https://get.helm.sh/helm-v4.3.1-darwin-arm64.tar.gz darwin-arm64/helm 6b4e61c8cd27d99e5a801e63ff25dd5c70b36875c2cd659d3e9ce6b76fc23198
-cosign v3.1.3 linux-amd64 https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-amd64 cosign 4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71
-cosign v3.1.3 darwin-arm64 https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-darwin-arm64 cosign 5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76
+cosign v3.1.4 linux-amd64 https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64 cosign 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+cosign v3.1.4 darwin-arm64 https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-darwin-arm64 cosign 9f9b8cd557cf2e5b3df3373a00baa005a86b02391e3e06dd0ce37b3a1533d3a4
 kubeconform v0.8.0 linux-amd64 https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz kubeconform 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
 kubeconform v0.8.0 darwin-arm64 https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-arm64.tar.gz kubeconform f84f4dfbebf4a6b0b230385fa065a39ea35e02608c2b50d025dcf64775a69d67
