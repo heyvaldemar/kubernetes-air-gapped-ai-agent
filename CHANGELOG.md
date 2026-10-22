@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Verify failed on main from ced42b8 to 2d78ce4, the v1.6.0 release commit, on one shellcheck finding (SC2015, info) in the guard's static check in `scripts/validate.sh`: three greps chained with `&&` before an `||`. Its meaning was what it said, and every static check and plant passed; the shellcheck step runs first and stopped the job. It is an `if` now. v1.6.0 was released on a green e2e without its Verify run being read; the release notes say so.
 
+### Security
+
+- certifi 2026.10.19 in `scripts/inspect-requirements.txt`, which the status workflow installs to write the evals as Inspect logs: earlier releases bundle emSign root CAs whose intermediate CA keys were compromised (GHSA-6q48-6c7w-9gw2, Dependabot alert 1, 2026-10-20). Moved by hand with both hashes from PyPI, as the file's other pins are.
+
 ## [1.6.0] - 2026-10-21
 
 ### Added
