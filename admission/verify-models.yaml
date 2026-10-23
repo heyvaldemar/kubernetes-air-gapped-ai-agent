@@ -11,7 +11,8 @@
 #
 # Kyverno 1.19 extracts images from containers, init containers and
 # ephemeral containers only; an image volume is not checked unless a policy
-# asks (kyverno/kyverno#17555 would add it). The `images` entry below asks.
+# asks: kyverno/kyverno#17555 would have added it, and was closed unmerged on
+# 2026-10-22. The `images` entry below asks.
 apiVersion: policies.kyverno.io/v1
 kind: ImageValidatingPolicy
 metadata:

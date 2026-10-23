@@ -3,7 +3,9 @@
 # of those scripts/bundle.sh loaded, listed in the ConfigMap carried-images
 # that scripts/admission.sh writes from the bundle after the load. A pod
 # with an image from anywhere else is refused, by tag or by a digest the
-# bundle never carried, whoever made it and however it got there.
+# bundle never carried, whoever made it and however it got there. Every
+# image a pod uses: containers, init containers, the ephemeral containers
+# kubectl debug adds, and image volumes, whose files are read like any other.
 #
 # Not kube-system or local-path-storage: what runs there comes with the node
 # image (kind's control plane, CoreDNS, the CNI, the storage provisioner),
@@ -30,7 +32,8 @@ spec:
       expression: >-
         object.spec.containers.map(c, c.image) +
         object.spec.?initContainers.orValue([]).map(c, c.image) +
-        object.spec.?ephemeralContainers.orValue([]).map(c, c.image)
+        object.spec.?ephemeralContainers.orValue([]).map(c, c.image) +
+        object.spec.?volumes.orValue([]).filter(v, has(v.image)).map(v, v.image.reference)
     - name: carried
       expression: params.data.digests.split(' ')
   validations:

@@ -265,6 +265,12 @@ check_policies() {
     || { echo "carried-images.yaml does not hold every pod's images to the digests the bundle carried"; ok=1; }
   grep -q "parameterNotFoundAction: Deny" admission/carried-images.yaml \
     || { echo "carried-images.yaml admits everything when its list of digests is missing"; ok=1; }
+  # Every image a pod uses: an image volume's files are read like any other
+  # (kubernetes-supply-chain-admission's ADR 6 found the gap there).
+  for part in "ephemeralContainers" "v.image.reference" "pods/ephemeralcontainers"; do
+    grep -qF "$part" admission/carried-images.yaml \
+      || { echo "carried-images.yaml does not read $part: an image could arrive there unchecked"; ok=1; }
+  done
   [ "$ok" = 0 ] && echo "the policies extract, verify and hold the model's image volume, hold every licence of every model in its AI-BOM to the list, and hold every pod to what the bundle carried"
   return "$ok"
 }

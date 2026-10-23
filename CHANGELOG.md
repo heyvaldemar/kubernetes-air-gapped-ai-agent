@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `admission/carried-images.yaml` holds image volumes to the digests the bundle carried, beside containers, init containers and ephemeral containers. Inside the boundary an image volume could only pull what the registry inside holds, which is what the bundle carried, so this was not a way in here; on any other registry it would be, as `kubernetes-supply-chain-admission`'s ADR 6 found on 2026-10-22. Plant `volume-not-carried`, in a namespace no model policy reads, and a static check with its plant. The model policy's comment, the README and ADR 3 say that kyverno/kyverno#17555, which would have made Kyverno extract image volumes by default, was closed unmerged on 2026-10-22.
+
 ## [1.7.0] - 2026-10-22
 
 ### Added
