@@ -1,0 +1,20 @@
+# an image the bundle never carried, mounted as a volume where no model
+# policy looks: carried-images holds every image a pod uses, volumes too
+# expect: one the bundle carried
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-not-carried
+  namespace: agents
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: @BUSYBOX@
+      command: [sleep, "3600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      volumeMounts: [{name: content, mountPath: /content, readOnly: true}]
+  volumes:
+    - name: content
+      image: {reference: "docker.io/library/busybox:1.37@sha256:0000000000000000000000000000000000000000000000000000000000000000", pullPolicy: IfNotPresent}
