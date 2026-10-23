@@ -7,7 +7,7 @@
 
 Kyverno checks the model's signature and reads its AI-BOM (ADR 3, ADR 9). It does that in a webhook, the API server asking it about every pod that mounts a model, and the policy says `failurePolicy: Fail`: if the webhook cannot be reached, the pod is refused. That reads as fail closed. It is fail closed only while the webhook's configuration exists.
 
-Kyverno removes its own webhook configurations when its admission controller stops and its Deployment is at zero replicas or being deleted (`pkg/webhooks/server.go`, `cleanup`, when `runtime.IsGoingDown()`, Kyverno 1.19.1). It does so to keep a cluster without Kyverno from refusing everything. From then on the API server asks nobody. The game day that takes Kyverno down with a model served (`tests/e2e/gameday.sh`) saw both outcomes. In run 39541542574 Kyverno had not yet seen its own Deployment at zero when it stopped, all seven configurations stayed, and every model was refused. In run 39543289132 five of seven went, and the API server admitted a model nobody signed and one under a licence the site does not allow. The first result was timing, not design.
+Kyverno removes its own webhook configurations when its admission controller stops and its Deployment is at zero replicas or being deleted (`pkg/webhooks/server.go`, `cleanup`, when `runtime.IsGoingDown()`, Kyverno 1.19.1, unchanged in 1.19.2: run 39901010465's game day saw seven configurations go to two again). It does so to keep a cluster without Kyverno from refusing everything. From then on the API server asks nobody. The game day that takes Kyverno down with a model served (`tests/e2e/gameday.sh`) saw both outcomes. In run 39541542574 Kyverno had not yet seen its own Deployment at zero when it stopped, all seven configurations stayed, and every model was refused. In run 39543289132 five of seven went, and the API server admitted a model nobody signed and one under a licence the site does not allow. The first result was timing, not design.
 
 The native policies that need nothing running hold the path, the digest and what the bundle carried. Both planted models are in the bundle, signed by nobody or under the wrong licence, so they pass all three: only Kyverno refuses them.
 
@@ -21,12 +21,12 @@ The native policies that need nothing running hold the path, the digest and what
 ## Consequences
 
 - With Kyverno away, no new model pod starts, the signed one included. That is an outage of model deployments, not of models already running, which keep serving. A real cluster runs Kyverno's admission controller three times over (`aws-eks-reference-platform`), so this is a scale-down or an uninstall, done by someone, not a crash.
-- The guard names Kyverno's configuration and its webhook by the names Kyverno 1.19.1 gives them. A Kyverno upgrade that renames either makes the guard refuse every model, which is loud and safe: `scripts/admission.sh` stops at install, and the e2e fails before main.
+- The guard names Kyverno's configuration and its webhook by the names Kyverno 1.19.1 gives them, and 1.19.2 gives them still (its renaming, kyverno/kyverno#17617, is for namespaced image policies). A Kyverno upgrade that renames either makes the guard refuse every model, which is loud and safe: `scripts/admission.sh` stops at install, and the e2e fails before main.
 - Uninstalling Kyverno now stops models from starting until the guard is removed too. That is the point.
 
 ## Alternatives
 
-- **Keep Kyverno from deleting its webhooks.** Kyverno 1.19.1 has no setting for it: the cleanup runs whenever the admission controller decides it is going down. And it would still leave the hole open to anyone who deletes the configuration by hand.
+- **Keep Kyverno from deleting its webhooks.** Kyverno 1.19.1 and 1.19.2 have no setting for it: the cleanup runs whenever the admission controller decides it is going down. And it would still leave the hole open to anyone who deletes the configuration by hand.
 - **More replicas and a disruption budget.** They keep Kyverno up through node loss and rollouts. They do nothing against a scale to zero or an uninstall, which is the case that opens the hole.
 - **Verify the signature natively.** The API server's CEL cannot verify a signature or fetch an attestation. Native policy can hold the shape of the reference, which `model-volumes.yaml` does, and can refuse when the verifier is missing, which this does.
 

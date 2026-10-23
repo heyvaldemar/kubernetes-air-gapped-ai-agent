@@ -14,7 +14,7 @@ Kubernetes mounts an OCI image as a read-only volume (`volumes[].image`, GA sinc
 - **An ordinary image.** `models/Dockerfile` is `FROM scratch` and one `COPY`. The model file is pinned in `models/models.lock` by the publisher's revision and its sha256, and the build refuses a file that does not match.
 - **Built reproducibly.** `SOURCE_DATE_EPOCH=0`, timestamps rewritten, an uncompressed layer, BuildKit pinned by digest. Anyone with the same file gets the same image digest; `models.lock` pins it, and every run rebuilds the image and fails if the digest differs.
 - **Signed by key, with no transparency log.** Nothing inside the boundary can reach Rekor, so the operator's key is the root of trust: `cosign sign --key … --tlog-upload=false`. cosign 3 refuses that combination under its default signing configuration, so the key path turns it off (`--use-signing-config=false`). CI makes the key pair per run.
-- **Verified at admission, offline.** An ImageValidatingPolicy (Kyverno 1.19.1) verifies the signature with the inline public key and `ctlog.insecureIgnoreTlog`. Kyverno extracts images from containers, init containers and ephemeral containers only, so the policy declares an `images` expression of its own for `volumes[].image` (kyverno#17555 would have made that the default, and was closed unmerged on 2026-10-22; the workaround is posted there). A native ValidatingAdmissionPolicy holds the shape without Kyverno: an image volume in the model namespace comes from the models path inside, by digest.
+- **Verified at admission, offline.** An ImageValidatingPolicy (Kyverno 1.19.1, 1.19.2 from 2026-10-23) verifies the signature with the inline public key and `ctlog.insecureIgnoreTlog`. Kyverno extracts images from containers, init containers and ephemeral containers only, so the policy declares an `images` expression of its own for `volumes[].image` (kyverno#17555 would have made that the default, and was closed unmerged on 2026-10-22; the workaround is posted there). A native ValidatingAdmissionPolicy holds the shape without Kyverno: an image volume in the model namespace comes from the models path inside, by digest.
 
 ## Consequences
 
@@ -28,7 +28,7 @@ Kubernetes mounts an OCI image as a read-only volume (`volumes[].image`, GA sinc
 - **Download the model at start-up** from a model hub. Impossible inside the boundary, and unverified outside it.
 - **A model in a PersistentVolume**, copied in by a Job. Nothing at admission knows what is in it.
 - **ModelPack or KitOps artifacts.** The right formats once containerd mounts artifacts; on CRI-O they mount today.
-- **Keyless signing with a TUF mirror inside.** Kyverno 1.19.1 still contacts the public TUF CDN first (kyverno#17883, fix open). The next step once that lands.
+- **Keyless signing with a TUF mirror inside.** Kyverno 1.19.1 and 1.19.2 still contact the public TUF CDN first (kyverno#17883, open on 2026-10-23). The next step once that lands.
 
 ## How to explain this to a customer
 

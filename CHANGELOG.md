@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Kyverno 1.19.2 (chart 3.9.2, its archive's sha256 matching the chart index's, from 1.19.1 and 3.9.1), every image it runs pinned by digest in `admission/kyverno-images.yaml` and `airgap/images.txt`.
+- Kyverno 1.19.2 (chart 3.9.2, its archive's sha256 matching the chart index's, from 1.19.1 and 3.9.1), every image it runs pinned by digest in `admission/kyverno-images.yaml` and `airgap/images.txt`. Every record that named 1.19.1 was checked against it: it still removes its webhook configurations at zero (the game day on the branch, run 39901010465: seven to two, and the guard refused), so ADR 17's guard still matters under the same webhook name; `extractPayload()` still returns the whole statement; the rotation drill passes; kyverno#17883, the public TUF client in a keyless attestor, is still open. The e2e on the branch passed all 13 jobs.
 
 ### Added
 

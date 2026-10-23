@@ -2,7 +2,7 @@
 # the model's signature and reads its AI-BOM in a webhook, and when its
 # Deployment is scaled to zero or deleted it removes its own webhook
 # configurations on the way down (pkg/webhooks/server.go, cleanup, when
-# runtime.IsGoingDown(); Kyverno 1.19.1). From then on the API server asks
+# runtime.IsGoingDown(); Kyverno 1.19.1 and 1.19.2). From then on the API server asks
 # nobody, and a model nobody signed is admitted: the game day saw it in run
 # 39543289132 (tests/e2e/gameday.sh).
 #

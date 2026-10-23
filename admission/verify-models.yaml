@@ -70,7 +70,7 @@ spec:
     # The AI-BOM. Each expression verifies the attestation's signature before
     # it reads it: CEL's && makes a missing attestation false rather than an
     # error, and extractPayload() returns the in-toto statement, so the BOM
-    # is under .predicate (Kyverno 1.19.1).
+    # is under .predicate (Kyverno 1.19.1 and 1.19.2).
     - expression: >-
         images.volumes.map(i, verifyAttestationSignatures(i, attestations.mlbom, [attestors.operator])).all(n, n > 0)
       message: model weights carry an AI-BOM signed with the operator's key
