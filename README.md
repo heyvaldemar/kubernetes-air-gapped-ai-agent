@@ -173,6 +173,17 @@ What one model server sustains on four vCPUs, from [run 39541814938](https://git
 
 On CPU a server's throughput is fixed, and parallel slots do not raise it: they split the same cores, and four slots of one thread did half the work of one slot with four. Concurrency only queues. Granite's p95 goes from 1.6 s with one caller to 11 s with eight, at the same 45 calls a minute. So a node is sized by replicas, one slot each with every core it has (the cluster here runs `-np 1`), and by the calls a minute its agents make at their busiest, which the evals report. Qwen3.5-2B writes about eight times as much per call, which is why it manages a sixth of the calls on the same cores. Not every run is clean: the first attempt of the Qwen one-slot job ran 30 times slower on one runner, 0.3 tokens a second, and was cancelled at its hour; its rerun is the row above. The workflow runs weekly, so a number taken from here is a measurement with a date, not a constant.
 
+On a GPU, inside the same boundary on AWS ([ADR 19](docs/decisions/0019-a-gpu-beside-the-cpu.md), [39898005905](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39898005905)): the same Granite, the same signed image by the same digest, the CUDA build of the same llama.cpp release on one NVIDIA L4, beside the CPU node of the same cluster, measured with the same calls.
+
+| On | Slots x threads | Concurrency | Calls a minute | p50 | p95 | A thousand calls |
+|---|---|---|---|---|---|---|
+| CPU, m7i.xlarge | 1 x 2 | 1 | 29.4 | 2.31 s | 2.48 s | $0.114 |
+| CPU, m7i.xlarge | 1 x 2 | 8 | 31.5 | 15.22 s | 16.27 s | $0.107 |
+| GPU, g6.xlarge (L4) | 8 x 0 | 1 | 224.3 | 0.29 s | 0.29 s | $0.060 |
+| GPU, g6.xlarge (L4) | 8 x 0 | 8 | 756.0 | 0.62 s | 0.72 s | $0.018 |
+
+On a GPU the slots batch, and eight callers got 3.4 times what one did, each in under a second; the CPU server held at 30 calls a minute and queued. At each node's list price for the time the calls took, the GPU was the cheaper call at every concurrency, though it costs four times as much an hour; for a model this small at low traffic the CPU node is still the smaller bill.
+
 ## Cost
 
 Nothing in a cloud. The model runs on CPU inside kind, and the daily runs call no model provider. In the run v1.1.0 was cut from, a task cost the model server between 7.8 and 27.1 vCPU-seconds across the six models, $0.0001 to $0.0003 at the on-demand list price of a c7i.large in us-east-1; the badges above carry the latest run's. The price is the model server's busy time at that list price: marginal compute at full use, not a bill. The weekly job with a model outside is priced by its tokens at Anthropic's list price ([`evals/pricing.json`](evals/pricing.json)), from a workspace whose monthly limit refuses anything past $10. CI is a fresh cluster per model on a GitHub-hosted runner; the eight green runs on main before 2026-10-20 took 18 to 37 minutes, most of it the evals. The model server gets two threads on any runner; what moves the price from run to run is how fast those two threads are. On the 2-vCPU runners this repository had while it was private, the same tasks took two to three times longer.
