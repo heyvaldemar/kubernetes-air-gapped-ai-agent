@@ -175,15 +175,28 @@ def digest_of(ref):
     return None
 
 
+def platform_manifests(ref):
+    """The digests of the per-platform manifests in the index a tag points to."""
+    r = subprocess.run(["docker", "buildx", "imagetools", "inspect", "--raw", ref], capture_output=True, text=True)
+    try:
+        return {m["digest"] for m in json.loads(r.stdout).get("manifests", [])}
+    except ValueError:
+        return set()
+
+
 def compare(what, ref):
     name, _, pinned = ref.partition("@")
     now = digest_of(name)
     if now is None:
         behind(what, "%s did not resolve; the registry did not answer or the tag is gone" % name)
-    elif now != pinned:
-        behind(what, "pinned %s, %s now points at %s" % (pinned[:19], name, now[:19]))
-    else:
+    elif now == pinned:
         ok(what, pinned[:19])
+    elif pinned in platform_manifests(name):
+        # Pinned to one platform's manifest on purpose (airgap/images-gpu.txt,
+        # ADR 19): current while it is still in the index the tag points to.
+        ok(what, "%s, a platform manifest in %s" % (pinned[:19], now[:19]))
+    else:
+        behind(what, "pinned %s, %s now points at %s" % (pinned[:19], name, now[:19]))
 
 
 def check_images():
