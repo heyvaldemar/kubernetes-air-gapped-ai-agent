@@ -97,6 +97,11 @@ case "${1:-}" in
         # existed: the tagging API had not caught up with the delete.
         *:security-group/*) aws ec2 describe-security-groups --group-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
         *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        # Run 39898005905 listed a subnet whose VPC was already gone, and a
+        # VPC is never deleted while it holds one: the same lag.
+        *:subnet/*) aws ec2 describe-subnets --subnet-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        *:route-table/*) aws ec2 describe-route-tables --route-table-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
+        *:launch-template/*) aws ec2 describe-launch-templates --launch-template-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
         # The registry inside, and Kyverno's Pod Identity association, which
         # goes with its cluster.
         *:repository/*) aws ecr describe-repositories --repository-names "${arn#*:repository/}" >/dev/null 2>&1 && really="$really $arn" ;;
@@ -116,21 +121,23 @@ case "${1:-}" in
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" <<'PY'
 import sys
-hours = (int(sys.argv[2]) - int(sys.argv[1])) / 3600
-node, gpu = sys.argv[3], sys.argv[4]
+now = int(sys.argv[2])
+hours = (now - int(sys.argv[1])) / 3600
+node, gpu, gpu_started = sys.argv[3], sys.argv[4], sys.argv[5]
 per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776}
-rates = {"EKS control plane": 0.10, "one %s node" % node: per_node[node], "six interface endpoints in two zones": 6 * 2 * 0.01}
-if gpu:
-    # The GPU node (ADR 19) is up for less of the run than the rest; priced
-    # as if for all of it, so the total is an upper bound.
-    rates["one %s GPU node, as if up the whole run" % gpu] = per_node[gpu]
-total = sum(rates.values()) * hours
+# (what, per hour, hours)
+rows = [("EKS control plane", 0.10, hours), ("one %s node" % node, per_node[node], hours),
+        ("six interface endpoints in two zones", 6 * 2 * 0.01, hours)]
+if gpu and gpu_started:
+    # The GPU node (ADR 19) from the apply that made it to the end of the
+    # destroy: an upper bound, since the destroy takes it down first.
+    rows.append(("one %s GPU node, %.2f h of the run" % (gpu, (now - int(gpu_started)) / 3600), per_node[gpu], (now - int(gpu_started)) / 3600))
 print("| What | Per hour | This run |\n|---|---|---|")
-for what, rate in rates.items():
-    print("| %s | $%.4f | $%.2f |" % (what, rate, rate * hours))
-print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, total))
+for what, rate, h in rows:
+    print("| %s | $%.4f | $%.2f |" % (what, rate, rate * h))
+print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, sum(r * h for _, r, h in rows)))
 PY
     ;;
   *) echo "usage: aws.sh <repositories|login|images|sweep|residue|cost>" >&2; exit 2 ;;

@@ -95,6 +95,7 @@ jobs:
       id-token: write
     outputs:
       started: ${{ steps.start.outputs.at }}
+      gpu_started: ${{ steps.gpu_clock.outputs.at }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -174,7 +175,6 @@ jobs:
               "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
               "node_instance_type": sys.argv[2],
               "images": json.loads(sys.argv[3]),
-              "gpu": os.environ["WITH_GPU"] == "true",
           }, indent=1))
           PY
           aws s3 cp run.tfvars.json "s3://$BUCKET/airgap-runs/$RUN_ID.tfvars.json"
@@ -258,7 +258,16 @@ jobs:
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
         run: ./scripts/evals.sh
 
-      # The GPU node joins while the evals run; by now it is Ready.
+      # The GPU node exists for the minutes it is measured, not the whole run:
+      # created by a second apply after the evals, and priced from this clock
+      # (run 39898005905 kept it up all 1.21 h, $0.98 of the run's $1.49).
+      - name: The GPU node, for the minutes it is measured
+        if: env.WITH_GPU == 'true'
+        id: gpu_clock
+        run: |
+          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+          terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true
+
       - name: A GPU beside the CPU, the same signed model
         if: env.WITH_GPU == 'true'
         env:
@@ -361,7 +370,6 @@ jobs:
           {
             echo "applied=true"
             echo "node=$(jq -r '.node_instance_type // "m7i.large"' run.tfvars.json)"
-            echo "gpu=$(jq -r 'if .gpu then (.gpu_instance_type // "g6.xlarge") else "" end' run.tfvars.json)"
           } >> "$GITHUB_OUTPUT"
           printf 'terraform {\n  backend "s3" {}\n}\n' > aws/ci_backend.tf
           terraform -chdir=aws init -input=false -lockfile=readonly \
@@ -381,5 +389,6 @@ jobs:
         env:
           STARTED: ${{ needs.up.outputs.started }}
           NODE_TYPE: ${{ steps.state.outputs.node }}
-          GPU_TYPE: ${{ steps.state.outputs.gpu }}
+          GPU_STARTED: ${{ needs.up.outputs.gpu_started }}
+          GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && 'g6.xlarge' || '' }}
         run: ./scripts/aws.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true
