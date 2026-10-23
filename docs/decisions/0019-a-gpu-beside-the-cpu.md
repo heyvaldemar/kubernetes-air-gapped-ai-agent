@@ -14,7 +14,7 @@ The account's quota for G and VT instances was 0. AWS raised it to 8 vCPUs on 20
 - **The same model, the same weights, the same engine.** The GPU server mounts the CPU server's signed model image by the same digest, verified by the same admission, and runs the CUDA build of the same llama.cpp release (b11429). Only the hardware differs, so the difference measured is the hardware's.
 - **Inside the same boundary.** One g6.xlarge (one NVIDIA L4) in the same private subnets, on EKS's AL2023 NVIDIA image, tainted so only what asks for a GPU lands on it. The CUDA image and NVIDIA's device plugin cross in the same signed bundle, pinned to their linux/amd64 manifests (`airgap/images-gpu.txt`), seeded only when a run asks for a GPU.
 - **Measured with the agent's own calls.** `scripts/capacity.py` against both servers at concurrency 1, 2, 4 and 8: calls a minute, p50 and p95, output tokens a second, and what a thousand calls cost at each node's list price. The CPU server as the evals run it (one slot, two threads); the GPU server with eight slots, since on a GPU requests in flight are batched.
-- **Checked like everything else** (`scripts/gpu.sh check`): the node offers one GPU; the GPU server runs on it with the CPU server's model digest; every layer is on the GPU; a pod asking for the GPU with weights nobody signed is refused.
+- **Checked like everything else** (`scripts/gpu.sh check`): the node offers one GPU; the GPU server runs on it with the CPU server's model digest; the model is in the GPU's memory, by `nvidia-smi` in the server's container; a pod asking for the GPU with weights nobody signed is refused.
 - **By hand first** (`gpu: true` on a dispatch), weekly once a run has passed (`AWS_GPU_ENABLED`).
 
 ## Consequences

@@ -11,7 +11,8 @@
 #            server names it and admission reads the same signature
 #   check    what the run claims about the GPU side, appended to $E2E_RESULTS:
 #            the node offers one GPU; the GPU server runs on it with the same
-#            model digest as the CPU server; every layer is on the GPU; and a
+#            model digest as the CPU server; the model is in the GPU's memory
+#            (nvidia-smi, in the server's container); and a
 #            pod that asks for the GPU with weights nobody signed is refused
 #            like any other
 #   measure  scripts/capacity.py against the CPU server and the GPU server,
@@ -75,11 +76,16 @@ case "${1:-}" in
     else
       fail "the GPU server's model or node is not the expected one: model '${gpu_ref:-none}' against '${cpu_ref:-none}', on '${on:-nowhere}'"
     fi
-    off="$(kubectl -n inference logs deploy/llama-gpu 2>/dev/null | grep -oE 'offloaded [0-9]+/[0-9]+ layers to GPU' | tail -1)"
-    if [ -n "$off" ] && [ "$(sed -E 's/offloaded ([0-9]+)\/([0-9]+).*/\1/' <<<"$off")" = "$(sed -E 's/offloaded ([0-9]+)\/([0-9]+).*/\2/' <<<"$off")" ]; then
-      pass "every layer of the model is on the GPU (llama-server: $off)"
+    # Asked of the GPU itself, not of a log line: llama-server b11429 no
+    # longer logs its offload at the default verbosity (run 39893082349).
+    # With every layer on the L4 the model and its cache take gigabytes of
+    # its memory; a server that fell back to the CPU leaves it near empty.
+    mem="$(kubectl -n inference exec deploy/llama-gpu -- nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)"
+    used="$(cut -d, -f2 <<<"$mem" | tr -d ' ')"
+    if [ -n "$used" ] && [ "$used" -ge 1024 ] 2>/dev/null; then
+      pass "the model is on the GPU: the $(cut -d, -f1 <<<"$mem" | sed 's/^ *//') holds ${used} MiB of its$(cut -d, -f3 <<<"$mem") MiB (nvidia-smi, in the server's container)"
     else
-      fail "not every layer is on the GPU: '${off:-no offload line in the server log}'"
+      fail "the model is not on the GPU: nvidia-smi in the server's container answered '${mem:-nothing}'"
     fi
     unsigned="$MODELS/plant-unsigned@$(cat "$STATE/plant-unsigned.digest")"
     out="$(kubectl apply --dry-run=server -f - 2>&1 <<EOF
