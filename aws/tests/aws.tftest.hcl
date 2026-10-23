@@ -226,3 +226,45 @@ run "an_image_ecr_cannot_name_is_refused" {
 
   expect_failures = [var.images]
 }
+
+# ADR 19: a GPU node only when asked, and only for what asks for a GPU.
+run "no_gpu_unless_asked" {
+  command = plan
+
+  assert {
+    condition     = length(aws_eks_node_group.gpu) == 0 && length(aws_launch_template.gpu) == 0
+    error_message = "a run without gpu makes no GPU node"
+  }
+}
+
+run "the_gpu_node" {
+  command = plan
+
+  variables {
+    gpu = true
+  }
+
+  assert {
+    condition     = aws_eks_node_group.gpu[0].ami_type == "AL2023_x86_64_NVIDIA" && aws_eks_node_group.gpu[0].instance_types == tolist(["g6.xlarge"]) && aws_eks_node_group.gpu[0].scaling_config[0].max_size == 1
+    error_message = "one g6.xlarge on EKS's NVIDIA image"
+  }
+  assert {
+    condition     = anytrue([for t in aws_eks_node_group.gpu[0].taint : t.key == "nvidia.com/gpu" && t.effect == "NO_SCHEDULE"])
+    error_message = "the GPU node is tainted: only what asks for a GPU lands on it"
+  }
+  assert {
+    condition     = aws_launch_template.gpu[0].metadata_options[0].http_tokens == "required" && aws_launch_template.gpu[0].metadata_options[0].http_put_response_hop_limit == 1
+    error_message = "IMDSv2 only, one hop, on the GPU node too"
+  }
+}
+
+run "a_gpu_beyond_the_quota_is_refused" {
+  command = plan
+
+  variables {
+    gpu               = true
+    gpu_instance_type = "p5.48xlarge"
+  }
+
+  expect_failures = [var.gpu_instance_type]
+}

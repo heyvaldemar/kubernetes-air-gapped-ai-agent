@@ -73,12 +73,13 @@ check_kubeconform() {
   mkdir -p .cache/kubeconform out
   kubectl kustomize manifests >out/manifests.yaml || return 1
   sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama#g" -e "s#@ALIAS@#m#g" manifests/inference/llama.yaml >out/llama.yaml
+  sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama-gpu#g" -e "s#@ALIAS@#m#g" manifests/inference/llama-gpu.yaml >out/llama-gpu.yaml
   for f in tests/e2e/plants/*.yaml tests/e2e/plants-frontier/*.yaml; do
     sed -e "s#@[A-Z_]*@#registry.boundary.internal:5000/models/m@$DIGEST#" "$f" >"out/plant-$(basename "$f")"
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml manifests/gpu/device-plugin.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
@@ -90,7 +91,7 @@ check_images() {
   local bad
   bad="$(grep -rnE '(image:|"image":|^[A-Z]+=)[[:space:]]*"?[a-z0-9.-]+\.[a-z]+/[^@[:space:]"]+:[^@[:space:]"]+("|$|[[:space:]])' \
     manifests admission/kyverno-images.yaml ci-images.pins airgap/registry.ref .github/workflows scripts 2>/dev/null | grep -v '@sha256:' || true)"
-  bad+="$(grep -vE '^\s*(#|$)' airgap/images.txt | grep -v '@sha256:' || true)"
+  bad+="$(grep -vE '^\s*(#|$)' airgap/images.txt airgap/images-gpu.txt | grep -v '@sha256:' || true)"
   # The node image reaches the cluster outside the bundle (README, What it
   # does not do); its pin is the one thing that says which node it was.
   bad+="$(grep -nE '^\s*image:' kind/*.yaml | grep -v '@sha256:' || true)"
@@ -101,10 +102,12 @@ check_images() {
 check_boundary() {
   python3 - <<'PY' || return 1
 import re, sys
-inside = {l.strip() for l in open("airgap/images.txt") if l.strip() and not l.startswith("#")}
+inside = {l.strip() for f in ("airgap/images.txt", "airgap/images-gpu.txt")
+          for l in open(f) if l.strip() and not l.startswith("#")}
 need = set()
 for f in ("manifests/mcp/mcp.yaml", "manifests/records/records.yaml", "manifests/tools/gateway.yaml",
-          "manifests/inference/llama.yaml", "manifests/agents/evals.yaml"):
+          "manifests/inference/llama.yaml", "manifests/agents/evals.yaml",
+          "manifests/inference/llama-gpu.yaml", "manifests/gpu/device-plugin.yaml"):
     need.update(re.findall(r"^\s*-?\s*image:\s*(\S+@sha256:[0-9a-f]{64})", open(f).read(), re.M))
 reg = rep = None
 for line in open("admission/kyverno-images.yaml"):
@@ -138,7 +141,7 @@ if not zot.get("auth", {}).get("htpasswd") or any(r.get("anonymousPolicy") != ["
 airgap = open("scripts/airgap.sh").read()
 if "--password-stdin" not in airgap or re.search(r"oras login[^\n]*\s-p\s", airgap):
     missing.append("scripts/airgap.sh does not hand the registry's password to oras on stdin")
-print("\n".join(missing) or "every image the cluster runs is in airgap/images.txt (%d); the registry lets anyone read and only loader write" % len(need))
+print("\n".join(missing) or "every image the cluster runs is in airgap/images.txt or images-gpu.txt (%d); the registry lets anyone read and only loader write" % len(need))
 sys.exit(1 if missing else 0)
 PY
 }

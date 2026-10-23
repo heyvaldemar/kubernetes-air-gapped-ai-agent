@@ -16,6 +16,8 @@ ref="$MODELS/$MODEL@$digest"
 # SERVE_NAME names the server: llama for the evals, one name per model when a
 # run serves two side by side behind the gateway.
 NAME="${SERVE_NAME:-llama}"
-sed -e "s#@MODEL@#$ref#" -e "s#@NAME@#$NAME#g" -e "s#@ALIAS@#$MODEL#g" "$ROOT/manifests/inference/llama.yaml" | relocate | kubectl apply -f - >/dev/null
+# SERVE_MANIFEST: the GPU server's (ADR 19) instead of the CPU server's.
+MANIFEST="${SERVE_MANIFEST:-$ROOT/manifests/inference/llama.yaml}"
+sed -e "s#@MODEL@#$ref#" -e "s#@NAME@#$NAME#g" -e "s#@ALIAS@#$MODEL#g" "$MANIFEST" | relocate | kubectl apply -f - >/dev/null
 kubectl -n inference rollout status "deployment/$NAME" --timeout=600s >/dev/null
 printf '== llama-server %s is up, serving %s\n' "$NAME" "$ref"

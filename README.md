@@ -217,6 +217,7 @@ The [threat model](docs/threat-model.md) lists every threat with its control and
 | 16 | [Rotating the operator's key with the model served](docs/decisions/0016-rotating-the-operators-key.md) |
 | 17 | [No model is mounted while Kyverno is away](docs/decisions/0017-no-model-while-kyverno-is-away.md) |
 | 18 | [The boundary on AWS: a VPC with no route out, and no name lookup out](docs/decisions/0018-the-boundary-on-aws.md) |
+| 19 | [A GPU beside the CPU: the same model, the same weights, measured side by side](docs/decisions/0019-a-gpu-beside-the-cpu.md) |
 
 ## Related
 

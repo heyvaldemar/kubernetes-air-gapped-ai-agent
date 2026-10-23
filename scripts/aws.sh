@@ -110,17 +110,22 @@ case "${1:-}" in
     ;;
   cost)
     # List prices, us-east-1, per hour, read from the AWS price list on
-    # 2026-10-21: the EKS control plane, the node on demand, and an
+    # 2026-10-21, the g6 nodes on 2026-10-22 from instances.vantage.sh, which
+    # republishes it: the EKS control plane, the nodes on demand, and an
     # interface endpoint per zone (six endpoints, two zones). The DNS
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" <<'PY'
 import sys
 hours = (int(sys.argv[2]) - int(sys.argv[1])) / 3600
-node = sys.argv[3]
-per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016}[node]
-rates = {"EKS control plane": 0.10, "one %s node" % node: per_node, "six interface endpoints in two zones": 6 * 2 * 0.01}
+node, gpu = sys.argv[3], sys.argv[4]
+per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776}
+rates = {"EKS control plane": 0.10, "one %s node" % node: per_node[node], "six interface endpoints in two zones": 6 * 2 * 0.01}
+if gpu:
+    # The GPU node (ADR 19) is up for less of the run than the rest; priced
+    # as if for all of it, so the total is an upper bound.
+    rates["one %s GPU node, as if up the whole run" % gpu] = per_node[gpu]
 total = sum(rates.values()) * hours
 print("| What | Per hour | This run |\n|---|---|---|")
 for what, rate in rates.items():

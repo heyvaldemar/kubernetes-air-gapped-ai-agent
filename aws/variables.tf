@@ -90,3 +90,25 @@ variable "images" {
     error_message = "every image is a repository path ECR accepts: lower case, by its original host and path."
   }
 }
+
+variable "gpu" {
+  description = <<-EOT
+    Whether the run adds one GPU node beside the CPU one (ADR 19): the same
+    signed model served by the CUDA build of the same llama.cpp release, so
+    the two are measured side by side. Approved quota: 8 vCPUs of G and VT
+    instances in us-east-1 (2026-10-22).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "gpu_instance_type" {
+  description = "The GPU node's instance type: one NVIDIA L4."
+  type        = string
+  default     = "g6.xlarge"
+
+  validation {
+    condition     = contains(["g6.xlarge", "g6.2xlarge"], var.gpu_instance_type)
+    error_message = "gpu_instance_type is g6.xlarge or g6.2xlarge: one L4, inside the 8 vCPUs the account's quota allows, and priced in scripts/aws.sh cost."
+  }
+}

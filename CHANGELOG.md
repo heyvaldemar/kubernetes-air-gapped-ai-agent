@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A GPU beside the CPU on AWS (ADR 19, proposed): with `gpu: true` on a dispatch (or `AWS_GPU_ENABLED` on the schedule), the AWS run adds one g6.xlarge (one NVIDIA L4) in the same private subnets, on EKS's AL2023 NVIDIA image and tainted, and serves the CPU server's signed model, by the same digest, with the CUDA build of the same llama.cpp release (`manifests/inference/llama-gpu.yaml`). The CUDA image and NVIDIA's device plugin cross in the same signed bundle, pinned to their linux/amd64 manifests in `airgap/images-gpu.txt` and seeded only on a GPU run (`GPU=1 scripts/airgap.sh seed`). `scripts/gpu.sh` installs the device plugin, serves the model, checks that the node offers one GPU, that the GPU server runs the CPU server's model digest with every layer on the GPU, and that a pod asking for the GPU with weights nobody signed is refused, then measures both servers with `scripts/capacity.py` (which now labels where each ran) at concurrency 1, 2, 4 and 8, with the cost of a thousand calls at each node's list price. Three Terraform tests and four plants (58 in all). The AWS account's G and VT quota went from 0 to 8 vCPUs on 2026-10-22, after an appeal that described this test.
+
 ### Security
 
 - `admission/carried-images.yaml` holds image volumes to the digests the bundle carried, beside containers, init containers and ephemeral containers. Inside the boundary an image volume could only pull what the registry inside holds, which is what the bundle carried, so this was not a way in here; on any other registry it would be, as `kubernetes-supply-chain-admission`'s ADR 6 found on 2026-10-22. Plant `volume-not-carried`, in a namespace no model policy reads, and a static check with its plant. The model policy's comment, the README and ADR 3 say that kyverno/kyverno#17555, which would have made Kyverno extract image volumes by default, was closed unmerged on 2026-10-22.

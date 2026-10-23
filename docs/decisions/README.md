@@ -22,3 +22,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 16 | [Rotating the operator's key with the model served](0016-rotating-the-operators-key.md) | accepted |
 | 17 | [No model is mounted while Kyverno is away](0017-no-model-while-kyverno-is-away.md) | accepted |
 | 18 | [The boundary on AWS: a VPC with no route out, and no name lookup out](0018-the-boundary-on-aws.md) | accepted |
+| 19 | [A GPU beside the CPU: the same model, the same weights, measured side by side](0019-a-gpu-beside-the-cpu.md) | proposed |

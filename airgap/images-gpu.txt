@@ -1,0 +1,9 @@
+# The images a GPU run adds (ADR 19), by tag and digest, seeded beside
+# airgap/images.txt only when the run asks for a GPU (GPU=1 scripts/airgap.sh
+# seed), so the daily bundle stays what it was. Each is pinned to its
+# linux/amd64 manifest, not the multi-platform index: the CUDA build is 2.5 GB
+# compressed for one platform, and the bundle carries only what the node runs.
+# llama.cpp's server, CUDA build of b11429: the release the CPU server runs
+ghcr.io/ggml-org/llama.cpp:server-cuda-b11429@sha256:a863a2d1dc2cbc5326c995ae380eec9c57f37a7e1cac944f0c6f43e4e9afff23
+# NVIDIA's device plugin, which offers the node's GPU to the scheduler
+nvcr.io/nvidia/k8s-device-plugin:v0.20.1@sha256:d279ecdb47b252c4cd96f4224650e9808c36012f6979570c9611ddbc5b0749a7

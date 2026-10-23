@@ -1,0 +1,70 @@
+# The model server on the GPU (ADR 19): the same signed model image as the
+# CPU server's, mounted the same way, served by the CUDA build of the same
+# llama.cpp release with every layer on the GPU (-ngl 99). Eight slots: on a
+# GPU, requests in flight are batched, where on CPU slots only split the
+# cores (README, Sizing). @MODEL@, @NAME@ and @ALIAS@ as in llama.yaml.
+# Only on the GPU node: it asks for one GPU and tolerates the node's taint.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: @NAME@
+  namespace: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llama, server: @NAME@}
+  template:
+    metadata:
+      labels: {app: llama, server: @NAME@}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      nodeSelector:
+        boundary.heyvaldemar.com/accelerator: nvidia
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11429@sha256:a863a2d1dc2cbc5326c995ae380eec9c57f37a7e1cac944f0c6f43e4e9afff23
+          # 8192 tokens a slot, as the CPU server has for its one.
+          args: ["-m", "/models/model.gguf", "--alias", "@ALIAS@", "--jinja", "-c", "65536", "-np", "8", "-ngl", "99",
+                 "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
+          ports: [{name: http, containerPort: 8080}]
+          lifecycle:
+            preStop:
+              sleep: {seconds: 60}
+          resources:
+            requests: {cpu: 500m, memory: 2Gi}
+            limits: {memory: 8Gi, nvidia.com/gpu: 1}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: model, mountPath: /models, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: model
+          image:
+            reference: @MODEL@
+            pullPolicy: IfNotPresent
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: @NAME@
+  namespace: inference
+spec:
+  selector: {app: llama, server: @NAME@}
+  ports: [{name: http, port: 8080, targetPort: http}]

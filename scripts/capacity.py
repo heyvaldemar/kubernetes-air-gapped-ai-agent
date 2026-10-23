@@ -74,7 +74,7 @@ def pct(xs, q):
 def run(url, out, levels):
     bodies = requests()
     one(url, bodies[0], 0)  # load the model and warm the cache before anything is timed
-    result = {"server": {k: os.environ.get(k) for k in ("MODEL", "SLOTS", "THREADS", "CONTEXT", "RUNNER_CPUS")},
+    result = {"server": {k: os.environ.get(k) for k in ("MODEL", "SLOTS", "THREADS", "CONTEXT", "RUNNER_CPUS", "ACCELERATOR")},
               "requests": len(bodies), "levels": []}
     seed = 1
     for c in levels:
@@ -106,13 +106,15 @@ def table(directory):
         r = json.load(open(f))
         s = r["server"]
         for lv in r["levels"]:
-            rows.append((s["MODEL"], int(s["SLOTS"]), int(s["THREADS"]), lv))
-    rows.sort(key=lambda x: (x[0], x[1], x[3]["concurrency"]))
-    print("| Model | Slots x threads | Concurrency | Calls a minute | p50 | p95 | Output tokens/s | Failed |")
-    print("|---|---|---|---|---|---|---|---|")
-    for model, slots, threads, lv in rows:
-        print("| %s | %d x %d | %d | %s | %s s | %s s | %s | %d of %d |" % (
-            model, slots, threads, lv["concurrency"], lv["calls_per_min"], lv["p50_s"], lv["p95_s"],
+            # ACCELERATOR names where the server ran when it was not the
+            # runner's CPU (ADR 19); older files have none.
+            rows.append((s["MODEL"], s.get("ACCELERATOR") or "CPU", int(s["SLOTS"]), int(s["THREADS"]), lv))
+    rows.sort(key=lambda x: (x[0], x[1], x[2], x[4]["concurrency"]))
+    print("| Model | On | Slots x threads | Concurrency | Calls a minute | p50 | p95 | Output tokens/s | Failed |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for model, on, slots, threads, lv in rows:
+        print("| %s | %s | %d x %d | %d | %s | %s s | %s s | %s | %d of %d |" % (
+            model, on, slots, threads, lv["concurrency"], lv["calls_per_min"], lv["p50_s"], lv["p95_s"],
             lv["out_tokens_per_s"], lv["failed"], lv["calls"]))
 
 

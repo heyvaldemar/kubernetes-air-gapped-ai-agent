@@ -8,7 +8,8 @@
 #   seed      copy every image in airgap/images.txt into it by digest, with
 #             the signatures and attestations that refer to it, under its
 #             original host and path (docker.io/library/busybox stays
-#             docker.io/library/busybox)
+#             docker.io/library/busybox); with GPU=1, airgap/images-gpu.txt
+#             too (ADR 19)
 #   mirror    point the node's containerd at it for every upstream host, so
 #             an image pulled by its original name is served from inside, and
 #             teach the node the registry's name (/etc/hosts: the node has no
@@ -44,7 +45,7 @@ CA="$STATE/ca.crt"
 # The registry's one account, "loader", logs in here: oras and cosign both
 # read this, and nothing else may write to the registry (ADR 2).
 export DOCKER_CONFIG="$STATE/docker"
-HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io cr.agentgateway.dev)
+HOSTS=(docker.io ghcr.io quay.io registry.k8s.io reg.kyverno.io cr.agentgateway.dev nvcr.io)
 say() { printf '== %s\n' "$*"; }
 nodes() { kind get nodes --name "$CLUSTER"; }
 registry_ip() { docker inspect -f "{{(index .NetworkSettings.Networks \"$NETWORK\").IPAddress}}" "$REGISTRY"; }
@@ -105,7 +106,7 @@ case "${1:-}" in
       got="$(oras manifest fetch --ca-file "$CA" --descriptor "$NAME:5000/$repo:$tag" | sed -n 's/.*"digest":"\([^"]*\)".*/\1/p')"
       [ "$got" = "$digest" ] || { echo "seeded $repo:$tag as $got, wanted $digest" >&2; exit 1; }
       say "seeded $repo:$tag@${digest:0:19}"
-    done <"$ROOT/airgap/images.txt"
+    done < <(cat "$ROOT/airgap/images.txt"; [ "${GPU:-0}" != 1 ] || cat "$ROOT/airgap/images-gpu.txt")
     ;;
   mirror)
     ip="$(registry_ip)"
