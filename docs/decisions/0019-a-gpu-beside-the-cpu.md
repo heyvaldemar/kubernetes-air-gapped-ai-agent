@@ -15,7 +15,7 @@ The account's quota for G and VT instances was 0. AWS raised it to 8 vCPUs on 20
 - **Inside the same boundary.** One g6.xlarge (one NVIDIA L4) in the same private subnets, on EKS's AL2023 NVIDIA image, tainted so only what asks for a GPU lands on it. The CUDA image and NVIDIA's device plugin cross in the same signed bundle, pinned to their linux/amd64 manifests (`airgap/images-gpu.txt`), seeded only when a run asks for a GPU.
 - **Measured with the agent's own calls.** `scripts/capacity.py` against both servers at concurrency 1, 2, 4 and 8: calls a minute, p50 and p95, output tokens a second, and what a thousand calls cost at each node's list price. The CPU server as the evals run it (one slot, two threads); the GPU server with eight slots, since on a GPU requests in flight are batched.
 - **Checked like everything else** (`scripts/gpu.sh check`): the node offers one GPU; the GPU server runs on it with the CPU server's model digest; the model is in the GPU's memory, by `nvidia-smi` in the server's container; a pod asking for the GPU with weights nobody signed is refused.
-- **The GPU node for the minutes it is measured.** The run's first apply makes no GPU node; a second apply after the evals adds it, and the cost table prices it from that apply.
+- **The GPU node for the minutes it is measured.** The run's first apply makes no GPU node. After the evals, the game day and the CPU server's measurement, a second apply adds it; a third takes it away as soon as it is measured, whatever happened, and the cost table prices it between the two.
 - **By hand first** (`gpu: true` on a dispatch), weekly once a run has passed (`AWS_GPU_ENABLED`).
 
 ## On AWS, 2026-10-23
@@ -34,7 +34,7 @@ The account's quota for G and VT instances was 0. AWS raised it to 8 vCPUs on 20
 
 On the GPU the slots batch: eight callers got 3.4 times the calls a minute one caller got, each answered in well under a second. On the CPU the server queued: 30 calls a minute whatever the concurrency, the wait growing with the queue. A thousand calls, at each node's on-demand list price for the time it took, cost less on the GPU at every concurrency measured, though the node costs four times as much an hour: it answered 7.6 to 24 times as many. The CPU server ran as the evals run it, one slot on two of the node's four vCPUs; with four threads the runner measured about 45 calls a minute (README, Sizing), which does not change the order.
 
-That run kept the GPU node up from the first apply, 1.21 h of which it was measured for a fraction, so $0.98 of the run's $1.49 was the GPU's. From here it is made after the evals and priced from then.
+That run kept the GPU node up from the first apply, so $0.98 of the run's $1.49 was the GPU's. [39905417932](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39905417932) made it after the evals and kept it to the destroy: 0.93 h of the run's 1.41, all checks passed, $1.34. From there it exists only around its own measurement.
 
 ## Consequences
 

@@ -15,11 +15,13 @@
 #            (nvidia-smi, in the server's container); and a
 #            pod that asks for the GPU with weights nobody signed is refused
 #            like any other
-#   measure  scripts/capacity.py against the CPU server and the GPU server,
-#            each through a port-forward from the runner, at concurrency 1,
-#            2, 4 and 8: calls a minute, p50 and p95, output tokens a second,
-#            and what a thousand calls cost at the node's list price. The
-#            table to $GITHUB_STEP_SUMMARY, the files to $CAPACITY_DIR
+#   measure <cpu|gpu>  scripts/capacity.py against one server, through a
+#            port-forward from the runner, at concurrency 1, 2, 4 and 8:
+#            calls a minute, p50 and p95, output tokens a second. The CPU
+#            server first, before the GPU node exists; then the GPU's, which
+#            also writes the comparison: what a thousand calls cost at each
+#            node's list price, the table to $GITHUB_STEP_SUMMARY, the files
+#            to $CAPACITY_DIR
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -112,16 +114,21 @@ EOF
   measure)
     dir="${CAPACITY_DIR:-$STATE/capacity}"
     mkdir -p "$dir"
-    kubectl -n inference port-forward svc/llama 18080:8080 >/dev/null 2>&1 & pf_cpu=$!
-    kubectl -n inference port-forward svc/llama-gpu 18081:8080 >/dev/null 2>&1 & pf_gpu=$!
-    trap 'kill "$pf_cpu" "$pf_gpu" 2>/dev/null' EXIT
-    for port in 18080 18081; do
-      for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$port/health" && break; sleep 1; done
-    done
-    MODEL="$MODEL" SLOTS=1 THREADS=2 ACCELERATOR="CPU, $CPU_NODE" \
-      python3 "$ROOT/scripts/capacity.py" run http://127.0.0.1:18080 "$dir/cpu.json" 1,2,4,8
+    case "${2:-}" in
+      cpu) svc=llama port=18080 ;;
+      gpu) svc=llama-gpu port=18081 ;;
+      *) echo "usage: gpu.sh measure <cpu|gpu>" >&2; exit 2 ;;
+    esac
+    kubectl -n inference port-forward "svc/$svc" "$port:8080" >/dev/null 2>&1 & pf=$!
+    trap 'kill "$pf" 2>/dev/null' EXIT
+    for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$port/health" && break; sleep 1; done
+    if [ "$2" = cpu ]; then
+      MODEL="$MODEL" SLOTS=1 THREADS=2 ACCELERATOR="CPU, $CPU_NODE" \
+        python3 "$ROOT/scripts/capacity.py" run "http://127.0.0.1:$port" "$dir/cpu.json" 1,2,4,8
+      exit $?
+    fi
     MODEL="$MODEL" SLOTS=8 THREADS=0 ACCELERATOR="GPU, $GPU_NODE (L4)" \
-      python3 "$ROOT/scripts/capacity.py" run http://127.0.0.1:18081 "$dir/gpu.json" 1,2,4,8
+      python3 "$ROOT/scripts/capacity.py" run "http://127.0.0.1:$port" "$dir/gpu.json" 1,2,4,8
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       { echo "### One model server, on CPU and on GPU"; echo; python3 "$ROOT/scripts/capacity.py" table "$dir"; echo; } >>"$GITHUB_STEP_SUMMARY"
     fi

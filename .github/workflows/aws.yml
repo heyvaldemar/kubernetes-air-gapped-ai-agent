@@ -96,6 +96,7 @@ jobs:
     outputs:
       started: ${{ steps.start.outputs.at }}
       gpu_started: ${{ steps.gpu_clock.outputs.at }}
+      gpu_stopped: ${{ steps.gpu_stop.outputs.at }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -258,36 +259,7 @@ jobs:
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
         run: ./scripts/evals.sh
 
-      # The GPU node exists for the minutes it is measured, not the whole run:
-      # created by a second apply after the evals, and priced from this clock
-      # (run 39898005905 kept it up all 1.21 h, $0.98 of the run's $1.49).
-      - name: The GPU node, for the minutes it is measured
-        if: env.WITH_GPU == 'true'
-        id: gpu_clock
-        run: |
-          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-          terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true
-
-      - name: A GPU beside the CPU, the same signed model
-        if: env.WITH_GPU == 'true'
-        env:
-          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
-        run: |
-          kubectl wait nodes -l boundary.heyvaldemar.com/accelerator=nvidia --for=condition=Ready --timeout=900s
-          ./scripts/gpu.sh install
-          ./scripts/gpu.sh serve
-          ./scripts/gpu.sh check
-
-      - name: The same model on CPU and on GPU, measured
-        if: env.WITH_GPU == 'true'
-        env:
-          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
-          CAPACITY_DIR: ${{ runner.temp }}/capacity
-          NODE_TYPE: m7i.xlarge
-          GPU_TYPE: g6.xlarge
-        run: ./scripts/gpu.sh measure
-
-      # Last, since it takes the cluster apart.
+      # It takes parts of the cluster down and puts them back.
       - name: Game day, parts of the boundary taken down while it serves
         if: env.AGENT == 'true'
         env:
@@ -295,6 +267,55 @@ jobs:
           SERVED_DEPLOYMENT: llama
           SERVED_MODEL: ${{ env.MODEL }}
         run: ./tests/e2e/gameday.sh
+
+      # The GPU node exists only around its own measurement (ADR 19): the CPU
+      # server is measured first, then a second apply makes the GPU node,
+      # and a third takes it away as soon as it is measured. Run 39905417932
+      # made it after the evals and kept it to the destroy: 0.93 h of 1.41.
+      - name: The CPU server, measured
+        if: env.WITH_GPU == 'true'
+        env:
+          CAPACITY_DIR: ${{ runner.temp }}/capacity
+          NODE_TYPE: m7i.xlarge
+        run: ./scripts/gpu.sh measure cpu
+
+      - name: The GPU node, for the minutes it is measured
+        if: env.WITH_GPU == 'true'
+        id: gpu_clock
+        run: |
+          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+          terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true
+
+      - name: A GPU beside the CPU, the same signed model, measured
+        if: env.WITH_GPU == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          CAPACITY_DIR: ${{ runner.temp }}/capacity
+          NODE_TYPE: m7i.xlarge
+          GPU_TYPE: g6.xlarge
+        run: |
+          kubectl wait nodes -l boundary.heyvaldemar.com/accelerator=nvidia --for=condition=Ready --timeout=900s
+          ./scripts/gpu.sh install
+          ./scripts/gpu.sh serve
+          ./scripts/gpu.sh check
+          ./scripts/gpu.sh measure gpu
+
+      - name: What the GPU side looked like
+        if: failure() && steps.gpu_clock.outputs.at != ''
+        run: |
+          kubectl get nodes -L boundary.heyvaldemar.com/accelerator || true
+          kubectl -n gpu-system logs ds/nvidia-device-plugin --tail=30 || true
+          kubectl -n inference describe pod -l server=llama-gpu | tail -30 || true
+          kubectl -n inference logs deploy/llama-gpu --tail=40 || true
+
+      # Whatever the steps above did: the GPU goes as soon as it is not
+      # needed, and the clock says when.
+      - name: The GPU node, taken away
+        if: always() && steps.gpu_clock.outputs.at != ''
+        id: gpu_stop
+        run: |
+          terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=false
+          echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: What the cluster looked like
         if: failure()
@@ -307,9 +328,6 @@ jobs:
           kubectl -n agents logs job/evals --tail=20 || true
           kubectl -n mcp logs deploy/mcp-server --tail=20 || true
           kubectl -n agentgateway-system logs deploy/agentgateway --tail=40 || true
-          kubectl -n gpu-system logs ds/nvidia-device-plugin --tail=30 || true
-          kubectl -n inference describe pod -l server=llama-gpu | tail -30 || true
-          kubectl -n inference logs deploy/llama-gpu --tail=40 || true
 
       - name: Keep the checks
         if: always()
@@ -390,5 +408,6 @@ jobs:
           STARTED: ${{ needs.up.outputs.started }}
           NODE_TYPE: ${{ steps.state.outputs.node }}
           GPU_STARTED: ${{ needs.up.outputs.gpu_started }}
+          GPU_STOPPED: ${{ needs.up.outputs.gpu_stopped }}
           GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && 'g6.xlarge' || '' }}
         run: ./scripts/aws.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true

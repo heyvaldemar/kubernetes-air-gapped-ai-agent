@@ -121,19 +121,20 @@ case "${1:-}" in
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" "${GPU_STOPPED:-}" <<'PY'
 import sys
 now = int(sys.argv[2])
 hours = (now - int(sys.argv[1])) / 3600
-node, gpu, gpu_started = sys.argv[3], sys.argv[4], sys.argv[5]
+node, gpu, gpu_started, gpu_stopped = sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776}
 # (what, per hour, hours)
 rows = [("EKS control plane", 0.10, hours), ("one %s node" % node, per_node[node], hours),
         ("six interface endpoints in two zones", 6 * 2 * 0.01, hours)]
 if gpu and gpu_started:
-    # The GPU node (ADR 19) from the apply that made it to the end of the
-    # destroy: an upper bound, since the destroy takes it down first.
-    rows.append(("one %s GPU node, %.2f h of the run" % (gpu, (now - int(gpu_started)) / 3600), per_node[gpu], (now - int(gpu_started)) / 3600))
+    # The GPU node (ADR 19) from the apply that made it to the apply that
+    # took it away, or to the end of the destroy when that one never ran.
+    gpu_h = ((int(gpu_stopped) if gpu_stopped else now) - int(gpu_started)) / 3600
+    rows.append(("one %s GPU node, %.2f h of the run" % (gpu, gpu_h), per_node[gpu], gpu_h))
 print("| What | Per hour | This run |\n|---|---|---|")
 for what, rate, h in rows:
     print("| %s | $%.4f | $%.2f |" % (what, rate, rate * h))
