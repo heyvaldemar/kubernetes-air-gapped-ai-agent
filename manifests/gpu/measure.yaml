@@ -1,0 +1,67 @@
+# Where scripts/capacity.py measures a model server from inside the cluster
+# (ADR 19), for the minutes it does: scripts/gpu.sh applies this file and the
+# Job in capacity.yaml, reads the Job's log, and deletes both, the door in
+# inference included. From the runner, every call crosses a port-forward
+# through the EKS API, and two runs measured the same L4 0.09 to 0.13 s a
+# call apart at every concurrency that way.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: measure
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+# The measurement's only ways out: the model servers, and the cluster's DNS
+# to find them. Nothing reaches it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: to-the-model-servers
+  namespace: measure
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: inference
+          podSelector:
+            matchLabels:
+              app: llama
+      ports:
+        - {protocol: TCP, port: 8080}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# The door in: the model servers answer the measurement's pod as they answer
+# the agents, on their one port, while it runs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: from-the-measurement
+  namespace: inference
+spec:
+  podSelector:
+    matchLabels:
+      app: llama
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: measure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: capacity
+      ports:
+        - {protocol: TCP, port: 8080}

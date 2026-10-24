@@ -80,37 +80,59 @@ case "${1:-}" in
     ;;
   residue)
     : "${CLUSTER:?}" "${AWS_REGION:?}"
+    # exists <arn> <cluster>: the tagging API keeps a deleted resource's tags
+    # for a while; a resource it lists is asked about directly before it
+    # counts.
+    exists() {
+      case "$1" in
+        *:vpc/*) aws ec2 describe-vpcs --vpc-ids "${1##*/}" >/dev/null 2>&1 ;;
+        *:vpc-endpoint/*) [ "$(aws ec2 describe-vpc-endpoints --vpc-endpoint-ids "${1##*/}" --query 'VpcEndpoints[0].State' --output text 2>/dev/null)" = available ] ;;
+        # Run 39624648738 listed a security group and its rule that no longer
+        # existed: the tagging API had not caught up with the delete.
+        *:security-group/*) aws ec2 describe-security-groups --group-ids "${1##*/}" >/dev/null 2>&1 ;;
+        *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${1##*/}" >/dev/null 2>&1 ;;
+        # Run 39898005905 listed a subnet its Terraform never made (it made
+        # and destroyed two others, then the VPC): EC2 answers for it now.
+        *:subnet/*) aws ec2 describe-subnets --subnet-ids "${1##*/}" >/dev/null 2>&1 ;;
+        *:route-table/*) aws ec2 describe-route-tables --route-table-ids "${1##*/}" >/dev/null 2>&1 ;;
+        *:launch-template/*) aws ec2 describe-launch-templates --launch-template-ids "${1##*/}" >/dev/null 2>&1 ;;
+        # The registry inside, and Kyverno's Pod Identity association, which
+        # goes with its cluster.
+        *:repository/*) aws ecr describe-repositories --repository-names "${1#*:repository/}" >/dev/null 2>&1 ;;
+        *:podidentityassociation/*) aws eks describe-cluster --name "$2" >/dev/null 2>&1 ;;
+        *) true ;;
+      esac
+    }
     left="$(aws resourcegroupstaggingapi get-resources --tag-filters "Key=airgap.heyvaldemar.com/cluster,Values=$CLUSTER" \
               --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v '^$' || true)"
     roles="$(aws iam list-roles --query "Roles[?starts_with(RoleName, '$CLUSTER')].RoleName" --output text | tr '\t' '\n' | grep -v '^$' || true)"
     cluster="$(aws eks describe-cluster --name "$CLUSTER" --query cluster.status --output text 2>/dev/null || true)"
-    # The tagging API keeps a deleted resource's tags for a while; a VPC, an
-    # endpoint or a security group it lists is asked about directly before it
-    # counts.
     really=""
     while read -r arn; do
       [ -n "$arn" ] || continue
-      case "$arn" in
-        *:vpc/*) aws ec2 describe-vpcs --vpc-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        *:vpc-endpoint/*) [ "$(aws ec2 describe-vpc-endpoints --vpc-endpoint-ids "${arn##*/}" --query 'VpcEndpoints[0].State' --output text 2>/dev/null)" = available ] && really="$really $arn" ;;
-        # Run 39624648738 listed a security group and its rule that no longer
-        # existed: the tagging API had not caught up with the delete.
-        *:security-group/*) aws ec2 describe-security-groups --group-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        # Run 39898005905 listed a subnet whose VPC was already gone, and a
-        # VPC is never deleted while it holds one: the same lag.
-        *:subnet/*) aws ec2 describe-subnets --subnet-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        *:route-table/*) aws ec2 describe-route-tables --route-table-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        *:launch-template/*) aws ec2 describe-launch-templates --launch-template-ids "${arn##*/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        # The registry inside, and Kyverno's Pod Identity association, which
-        # goes with its cluster.
-        *:repository/*) aws ecr describe-repositories --repository-names "${arn#*:repository/}" >/dev/null 2>&1 && really="$really $arn" ;;
-        *:podidentityassociation/*) [ -n "$cluster" ] && really="$really $arn" ;;
-        *) really="$really $arn" ;;
-      esac
+      exists "$arn" "$CLUSTER" && really="$really $arn"
     done <<<"$left"
-    if [ -z "${really// /}" ] && [ -z "$roles" ] && [ -z "$cluster" ]; then say "nothing left of $CLUSTER"; exit 0; fi
-    echo "left behind by $CLUSTER: cluster '${cluster:-none}'; roles: ${roles:-none}; tagged:$really" >&2
+    # And what any earlier run of this project left that its own run never
+    # saw: a run destroys what its state holds and looks for its own tag,
+    # and the sweep destroys an earlier run's state. A resource no state
+    # holds is found here, by the project's tag, whichever run made it. The
+    # runs never overlap (concurrency aws-boundary), so at this point none
+    # but this one has a cluster.
+    elsewhere="" gone=0
+    # shellcheck disable=SC2016 # the backticks are JMESPath's, not the shell's
+    while read -r arn owner; do
+      [ -n "$arn" ] || continue
+      [ "$owner" = "$CLUSTER" ] && continue
+      if exists "$arn" "$owner"; then elsewhere="$elsewhere $arn ($owner)"; else gone=$((gone + 1)); fi
+    done < <(aws resourcegroupstaggingapi get-resources \
+               --tag-filters "Key=airgap.heyvaldemar.com/project,Values=kubernetes-air-gapped-ai-agent" "Key=airgap.heyvaldemar.com/cluster" \
+               --query 'ResourceTagMappingList[].[ResourceARN, Tags[?Key==`airgap.heyvaldemar.com/cluster`] | [0].Value]' --output text || true)
+    [ "$gone" -gt 0 ] && say "the tagging API still lists $gone resource(s) of earlier runs that no longer exist"
+    if [ -z "${really// /}" ] && [ -z "$roles" ] && [ -z "$cluster" ] && [ -z "$elsewhere" ]; then
+      say "nothing left of $CLUSTER, and nothing of any earlier run"; exit 0
+    fi
+    [ -z "${really// /}" ] && [ -z "$roles" ] && [ -z "$cluster" ] || echo "left behind by $CLUSTER: cluster '${cluster:-none}'; roles: ${roles:-none}; tagged:${really:- none}" >&2
+    [ -z "$elsewhere" ] || echo "left behind by earlier runs:$elsewhere" >&2
     exit 1
     ;;
   cost)

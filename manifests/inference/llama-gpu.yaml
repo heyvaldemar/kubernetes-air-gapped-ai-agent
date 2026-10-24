@@ -40,7 +40,9 @@ spec:
               sleep: {seconds: 60}
           resources:
             requests: {cpu: 500m, memory: 2Gi}
-            limits: {memory: 8Gi, nvidia.com/gpu: 1}
+            # The larger model's file is 5.0 GiB, read into the GPU through
+            # the page cache.
+            limits: {memory: 12Gi, nvidia.com/gpu: 1}
           readinessProbe:
             httpGet: {path: /health, port: http}
             periodSeconds: 5

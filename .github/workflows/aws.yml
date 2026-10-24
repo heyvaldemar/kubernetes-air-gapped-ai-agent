@@ -112,10 +112,10 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      # The CUDA build is 2.5 GB more, and the bundle holds it three times on
-      # the runner's disk on its way: the staging registry, the file, and the
-      # file unpacked. The runner's preinstalled SDKs take most of the disk
-      # and none of them is used here.
+      # The CUDA build is 2.5 GB more and the larger model 5.0 GiB, and the
+      # bundle holds each three times on the runner's disk on its way: the
+      # staging registry, the file, and the file unpacked. The runner's
+      # preinstalled SDKs take most of the disk and none of them is used here.
       - name: Room for the GPU image
         if: env.WITH_GPU == 'true'
         run: |
@@ -135,6 +135,10 @@ jobs:
           GPU="$([ "$WITH_GPU" = true ] && echo 1 || echo 0)" ./scripts/airgap.sh seed
           ./scripts/model.sh build
           ./scripts/model.sh sign
+          if [ "$WITH_GPU" = true ]; then
+            MODEL=granite-4.1-8b ./scripts/model.sh build
+            MODEL=granite-4.1-8b ./scripts/model.sh sign
+          fi
           ./scripts/model.sh plants
           ./scripts/admission.sh fetch
           ./scripts/gateway.sh fetch
@@ -272,9 +276,11 @@ jobs:
       # server is measured first, then a second apply makes the GPU node,
       # and a third takes it away as soon as it is measured. Run 39905417932
       # made it after the evals and kept it to the destroy: 0.93 h of 1.41.
+      # Every server is measured from inside the cluster.
       - name: The CPU server, measured
         if: env.WITH_GPU == 'true'
         env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CAPACITY_DIR: ${{ runner.temp }}/capacity
           NODE_TYPE: m7i.xlarge
         run: ./scripts/gpu.sh measure cpu
@@ -300,6 +306,25 @@ jobs:
           ./scripts/gpu.sh check
           ./scripts/gpu.sh measure gpu
 
+      # Then the larger model takes the GPU, and the agent runs through the
+      # evals on it with everything the evals read started afresh. Measured,
+      # not shipped: no task floor, every other gate.
+      - name: A larger model on the same GPU, through the evals
+        if: env.WITH_GPU == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          CAPACITY_DIR: ${{ runner.temp }}/capacity
+          GPU_TYPE: g6.xlarge
+          EVALS_OUT: ${{ runner.temp }}/granite-4.1-8b
+          EVALS_RESULTS: ${{ runner.temp }}/granite-4.1-8b/evals-results.json
+          SERVER_NODE: g6.xlarge
+          SERVER_USD_PER_HOUR: "0.8048"
+        run: |
+          ./scripts/gpu.sh larger
+          ./scripts/gateway.sh route granite-4.1-8b=llama-gpu-8b
+          ./scripts/gpu.sh reset
+          MODEL=granite-4.1-8b TASK_FLOOR=off ./scripts/evals.sh
+
       - name: What the GPU side looked like
         if: failure() && steps.gpu_clock.outputs.at != ''
         run: |
@@ -307,6 +332,9 @@ jobs:
           kubectl -n gpu-system logs ds/nvidia-device-plugin --tail=30 || true
           kubectl -n inference describe pod -l server=llama-gpu | tail -30 || true
           kubectl -n inference logs deploy/llama-gpu --tail=40 || true
+          kubectl -n inference describe pod -l server=llama-gpu-8b | tail -30 || true
+          kubectl -n inference logs deploy/llama-gpu-8b --tail=40 || true
+          kubectl -n measure logs job/capacity --tail=40 || true
 
       # Whatever the steps above did: the GPU goes as soon as it is not
       # needed, and the clock says when.
@@ -340,6 +368,16 @@ jobs:
             .cache/airgap/evals.jsonl
             .cache/airgap/mcp-audit.jsonl
             ${{ runner.temp }}/capacity
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # Apart from the default model's: the same file names, another model.
+      - name: Keep the larger model's evals
+        if: always() && env.WITH_GPU == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evals-results-aws-granite-4.1-8b
+          path: ${{ runner.temp }}/granite-4.1-8b
           if-no-files-found: ignore
           retention-days: 90
 

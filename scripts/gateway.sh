@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gateway.sh <fetch|install> - the inference gateway in front of the model
+# gateway.sh <fetch|install|route> - the inference gateway in front of the model
 # servers: agentgateway, with the Gateway API, pinned by gateway/gateway.lock.
 #
 #   fetch    outside, connected: the Gateway API CRDs and both charts, each
@@ -14,6 +14,9 @@
 #            empty, no model is served inside (the frontier job's route is
 #            scripts/frontier.sh's); waits until the Gateway is programmed
 #            and its proxy answers
+#   route    one route.yaml more for each model=Service pair given, on a
+#            gateway already installed: a second model served later in the
+#            run (ADR 19)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -26,6 +29,12 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -
 lock() { awk -v k="$1" -v n="$2" '$1 == k && $2 == n {print $'"$3"'}' "$LOCK"; }
 crds_file() { echo "$DIR/gateway-api-standard-$(lock crds gateway-api 3).yaml"; }
 chart_file() { echo "$DIR/$1-$(lock chart "$1" 3).tgz"; }
+routes() {
+  for pair in "$@"; do
+    sed -e "s#@MODEL@#${pair%%=*}#g" -e "s#@SERVICE@#${pair#*=}#g" "$ROOT/manifests/gateway/route.yaml" \
+      | kubectl apply -f - >/dev/null
+  done
+}
 # The tag and digest of an image in the lock: everything after the first
 # colon, which is the tag's (the registry has no port).
 tag_of() { local ref; ref="$(lock image "$1" 4)"; echo "${ref#*:}"; }
@@ -67,10 +76,8 @@ print(text.replace("@ISSUER@", json.loads(oidc)["issuer"])
           .replace("@JWKS@", json.dumps(json.loads(jwks), separators=(",", ":"))))
 PY
     served="${SERVED-${MODEL:?MODEL or SERVED names the models the gateway routes}=llama}"
-    for pair in $served; do
-      sed -e "s#@MODEL@#${pair%%=*}#g" -e "s#@SERVICE@#${pair#*=}#g" "$ROOT/manifests/gateway/route.yaml" \
-        | kubectl apply -f - >/dev/null
-    done
+    # shellcheck disable=SC2086 # one word a pair
+    routes $served
     # The gateway is the one way in: the agents' own rule to the model
     # servers goes, and their default-deny leaves them the gateway alone.
     kubectl -n agents delete networkpolicy allow-model --ignore-not-found >/dev/null
@@ -82,8 +89,14 @@ PY
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
     say "agentgateway is up inside: Gateway models programmed, routes for ${served:-no model inside}, a quota and a token budget per service account"
     ;;
+  route)
+    shift
+    [ "$#" -gt 0 ] || { echo "usage: gateway.sh route <model=Service>..." >&2; exit 2; }
+    routes "$@"
+    say "the gateway routes $* too"
+    ;;
   *)
-    echo "usage: gateway.sh <fetch|install>" >&2
+    echo "usage: gateway.sh <fetch|install|route>" >&2
     exit 2
     ;;
 esac

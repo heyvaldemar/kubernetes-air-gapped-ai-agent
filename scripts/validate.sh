@@ -79,7 +79,7 @@ check_kubeconform() {
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml manifests/gpu/device-plugin.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
@@ -107,7 +107,7 @@ inside = {l.strip() for f in ("airgap/images.txt", "airgap/images-gpu.txt")
 need = set()
 for f in ("manifests/mcp/mcp.yaml", "manifests/records/records.yaml", "manifests/tools/gateway.yaml",
           "manifests/inference/llama.yaml", "manifests/agents/evals.yaml",
-          "manifests/inference/llama-gpu.yaml", "manifests/gpu/device-plugin.yaml"):
+          "manifests/inference/llama-gpu.yaml", "manifests/gpu/device-plugin.yaml", "manifests/gpu/capacity.yaml"):
     need.update(re.findall(r"^\s*-?\s*image:\s*(\S+@sha256:[0-9a-f]{64})", open(f).read(), re.M))
 reg = rep = None
 for line in open("admission/kyverno-images.yaml"):
@@ -138,6 +138,17 @@ writers = {u for r in acl.values() for p in r.get("policies", []) for u in p.get
 if not zot.get("auth", {}).get("htpasswd") or any(r.get("anonymousPolicy") != ["read"] for r in acl.values()) \
         or not acl or writers != {"loader"}:
     missing.append("airgap/zot.json does not hold writing to one account, loader, with reads open and nothing more")
+# The door the GPU measurement opens into inference while it runs (ADR 19):
+# for the measurement's own pod, from its own namespace, on the servers' one
+# port; and that namespace reaches nothing but the servers and DNS.
+docs = open("manifests/gpu/measure.yaml").read().split("\n---\n")
+ingress = next((d for d in docs if "name: from-the-measurement" in d), "").partition("ingress:")[2]
+if ingress.count("- from:") != 1 or re.findall(r"port: (\d+)", ingress) != ["8080"] or not re.search(
+        r"kubernetes.io/metadata.name: measure\n\s+podSelector:\n\s+matchLabels:\n\s+app.kubernetes.io/name: capacity\n", ingress):
+    missing.append("manifests/gpu/measure.yaml: the door into inference is not for the measurement's pod alone, on port 8080")
+egress = next((d for d in docs if "name: to-the-model-servers" in d), "").partition("egress:")[2]
+if egress.count("- to:") != 2 or re.findall(r"port: (\d+)", egress) != ["8080", "53", "53"] or re.search(r"-\s*\{\}|Selector: \{\}|ipBlock", egress):
+    missing.append("manifests/gpu/measure.yaml: the measurement's namespace reaches more than the model servers and DNS")
 airgap = open("scripts/airgap.sh").read()
 if "--password-stdin" not in airgap or re.search(r"oras login[^\n]*\s-p\s", airgap):
     missing.append("scripts/airgap.sh does not hand the registry's password to oras on stdin")

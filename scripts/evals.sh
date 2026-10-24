@@ -10,13 +10,18 @@
 # reviewer asks for.
 #
 # Prints one PASS or FAIL line per gate and the measurements; writes
-# $EVALS_RESULTS (JSON) when set. Exits non-zero if a gate fails.
+# $EVALS_RESULTS (JSON) when set. Exits non-zero if a gate fails. The agent's
+# log and what the services recorded go to $EVALS_OUT, or the state
+# directory; a second model's evals in the same run keep their own. A model
+# on a node of its own (ADR 19) is priced by that node's hour, from
+# SERVER_NODE and SERVER_USD_PER_HOUR, not by vCPU-seconds.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
 # shellcheck source=scripts/inside.sh
 . "$ROOT/scripts/inside.sh"
-mkdir -p "$STATE"
+OUT="${EVALS_OUT:-$STATE}"
+mkdir -p "$STATE" "$OUT"
 
 kubectl -n agents create configmap evals --from-file="$ROOT/evals/harness.py" --from-file="$ROOT/evals/tasks.json" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -50,7 +55,7 @@ for _ in $(seq 1 720); do
   [ -n "$done_" ] && break
   sleep 5
 done
-kubectl -n agents logs job/evals >"$STATE/evals.jsonl" 2>&1 || true
+kubectl -n agents logs job/evals >"$OUT/evals.jsonl" 2>&1 || true
 
 # What actually happened, from the services themselves.
 records_state() {
@@ -62,15 +67,15 @@ def get(p):
     return json.loads(urllib.request.urlopen(r, timeout=10).read())
 print(json.dumps({"records": get("/records")["records"], "sent": [m["to"] for m in get("/outbox")["sent"]]}))'
 }
-records_state >"$STATE/records-state.json"
+records_state >"$OUT/records-state.json"
 # What the gateway counted, from its proxy's metrics, read through the API
 # server: every request it answered or refused, by status.
 gw_pod="$(kubectl -n gateway get pod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-kubectl get --raw "/api/v1/namespaces/gateway/pods/$gw_pod:15020/proxy/metrics" >"$STATE/gateway-metrics.txt" 2>/dev/null || true
-kubectl -n mcp logs deploy/mcp-server >"$STATE/mcp-audit.jsonl" 2>/dev/null || true
+kubectl get --raw "/api/v1/namespaces/gateway/pods/$gw_pod:15020/proxy/metrics" >"$OUT/gateway-metrics.txt" 2>/dev/null || true
+kubectl -n mcp logs deploy/mcp-server >"$OUT/mcp-audit.jsonl" 2>/dev/null || true
 
-python3 - "$STATE/evals.jsonl" "$STATE/records-state.json" "$STATE/mcp-audit.jsonl" \
-  "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" "$STATE/gateway-metrics.txt" <<'PY'
+python3 - "$OUT/evals.jsonl" "$OUT/records-state.json" "$OUT/mcp-audit.jsonl" \
+  "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" "$OUT/gateway-metrics.txt" <<'PY'
 import json, math, os, re, statistics, sys
 log, state, audit, gates, pricing, out, gwmetrics = sys.argv[1:8]
 rows, asked, throttled, busiest = [], None, 0, {}
@@ -157,6 +162,16 @@ quota = ("{:,}".format(int(quota.group(1))), "{:,}".format(int(quota.group(2))))
 if per_mtok:
     cost = statistics.mean(x["prompt_tokens"] * per_mtok[0] + x["completion_tokens"] * per_mtok[1] for x in rows) / 1e6
     cost_line = "cost per task: about $%.6f (its tokens at Anthropic's list price)" % cost
+elif os.environ.get("SERVER_USD_PER_HOUR"):
+    # The harness counts the server's compute time times the threads the
+    # Job says the server has (MODEL_THREADS); a GPU server holds its whole
+    # node for that time.
+    threads = int(re.search(r"name: MODEL_THREADS, value: \"(\d+)\"",
+                            open(os.path.join(os.path.dirname(os.path.dirname(gates)), "manifests", "agents", "evals.yaml")).read()).group(1))
+    server_s = statistics.mean(x["vcpu_seconds"] for x in rows) / threads
+    cost = server_s * float(os.environ["SERVER_USD_PER_HOUR"]) / 3600
+    cost_line = "cost per task: about $%.6f (%.2f s of the %s it runs on, at its on-demand list price)" % (
+        cost, server_s, os.environ.get("SERVER_NODE", "node"))
 else:
     cost = statistics.mean(x["vcpu_seconds"] for x in rows) * price
     cost_line = "cost per task: about $%.6f (%.1f vCPU-seconds at on-demand list price)" % (cost, cost / price)

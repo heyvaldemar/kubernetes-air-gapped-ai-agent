@@ -57,3 +57,5 @@
 "aws/nodes.tf"	"resource \"aws_eks_node_group\" \"gpu\" {\n  count           = var.gpu ? 1 : 0"	"resource \"aws_eks_node_group\" \"gpu\" {\n  count           = 1"	"aws"	"a GPU node on every run, asked for or not"
 "aws/variables.tf"	"contains([\"g6.xlarge\", \"g6.2xlarge\"], var.gpu_instance_type)"	"true"	"aws"	"a GPU instance beyond the account's quota and the cost table"
 "airgap/images-gpu.txt"	"ghcr.io/ggml-org/llama.cpp:server-cuda-b11429@sha256:a863a2d1dc2cbc5326c995ae380eec9c57f37a7e1cac944f0c6f43e4e9afff23\n"	""	"boundary"	"the GPU server's image left out of the boundary"
+"manifests/gpu/measure.yaml"	"          podSelector:\n            matchLabels:\n              app.kubernetes.io/name: capacity\n"	""	"boundary"	"a door into inference for any pod in the measurement's namespace"
+"manifests/gpu/measure.yaml"	"  egress:\n    - to:\n"	"  egress:\n    - {}\n    - to:\n"	"boundary"	"a measurement namespace that may reach anything"
