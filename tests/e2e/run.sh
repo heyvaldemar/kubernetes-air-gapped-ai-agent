@@ -260,7 +260,9 @@ if [ -n "$now" ] && [ "$now" = "$(carried)" ]; then
 else
   fail "what the registry holds differs from what the bundle carried: $(diff <(carried) <(echo "$now") | head -5 | tr '\n' ' ')"
 fi
-cp "$STATE/bundle.tar" "$STATE/bundle.tampered" && cp "$STATE/bundle.tar.sigstore.json" "$STATE/bundle.tampered.sigstore.json"
+# The signed sha256 travels with it unchanged: the file no longer has it.
+cp "$STATE/bundle.tar" "$STATE/bundle.tampered" && cp "$STATE/bundle.tar.sha256" "$STATE/bundle.tampered.sha256" \
+  && cp "$STATE/bundle.tar.sha256.sigstore.json" "$STATE/bundle.tampered.sha256.sigstore.json"
 printf 'X' | dd of="$STATE/bundle.tampered" bs=1 seek=4096 conv=notrunc 2>/dev/null
 cp "$STATE/bundle.loaded" "$STATE/bundle.loaded.kept"
 if ! BUNDLE="$STATE/bundle.tampered" "$ROOT/scripts/bundle.sh" load >/dev/null 2>&1 && [ "$(held)" = "$now" ]; then
@@ -269,7 +271,7 @@ else
   fail "a bundle changed by one byte was not refused, or changed the registry"
 fi
 mv "$STATE/bundle.loaded.kept" "$STATE/bundle.loaded"
-rm -f "$STATE/bundle.tampered" "$STATE/bundle.tampered.sigstore.json"
+rm -f "$STATE/bundle.tampered" "$STATE/bundle.tampered.sha256" "$STATE/bundle.tampered.sha256.sigstore.json"
 
 step "11. nothing that runs came from anywhere else"
 # Read back, not assumed: every pod in the namespaces carried-images covers,

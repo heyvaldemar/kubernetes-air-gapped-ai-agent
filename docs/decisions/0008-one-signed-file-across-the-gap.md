@@ -10,8 +10,8 @@ Until now the registry inside was seeded from the internet on the same host, and
 ## Decision
 
 - **Everything the cluster runs crosses as one file.** `scripts/bundle.sh create`, on the connected side, copies every repository and tag of the staging registry into OCI layouts, with what refers to each image (the model's signature travels with the model), puts the admission chart beside them, writes a SHA256SUMS over every file, and tars it all with sorted names, no times and no owners.
-- **The file is signed with the operator's key, with no transparency log.** A site that cannot reach a log cannot check one; the key is what its policy already trusts for the model.
-- **On the inside, the signature first, the checksums second, then the load.** `scripts/bundle.sh load` reads nothing from a file whose signature does not verify against the operator's public key, and loads nothing from one whose checksums do not match.
+- **The file is signed with the operator's key, with no transparency log.** A site that cannot reach a log cannot check one; the key is what its policy already trusts for the model. What is signed is the file's sha256 (`bundle.tar.sha256`, amended 2026-10-24): cosign reads a blob it signs or verifies into memory, about twice its size, and a bundle carrying the GPU's larger model (ADR 19) is 11 GB on a runner with 16 GB of memory. Run 40048612675 was killed signing it. `sha256sum` reads any size in constant memory, and a file with one byte changed has another sha256, so the check is the same.
+- **On the inside, the signature first, the checksums second, then the load.** `scripts/bundle.sh load` reads nothing from a file unless the operator's signature over its sha256 verifies against the operator's public key and the file has that sha256, and loads nothing from one whose checksums inside do not match.
 - **The e2e run goes through exactly that path.** After the bundle is made, the staging registry is replaced by an empty one, the chart is deleted, and the boundary closes. The acceptance test (`tests/e2e/run.sh`, check 10) proves that the registry inside held nothing when the file was loaded, that it now holds exactly what the file carried, tag by tag and by digest, and that the same file with one byte changed is refused and loads nothing.
 
 ## Consequences
@@ -28,4 +28,4 @@ Until now the registry inside was seeded from the internet on the same host, and
 
 ## How to explain this to a customer
 
-Everything we install arrives as one file. Before it goes anywhere near your cluster, your side checks two things with a public key we gave you in advance: that we signed it, and that not one byte changed on the way. If either check fails, nothing is loaded. Our test does the same every day, including with a file we damaged on purpose.
+Everything we install arrives as one file, with its fingerprint signed by us. Before it goes anywhere near your cluster, your side checks two things with a public key we gave you in advance: that we signed that fingerprint, and that the file still has it, so not one byte changed on the way. If either check fails, nothing is loaded. Our test does the same every day, including with a file we damaged on purpose.

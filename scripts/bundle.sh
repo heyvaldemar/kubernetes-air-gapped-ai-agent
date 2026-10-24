@@ -6,19 +6,22 @@
 #           registry (the images airgap.sh seeded, the model images, their
 #           signatures) copied with what refers to them into OCI layouts, the
 #           admission chart beside them, a SHA256SUMS over every file, all in
-#           one tar, signed with the operator's key and no transparency log
+#           one tar; the tar's sha256, signed with the operator's key and no
+#           transparency log
 #   load    inside, after the cut: refuse the file unless the operator's
-#           signature verifies and every checksum matches, then copy each
-#           layout into the registry inside and put the chart where
-#           admission.sh installs it from
+#           signature over its sha256 verifies, the file has that sha256 and
+#           every checksum in it matches, then copy each layout into the
+#           registry inside and put the chart where admission.sh installs it
+#           from
 #
 # The registry the cluster pulls from is empty until `load` runs: the e2e
 # run starts a fresh one after `create` and checks that it holds nothing
 # before the bundle goes in, and that a bundle changed by one byte is
 # refused. Nothing reaches the cluster except through this file.
 #
-#   BUNDLE  the file (default .cache/airgap/bundle.tar; its signature is
-#           BUNDLE.sigstore.json beside it)
+#   BUNDLE  the file (default .cache/airgap/bundle.tar; its sha256 is
+#           BUNDLE.sha256 beside it, and the signature over that is
+#           BUNDLE.sha256.sigstore.json)
 #   INSIDE  where `load` puts it, when that is not the kind registry: the
 #           run's path in ECR on AWS (ADR 18, scripts/inside.sh), with the
 #           credential `aws.sh login` wrote into DOCKER_CONFIG
@@ -56,19 +59,30 @@ case "${1:-}" in
     mv "$STATE/SHA256SUMS.tmp" "$work/SHA256SUMS"
     # The same bytes for the same contents: sorted, no times, no owners.
     tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$BUNDLE" -C "$work" .
+    # The signature is over the file's sha256, not the file: cosign reads a
+    # blob it signs or verifies into memory, about twice its size (4.3 GB
+    # for a 2 GB file), and a bundle with the GPU's larger model is 11 GB on
+    # a runner with 16 (run 40048612675 was killed signing it). sha256sum
+    # reads a file of any size in constant memory.
+    printf '%s  %s\n' "$(sha256sum "$BUNDLE" | cut -d' ' -f1)" "$(basename "$BUNDLE")" >"$BUNDLE.sha256"
     COSIGN_PASSWORD="" cosign sign-blob --key "$STATE/operator.key" --tlog-upload=false --use-signing-config=false \
-      --bundle "$BUNDLE.sigstore.json" --yes "$BUNDLE" >/dev/null 2>&1
+      --bundle "$BUNDLE.sha256.sigstore.json" --yes "$BUNDLE.sha256" >/dev/null 2>&1
     # The file is what crosses; the layouts it was made from are not kept
     # beside it on a runner's disk.
     rm -rf "$work"
-    say "bundle: $n image tags and the chart, $(du -h "$BUNDLE" | cut -f1), sha256 $(sha256sum "$BUNDLE" | cut -c1-16)..., signed with the operator's key"
+    say "bundle: $n image tags and the chart, $(du -h "$BUNDLE" | cut -f1), sha256 $(cut -c1-16 "$BUNDLE.sha256")..., signed with the operator's key"
     ;;
   load)
     # The signature first, the contents second: nothing in a file that does
-    # not verify is read, let alone loaded.
-    if ! cosign verify-blob --key "$STATE/operator.pub" --bundle "$BUNDLE.sigstore.json" \
-        --insecure-ignore-tlog=true "$BUNDLE" >/dev/null 2>&1; then
-      echo "refused: $BUNDLE does not verify against the operator's key; nothing loaded" >&2
+    # not verify is read, let alone loaded. The operator signed the file's
+    # sha256; the file must have it.
+    if ! cosign verify-blob --key "$STATE/operator.pub" --bundle "$BUNDLE.sha256.sigstore.json" \
+        --insecure-ignore-tlog=true "$BUNDLE.sha256" >/dev/null 2>&1; then
+      echo "refused: $BUNDLE's sha256 does not verify against the operator's key; nothing loaded" >&2
+      exit 1
+    fi
+    if [ "$(sha256sum "$BUNDLE" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$BUNDLE.sha256")" ]; then
+      echo "refused: $BUNDLE is not the file the operator signed; nothing loaded" >&2
       exit 1
     fi
     inside="$STATE/bundle.inside"
@@ -101,7 +115,7 @@ case "${1:-}" in
     # The blobs are in the registry now. The indexes stay, so the acceptance
     # test can compare what the registry holds with what the file carried.
     find "$inside/oci" -path '*/blobs/*' -type f -delete
-    printf 'repositories_before=%s\ntags_loaded=%s\nsha256=%s\n' "$before" "$n" "$(sha256sum "$BUNDLE" | cut -d' ' -f1)" >"$STATE/bundle.loaded"
+    printf 'repositories_before=%s\ntags_loaded=%s\nsha256=%s\n' "$before" "$n" "$(cut -d' ' -f1 "$BUNDLE.sha256")" >"$STATE/bundle.loaded"
     say "loaded $n image tags into $to from a bundle that verified, and the chart into .cache/airgap/charts"
     ;;
   *)
