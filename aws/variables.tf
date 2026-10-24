@@ -91,6 +91,21 @@ variable "images" {
   }
 }
 
+variable "nodes" {
+  description = <<-EOT
+    How many CPU nodes, spread over the two private subnets' zones: one, or
+    two for the node-loss drill (ADR 20), where every service it watches runs
+    a replica on each and the node group replaces the one it loses.
+  EOT
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([1, 2], var.nodes)
+    error_message = "One CPU node, or two for the node-loss drill."
+  }
+}
+
 variable "gpu" {
   description = <<-EOT
     Whether the run adds one GPU node beside the CPU one (ADR 19): the same

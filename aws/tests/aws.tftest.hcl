@@ -268,3 +268,36 @@ run "a_gpu_beyond_the_quota_is_refused" {
 
   expect_failures = [var.gpu_instance_type]
 }
+
+# ADR 20: two CPU nodes only for the node-loss drill, and never more.
+run "one_cpu_node_unless_asked" {
+  command = plan
+
+  assert {
+    condition     = aws_eks_node_group.this.scaling_config[0].desired_size == 1 && aws_eks_node_group.this.scaling_config[0].max_size == 1
+    error_message = "a run without the drill has one CPU node"
+  }
+}
+
+run "two_cpu_nodes_for_the_drill" {
+  command = plan
+
+  variables {
+    nodes = 2
+  }
+
+  assert {
+    condition     = aws_eks_node_group.this.scaling_config[0].desired_size == 2 && aws_eks_node_group.this.scaling_config[0].min_size == 2 && aws_eks_node_group.this.scaling_config[0].max_size == 2
+    error_message = "two CPU nodes, and the node group replaces the one it loses"
+  }
+}
+
+run "more_nodes_are_refused" {
+  command = plan
+
+  variables {
+    nodes = 3
+  }
+
+  expect_failures = [var.nodes]
+}

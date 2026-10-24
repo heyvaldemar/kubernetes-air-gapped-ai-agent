@@ -152,6 +152,28 @@ case "${1:-}" in
           docker exec "$node" "$t" -t nat -F "$chain" 2>/dev/null || true
         done
       done
+      # And at every boot. Docker gives a node that starts again its resolver
+      # and its rules back, and the node resolved example.com once more after
+      # a restart (run 40108045991, ADR 20). The node closes itself before
+      # containerd and the kubelet start.
+      docker exec -i "$node" sh -c 'cat >/etc/systemd/system/boundary-close.service && systemctl daemon-reload && systemctl enable boundary-close.service >/dev/null 2>&1' <<'UNIT'
+[Unit]
+Description=No DNS from the node, and no way to Docker's (scripts/airgap.sh close)
+DefaultDependencies=no
+After=local-fs.target
+Before=containerd.service kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'printf "nameserver 127.0.0.1\n" > /etc/resolv.conf'
+ExecStart=-/usr/sbin/iptables -t nat -F DOCKER_OUTPUT
+ExecStart=-/usr/sbin/iptables -t nat -F DOCKER_POSTROUTING
+ExecStart=-/usr/sbin/ip6tables -t nat -F DOCKER_OUTPUT
+ExecStart=-/usr/sbin/ip6tables -t nat -F DOCKER_POSTROUTING
+
+[Install]
+WantedBy=multi-user.target
+UNIT
     done
     # CoreDNS forwards what it does not own to the node's resolver; with that
     # gone it would time out. kind's own offline CI removes the block so the

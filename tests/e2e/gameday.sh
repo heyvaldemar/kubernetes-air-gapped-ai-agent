@@ -247,6 +247,8 @@ if [ "$code" = 200 ]; then pass "control: the gateway answers for $MODEL_NAME (2
 
 step "1. the admission controller down"
 hooks_before="$(kubectl get validatingwebhookconfigurations -o name | grep -c kyverno)"
+# As many as it ran before, which is two on a cluster that runs two (ADR 20).
+kyverno_replicas="$(kubectl -n kyverno get deployment/kyverno-admission-controller -o jsonpath='{.spec.replicas}')"
 kubectl -n kyverno scale deployment/kyverno-admission-controller --replicas=0 >/dev/null
 kubectl -n kyverno wait pod -l app.kubernetes.io/component=admission-controller --for=delete --timeout=180s >/dev/null 2>&1
 # Kyverno deletes its webhooks only if it has seen its own Deployment at
@@ -270,7 +272,7 @@ if admitted "$served"; then fail "with Kyverno down, the signed model was admitt
 else pass "with Kyverno down, the signed model is refused too: an outage, not a hole"; fi
 code="$(ask)"
 if [ "$code" = 200 ]; then pass "with Kyverno down, the model already served keeps answering (200)"; else fail "with Kyverno down, the served model stopped answering (HTTP $code)"; fi
-kubectl -n kyverno scale deployment/kyverno-admission-controller --replicas=1 >/dev/null
+kubectl -n kyverno scale deployment/kyverno-admission-controller --replicas="${kyverno_replicas:-1}" >/dev/null
 if s="$(seconds_until admitted "$served")"; then
   pass "Kyverno back: the signed model is admitted again, ${s}s after it was scaled up"
 else
