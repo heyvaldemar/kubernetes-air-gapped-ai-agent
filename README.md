@@ -173,16 +173,18 @@ What one model server sustains on four vCPUs, from [run 39541814938](https://git
 
 On CPU a server's throughput is fixed, and parallel slots do not raise it: they split the same cores, and four slots of one thread did half the work of one slot with four. Concurrency only queues. Granite's p95 goes from 1.6 s with one caller to 11 s with eight, at the same 45 calls a minute. So a node is sized by replicas, one slot each with every core it has (the cluster here runs `-np 1`), and by the calls a minute its agents make at their busiest, which the evals report. Qwen3.5-2B writes about eight times as much per call, which is why it manages a sixth of the calls on the same cores. Not every run is clean: the first attempt of the Qwen one-slot job ran 30 times slower on one runner, 0.3 tokens a second, and was cancelled at its hour; its rerun is the row above. The workflow runs weekly, so a number taken from here is a measurement with a date, not a constant.
 
-On a GPU, inside the same boundary on AWS ([ADR 19](docs/decisions/0019-a-gpu-beside-the-cpu.md), [39898005905](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39898005905)): the same Granite, the same signed image by the same digest, the CUDA build of the same llama.cpp release on one NVIDIA L4, beside the CPU node of the same cluster, measured with the same calls.
+On a GPU, inside the same boundary on AWS ([ADR 19](docs/decisions/0019-a-gpu-beside-the-cpu.md), [40052214040](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40052214040)): the same Granite, the same signed image by the same digest, the CUDA build of the same llama.cpp release on one NVIDIA L4, beside the CPU node of the same cluster, measured with the same calls from a pod beside each server, each level for at least 30 seconds. Then Granite 4.1 at 8B parameters on the same GPU, signed and admitted the same way.
 
-| On | Slots x threads | Concurrency | Calls a minute | p50 | p95 | A thousand calls |
+| Model | On | Concurrency | Calls a minute | p50 | p95 | A thousand calls |
 |---|---|---|---|---|---|---|
-| CPU, m7i.xlarge | 1 x 2 | 1 | 29.4 | 2.31 s | 2.48 s | $0.114 |
-| CPU, m7i.xlarge | 1 x 2 | 8 | 31.5 | 15.22 s | 16.27 s | $0.107 |
-| GPU, g6.xlarge (L4) | 8 x 0 | 1 | 224.3 | 0.29 s | 0.29 s | $0.060 |
-| GPU, g6.xlarge (L4) | 8 x 0 | 8 | 756.0 | 0.62 s | 0.72 s | $0.018 |
+| granite-4.0-1b | CPU, m7i.xlarge, 1 slot x 2 threads | 1 | 31.8 | 2.01 s | 2.23 s | $0.106 |
+| granite-4.0-1b | CPU, m7i.xlarge, 1 slot x 2 threads | 8 | 32.2 | 14.82 s | 15.84 s | $0.104 |
+| granite-4.0-1b | GPU, g6.xlarge (L4), 8 slots | 1 | 402.1 | 0.16 s | 0.16 s | $0.033 |
+| granite-4.0-1b | GPU, g6.xlarge (L4), 8 slots | 8 | 1028.6 | 0.49 s | 0.56 s | $0.013 |
+| granite-4.1-8b | GPU, g6.xlarge (L4), 8 slots | 1 | 85.1 | 0.55 s | 2.13 s | $0.158 |
+| granite-4.1-8b | GPU, g6.xlarge (L4), 8 slots | 8 | 263.6 | 1.55 s | 4.08 s | $0.051 |
 
-On a GPU the slots batch, and eight callers got 3.4 times what one did, each in under a second; the CPU server held at 30 calls a minute and queued. A second run ([39914708816](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39914708816)) measured the GPU faster, 418 calls a minute with one caller and 972 with eight, and the CPU the same; ADR 19 says what is and is not known about the spread. At each node's list price for the time the calls took, the GPU was the cheaper call at every concurrency, though it costs four times as much an hour; for a model this small at low traffic the CPU node is still the smaller bill.
+On a GPU the slots batch: eight callers got 2.6 times what one did, each in half a second, where the CPU server held at 32 calls a minute and queued. At each node's list price for the time the calls took, the GPU was the cheaper call at every concurrency, though it costs four times as much an hour; for a model this small at low traffic the CPU node is still the smaller bill. The two runs before measured through a port-forward from the runner and disagreed by 0.09 to 0.13 s a call; measured both ways in one run, the port-forward added 0.19 to 0.33 s (ADR 19). The 8B model answered a fifth to a quarter as many calls as the 1B on the same GPU. Through the evals it acted on the same planted report as the 1B, every time, and declined more of what the agent may not do (3 of 9 against 0), invented nothing (6 of 6 against 3), and every gate held for both.
 
 ## Cost
 

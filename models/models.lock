@@ -18,5 +18,6 @@ qwen3-4b-2507 https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/
 minicpm5-2b https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/2079a22f3beaa4e306449978533478fe0522f4b3/MiniCPM5-2B-Q4_K_M.gguf ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd Apache-2.0 sha256:913a7d93ff898fe97ce586d18c9b0257971e4f29f8ab4d8ae64364f04222d0da
 # On the GPU only (ADR 19), once the first model is measured there: Granite
 # 4.1 at 8B parameters, a 5.0 GiB file, through the same admission and the
-# same evals. Built on the runs that ask for a GPU, pinned once two agree.
-granite-4.1-8b https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF/resolve/865b82c2e7970d82e3731278c88c57ae7138359c/granite-4.1-8b-Q4_K_M.gguf ed902ac9eb6adce5a90c6a08c8ea201b50e23fdc5976d1cd0362006afac5309e Apache-2.0 unpinned
+# same evals. Built on the runs that ask for a GPU; pinned from its first build,
+# the same digest on two runners (runs 40048612675 and 40052214040).
+granite-4.1-8b https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF/resolve/865b82c2e7970d82e3731278c88c57ae7138359c/granite-4.1-8b-Q4_K_M.gguf ed902ac9eb6adce5a90c6a08c8ea201b50e23fdc5976d1cd0362006afac5309e Apache-2.0 sha256:dfaeada7ded8590520550df8d23172a409a2c704f124943cb47dc18aef41b927
