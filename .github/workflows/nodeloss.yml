@@ -1,0 +1,111 @@
+name: A node lost while it serves
+
+# The node-loss drill on kind (ADR 20): two workers, two of each service the
+# boundary depends on, and tests/e2e/nodeloss.sh. Called by the daily e2e run,
+# whose results the status page reads; by hand on main.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [nodeloss]
+
+permissions:
+  contents: read
+
+jobs:
+  nodeloss:
+    name: A node lost while it serves
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      MODEL: granite-4.0-1b
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Create the cluster, two workers in two zones
+        run: kind create cluster --config kind/ha.yaml --wait 180s
+
+      - name: The staging registry, seeded
+        run: |
+          ./scripts/airgap.sh registry
+          ./scripts/airgap.sh seed
+          ./scripts/airgap.sh mirror
+
+      - name: The model, built reproducibly and signed, and the plants
+        run: |
+          ./scripts/model.sh build
+          ./scripts/model.sh sign
+          ./scripts/model.sh plants
+
+      - name: The admission chart and the gateway, fetched and checked
+        run: |
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+
+      - name: Everything the cluster runs, in one signed file
+        run: ./scripts/bundle.sh create
+
+      - name: An empty registry inside, then close the boundary
+        run: |
+          ./scripts/airgap.sh registry
+          rm -rf .cache/airgap/charts
+          ./scripts/airgap.sh mirror
+          ./scripts/airgap.sh close
+
+      - name: Across the gap, the bundle verified and loaded
+        run: ./scripts/bundle.sh load
+
+      # Two of each the drill watches, one on each worker.
+      - name: Kyverno and the model policies, two admission controllers
+        env:
+          ADMISSION_REPLICAS: "2"
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: Two model servers, the signed model
+        env:
+          SERVE_REPLICAS: "2"
+        run: ./scripts/serve.sh
+
+      - name: The tool side, inside
+        run: ./scripts/tools.sh
+
+      - name: The gateway, two proxies
+        env:
+          GATEWAY_REPLICAS: "2"
+        run: ./scripts/gateway.sh install
+
+      - name: Disruption budgets
+        run: |
+          kubectl apply -f manifests/ha/disruption-budgets.yaml
+          kubectl get pods -A -o wide | grep -E 'inference|gateway|kyverno' || true
+
+      - name: A worker lost, brought back, and drained, while it serves
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/nodeloss.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get pdb -A || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n gateway logs -l gateway.networking.k8s.io/gateway-name=models --tail=40 --all-containers || true
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-nodeloss
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore

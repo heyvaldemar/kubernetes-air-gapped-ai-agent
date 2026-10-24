@@ -1,0 +1,26 @@
+# What a planned disruption may take at once when the services run two
+# replicas (ADR 20): one model server and one gateway proxy, never both.
+# Kyverno's admission controller gets its own from its chart, which makes
+# one whenever it runs more than one replica. A crash ignores budgets; a
+# drain, an upgrade or an autoscaler waits for them.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: llama
+  namespace: inference
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: llama, server: llama}
+---
+# The proxy's labels are the ones agentgateway's controller gives the pods it
+# makes for the Gateway models (gateway.networking.k8s.io/gateway-name).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: models
+  namespace: gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {gateway.networking.k8s.io/gateway-name: models}

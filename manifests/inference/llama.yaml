@@ -25,6 +25,14 @@ spec:
       labels: {app: llama, server: @NAME@}
     spec:
       automountServiceAccountToken: false
+      # Replicas on different nodes when there are nodes to spread over (ADR
+      # 20); on one node, all of them there.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: llama, server: @NAME@}
       # THE ANSWER IS FINISHED BEFORE THE SERVER IS TOLD TO STOP. On a
       # rollout the old pod is deleted as soon as the new one is ready, and
       # llama-server, sent SIGTERM, stops working on the answer it is writing

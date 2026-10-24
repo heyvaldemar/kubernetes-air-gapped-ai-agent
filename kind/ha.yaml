@@ -1,0 +1,18 @@
+# Three nodes for the node-loss drill (ADR 20): the control plane, which keeps
+# its taint and runs nothing of the boundary's own, and two workers in two
+# zones. Every service the drill watches runs two replicas, one on each
+# worker, so losing a worker leaves one of each.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: air-gapped
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+    labels:
+      topology.kubernetes.io/zone: zone-a
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+    labels:
+      topology.kubernetes.io/zone: zone-b

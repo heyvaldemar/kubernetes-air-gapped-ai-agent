@@ -79,7 +79,7 @@ check_kubeconform() {
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/ha/disruption-budgets.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \

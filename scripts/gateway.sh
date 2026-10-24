@@ -69,9 +69,28 @@ case "${1:-}" in
     mkdir -p "$STATE"
     kubectl get --raw /.well-known/openid-configuration >"$STATE/cluster-oidc.json"
     kubectl get --raw /openid/v1/jwks >"$STATE/cluster-jwks.json"
-    python3 - "$ROOT/manifests/gateway/gateway.yaml" "$STATE/cluster-oidc.json" "$STATE/cluster-jwks.json" <<'PY' | kubectl apply -f - >/dev/null
+    # GATEWAY_REPLICAS: more than one proxy, spread over the nodes (ADR 20).
+    python3 - "$ROOT/manifests/gateway/gateway.yaml" "$STATE/cluster-oidc.json" "$STATE/cluster-jwks.json" "${GATEWAY_REPLICAS:-}" <<'PY' | kubectl apply -f - >/dev/null
 import json, sys
 text, oidc, jwks = (open(f).read() for f in sys.argv[1:4])
+replicas = sys.argv[4]
+if replicas:
+    text = text.replace("""  deployment:
+    spec:
+      template:
+        spec:
+""", """  deployment:
+    spec:
+      replicas: %s
+      template:
+        spec:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: {gateway.networking.k8s.io/gateway-name: models}
+""" % int(replicas), 1)
 print(text.replace("@ISSUER@", json.loads(oidc)["issuer"])
           .replace("@JWKS@", json.dumps(json.loads(jwks), separators=(",", ":"))))
 PY

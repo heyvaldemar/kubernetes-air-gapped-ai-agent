@@ -18,6 +18,8 @@ ref="$MODELS/$MODEL@$digest"
 NAME="${SERVE_NAME:-llama}"
 # SERVE_MANIFEST: the GPU server's (ADR 19) instead of the CPU server's.
 MANIFEST="${SERVE_MANIFEST:-$ROOT/manifests/inference/llama.yaml}"
-sed -e "s#@MODEL@#$ref#" -e "s#@NAME@#$NAME#g" -e "s#@ALIAS@#$MODEL#g" "$MANIFEST" | relocate | kubectl apply -f - >/dev/null
+# SERVE_REPLICAS: more than one server, spread over the nodes (ADR 20).
+sed -e "s#@MODEL@#$ref#" -e "s#@NAME@#$NAME#g" -e "s#@ALIAS@#$MODEL#g" \
+  -e "s#^  replicas: 1\$#  replicas: ${SERVE_REPLICAS:-1}#" "$MANIFEST" | relocate | kubectl apply -f - >/dev/null
 kubectl -n inference rollout status "deployment/$NAME" --timeout=600s >/dev/null
 printf '== llama-server %s is up, serving %s\n' "$NAME" "$ref"

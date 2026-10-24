@@ -56,8 +56,12 @@ case "${1:-}" in
     # from it; ECR's is a public one, which Kyverno's image already trusts.
     trust=(--set-file "global.caCertificates.data=$STATE/ca.crt"); [ -z "${INSIDE:-}" ] || trust=()
     kyverno_images >"$STATE/kyverno-images.yaml"
+    # ADMISSION_REPLICAS: more than one admission controller (ADR 20); the
+    # chart then spreads them over the nodes and gives them a disruption
+    # budget of its own.
+    replicas=(); [ -z "${ADMISSION_REPLICAS:-}" ] || replicas=(--set "admissionController.replicas=$ADMISSION_REPLICAS")
     helm upgrade --install kyverno "$CHART" --namespace kyverno --create-namespace --wait --timeout 10m \
-      -f "$STATE/kyverno-images.yaml" -f "$ROOT/admission/kyverno-values.yaml" "${trust[@]}" >/dev/null
+      -f "$STATE/kyverno-images.yaml" -f "$ROOT/admission/kyverno-values.yaml" "${trust[@]}" "${replicas[@]}" >/dev/null
     kubectl -n kyverno rollout status deployment/kyverno-admission-controller --timeout=300s >/dev/null
     # Rolled out is not serving: wait until a server-side dry run of the
     # policy goes through the webhook that validates policies.

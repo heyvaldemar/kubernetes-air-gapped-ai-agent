@@ -172,6 +172,11 @@ jobs:
             .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore
 
+  # A worker lost, brought back and drained while the boundary serves (ADR
+  # 20), on a cluster of its own with two of each service.
+  nodeloss:
+    uses: ./.github/workflows/nodeloss.yml
+
   gateway:
     # Two models behind one gateway, inside the same boundary: the request
     # names the model and the gateway routes it, a client over its limit is
