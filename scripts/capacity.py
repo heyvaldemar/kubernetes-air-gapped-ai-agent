@@ -15,7 +15,10 @@ on a runner with a model from models/models.lock under several slot and
 thread counts.
 
 At each concurrency C, C workers send 6 x C requests between them, a request
-starting as soon as a worker is free. Reported per level: calls a minute,
+starting as soon as a worker is free. With MIN_SECONDS set, a level goes on
+until it has lasted that long as well, and starts with one untimed round of
+C calls: a GPU answers 6 x C calls in about a second, too short a window
+to read a rate from (ADR 19). Reported per level: calls a minute,
 p50 and p95 latency, output tokens a second, and how many failed. A failed
 call counts against the level; a level is never reported on its successes
 alone. Capacity is in model calls, not tasks: a task takes one to six calls,
@@ -27,6 +30,7 @@ import json
 import os
 import statistics
 import sys
+import threading
 import time
 import urllib.request
 
@@ -71,20 +75,41 @@ def pct(xs, q):
     return xs[min(len(xs) - 1, int(round(q * (len(xs) - 1))))] if xs else None
 
 
+def one_level(url, bodies, c, seed, min_s):
+    """C workers, 6 x C calls at least, and at least min_s seconds."""
+    lock, issued, done = threading.Lock(), [0], []
+    t0 = time.monotonic()
+
+    def worker():
+        while True:
+            with lock:
+                i = issued[0]
+                if i >= 6 * c and time.monotonic() - t0 >= min_s:
+                    return
+                issued[0] += 1
+            done.append(one(url, bodies[(i + c) % len(bodies)], seed + i))
+    workers = [threading.Thread(target=worker) for _ in range(c)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    return done, time.monotonic() - t0
+
+
 def run(url, out, levels):
     bodies = requests()
+    min_s = float(os.environ.get("MIN_SECONDS") or 0)
     one(url, bodies[0], 0)  # load the model and warm the cache before anything is timed
     result = {"server": {k: os.environ.get(k) for k in ("MODEL", "SLOTS", "THREADS", "CONTEXT", "RUNNER_CPUS", "ACCELERATOR")},
-              "requests": len(bodies), "levels": []}
+              "requests": len(bodies), "min_seconds": min_s, "levels": []}
     seed = 1
     for c in levels:
-        n = 6 * c
-        jobs = [(bodies[(i + c) % len(bodies)], seed + i) for i in range(n)]
+        if min_s:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=c) as pool:
+                list(pool.map(lambda i: one(url, bodies[i % len(bodies)], 0), range(c)))
+        done, wall = one_level(url, bodies, c, seed, min_s)
+        n = len(done)
         seed += n
-        t0 = time.monotonic()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=c) as pool:
-            done = list(pool.map(lambda j: one(url, *j), jobs))
-        wall = time.monotonic() - t0
         ok = [d for d in done if d["ok"]]
         lat = [d["s"] for d in ok]
         level = {"concurrency": c, "calls": n, "failed": n - len(ok), "wall_s": round(wall, 1),
