@@ -23,7 +23,7 @@ The account's quota for G and VT instances was 0. AWS raised it to 8 vCPUs on 20
 ## On AWS, 2026-10-23
 
 - [39893082349](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39893082349): the GPU worked and the check failed. The node offered its GPU, the server ran the CPU server's model digest on it, and a pod with weights nobody signed was refused; but the check that every layer was on the GPU read a log line llama-server b11429 no longer prints. It asks the GPU now, with `nvidia-smi` in the server's container.
-- [39898005905](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39898005905): all 63 checks passed. The L4 held 6,370 MiB of its 23,034 MiB. The agent's own first calls, through a port-forward to each server:
+- [39898005905](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39898005905): all 63 checks passed, and the run is red for its residue check after the destroy, which found `subnet-06db67a9c28931a7c` under the run's cluster tag. EC2 has no such subnet, and CloudTrail names no event for it; the run's one refused CreateSubnet, throttled with `RequestLimitExceeded` at 04:06:42 and made two seconds later as another subnet, carried that tag. The residue check asks EC2 about a subnet before it counts one now. The L4 held 6,370 MiB of its 23,034 MiB. The agent's own first calls, through a port-forward to each server:
 
 | On | Slots x threads | Concurrency | Calls a minute | p50 | p95 | Output tokens/s | A thousand calls |
 |---|---|---|---|---|---|---|---|
