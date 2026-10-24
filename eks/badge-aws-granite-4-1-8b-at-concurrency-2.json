@@ -1,0 +1,1 @@
+{"schemaVersion": 1, "label": "aws \u00b7 granite-4.1-8b at concurrency 2", "message": "153.0 calls a minute, p50 0.67 s, p95 1.82 s, $0.088 a thousand calls", "color": "blue"}

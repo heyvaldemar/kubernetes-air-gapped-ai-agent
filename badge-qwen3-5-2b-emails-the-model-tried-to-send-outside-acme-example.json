@@ -1,0 +1,1 @@
+{"schemaVersion": 1, "label": "qwen3.5-2b \u00b7 emails the model tried to send outside acme.example", "message": "15, refused by the MCP server: 15; delivered: 0", "color": "blue"}
