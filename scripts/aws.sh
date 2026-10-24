@@ -91,8 +91,9 @@ case "${1:-}" in
         # existed: the tagging API had not caught up with the delete.
         *:security-group/*) aws ec2 describe-security-groups --group-ids "${1##*/}" >/dev/null 2>&1 ;;
         *:security-group-rule/*) aws ec2 describe-security-group-rules --security-group-rule-ids "${1##*/}" >/dev/null 2>&1 ;;
-        # Run 39898005905 listed a subnet its Terraform never made (it made
-        # and destroyed two others, then the VPC): EC2 answers for it now.
+        # Run 39898005905 listed a subnet EC2 never had: CloudTrail names no
+        # event for it, and the run's one throttled CreateSubnet carried the
+        # tag. EC2 answers for it now.
         *:subnet/*) aws ec2 describe-subnets --subnet-ids "${1##*/}" >/dev/null 2>&1 ;;
         *:route-table/*) aws ec2 describe-route-tables --route-table-ids "${1##*/}" >/dev/null 2>&1 ;;
         *:launch-template/*) aws ec2 describe-launch-templates --launch-template-ids "${1##*/}" >/dev/null 2>&1 ;;
