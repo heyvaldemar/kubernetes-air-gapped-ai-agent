@@ -70,8 +70,12 @@ print(json.dumps({"records": get("/records")["records"], "sent": [m["to"] for m 
 records_state >"$OUT/records-state.json"
 # What the gateway counted, from its proxy's metrics, read through the API
 # server: every request it answered or refused, by status.
-gw_pod="$(kubectl -n gateway get pod -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-kubectl get --raw "/api/v1/namespaces/gateway/pods/$gw_pod:15020/proxy/metrics" >"$OUT/gateway-metrics.txt" 2>/dev/null || true
+# Every proxy's: with two (ADR 20) each counts the requests it answered, and
+# one alone held 72 of the 157 the agent asked (run 40161497976).
+: >"$OUT/gateway-metrics.txt"
+for gw_pod in $(kubectl -n gateway get pod -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  kubectl get --raw "/api/v1/namespaces/gateway/pods/$gw_pod:15020/proxy/metrics" >>"$OUT/gateway-metrics.txt" 2>/dev/null || true
+done
 kubectl -n mcp logs deploy/mcp-server >"$OUT/mcp-audit.jsonl" 2>/dev/null || true
 
 python3 - "$OUT/evals.jsonl" "$OUT/records-state.json" "$OUT/mcp-audit.jsonl" \

@@ -100,7 +100,9 @@ watch_admission() {
 # for the answer, and a call that never connected asked again, up to five
 # times. Prints "<sent> <answered> <not answered> <longest gap, s> <first
 # failure, s> <last failure, s> <the last 20 all answered: yes|no> <asked
-# again> <codes>".
+# again> <longest name lookup, s> <codes>". The name is looked up apart from the
+# connection, and timed: the lookup is the cluster's DNS, the connection the
+# gateway's.
 watch_calls() {
   kubectl -n agents create token support-agent --audience "$AUDIENCE" --duration 15m \
     | kubectl -n agents exec -i nodeloss-client -- python3 -c '
@@ -110,11 +112,20 @@ u = urllib.parse.urlsplit(url)
 tok = sys.stdin.read().strip()
 body = json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "Say OK."}]})
 headers = {"Content-Type": "application/json", "Authorization": "Bearer " + tok}
+lookup = [0.0]
 def call():
     again = 0
     for _ in range(5):
+        t0 = time.monotonic()
         try:
-            sock = socket.create_connection((u.hostname, u.port), 2)
+            addr = socket.getaddrinfo(u.hostname, u.port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
+        except OSError:
+            lookup[0] = max(lookup[0], time.monotonic() - t0)
+            again += 1
+            continue
+        lookup[0] = max(lookup[0], time.monotonic() - t0)
+        try:
+            sock = socket.create_connection(addr, 2)
         except OSError:
             again += 1
             continue
@@ -151,9 +162,9 @@ gap = max(gap, time.monotonic() - last)
 sent = sum(codes.values())
 f = lambda x: "-" if x is None else str(round(x, 1))
 print(sent, codes[200], sent - codes[200], round(gap, 1), f(first_fail), f(last_fail),
-      "yes" if len(recent) == 20 and all(c == 200 for c in recent) else "no", asked_again,
+      "yes" if len(recent) == 20 and all(c == 200 for c in recent) else "no", asked_again, round(lookup[0], 1),
       ",".join("%s:%d" % kv for kv in sorted(codes.items())))
-' "$GW" "$MODEL_NAME" "$1" 2>/dev/null || echo "0 0 0 0 - - no 0 exec-failed"
+' "$GW" "$MODEL_NAME" "$1" 2>/dev/null || echo "0 0 0 0 - - no 0 0 exec-failed"
 }
 
 # on_nodes <ns> <selector>: the nodes the ready pods run on, one a line.
@@ -301,7 +312,7 @@ lose "$victim"; t_lost=$SECONDS
 if s="$(seconds_until 180 not_ready "$victim")"; then measure "the API server saw $victim not ready ${s}s after it was lost"
 else measure "the API server still called $victim ready three minutes after it was lost"; fi
 wait "$wc" "$wa"
-read -r sent answered missed gap first_fail last_fail settled again codes <"$calls"
+read -r sent answered missed gap first_fail last_fail settled again slowest_lookup codes <"$calls"
 read -r tries holes refused first_ref last_ref <"$adm"
 rm -f "$calls" "$adm"
 if [ "${tries:-0}" -gt 0 ] && [ "$holes" = 0 ]; then
@@ -311,7 +322,7 @@ else
 fi
 measure "the signed model was refused at admission $refused time(s) of $tries while the node was lost (first at ${first_ref}s, last at ${last_ref}s of the window; the loss at 10s)"
 if admitted "$served"; then pass "admission admits the signed model again with one replica left"; else fail "admission still refuses the signed model with one replica left"; fi
-measure "through the gateway while the node was lost: $answered of $sent answered, $missed not ($codes), the longest wait between two answers ${gap}s, failures from ${first_fail}s to ${last_fail}s of the window (the loss at 10s); $again call(s) asked again after a connection that was never made"
+measure "through the gateway while the node was lost: $answered of $sent answered, $missed not ($codes), the longest wait between two answers ${gap}s, failures from ${first_fail}s to ${last_fail}s of the window (the loss at 10s); $again call(s) asked again after a connection that was never made; the longest name lookup ${slowest_lookup}s"
 if [ "$settled" = yes ]; then pass "the gateway answers again with one replica of each left: the last 20 requests of the four minutes all answered"
 else fail "the gateway does not answer steadily four minutes after the node was lost ($codes)"; fi
 
@@ -357,7 +368,7 @@ if [ -n "$newnode" ]; then
   rm -f "$drain"
   wait "$wc" "$wa"
   kubectl uncordon "$newnode" >/dev/null 2>&1
-  read -r sent answered missed gap _ _ _ _ codes <"$calls"
+  read -r sent answered missed gap _ _ _ _ _ codes <"$calls"
   read -r tries holes refused _ _ <"$adm"
   rm -f "$calls" "$adm"
   if [ "${sent:-0}" -gt 0 ] && [ "$missed" = 0 ]; then pass "a node drained under traffic: $answered of $sent requests answered, the longest wait between two answers ${gap}s"
