@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-25
+
 ### Changed
 
 - oras 1.3.6 (from 1.3.5), its archives checked against the release's checksums and its GitHub build provenance (`gh attestation verify`); `httpd:2.4.69-alpine`, the registry's password hash, at the digest its tag points to on 2026-10-25. The weekly freshness check reported both; this repository is not one the fleet's triage refreshes.
@@ -206,7 +208,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.4.0...v1.5.0

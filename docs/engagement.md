@@ -22,31 +22,33 @@ It is a plan for a pilot, not a claim about anyone's production. Every step name
 Built from a release tag on a connected Linux machine with Docker, never from a branch:
 
 ```bash
-git checkout v1.7.0
+git checkout v1.8.0
 ./scripts/airgap.sh registry && ./scripts/airgap.sh seed   # the staging registry
 ./scripts/model.sh build && ./scripts/model.sh sign         # the model, rebuilt and signed
+MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build        # the document search's embedding model
+MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
 ./scripts/admission.sh fetch                                # the admission chart, checked
 ./scripts/gateway.sh fetch                                  # the gateway's CRDs and charts, checked
-./scripts/bundle.sh create                                  # .cache/airgap/bundle.tar, signed
+./scripts/bundle.sh create                                  # .cache/airgap/bundle.tar, its sha256 signed
 sha256sum .cache/airgap/bundle.tar
 ```
 
 `MODEL=` picks the model from `models/models.lock`. The sha256 is read to the customer over a second channel, a phone call or a ticket, before the file moves. A file that arrives with a different hash is not loaded, whatever the signature says.
 
-**Done when:** the customer holds `bundle.tar`, `bundle.tar.sigstore.json` and the operator's public key, and the hash they computed is the one they were told.
+**Done when:** the customer holds `bundle.tar`, `bundle.tar.sha256`, `bundle.tar.sha256.sigstore.json` and the operator's public key, and the hash they computed is the one they were told.
 
 ## Day 2: inside
 
 ```bash
 ./scripts/airgap.sh registry && ./scripts/airgap.sh mirror  # or their registry, and its mirror config
-./scripts/bundle.sh load                                    # signature, then checksums, then the load
+./scripts/bundle.sh load                                    # the signed sha256, the file's, the checksums, then the load
 ./scripts/admission.sh install && ./scripts/admission.sh policy
 ./scripts/serve.sh && ./scripts/tools.sh
 ./scripts/gateway.sh install                                # the one way to the models: who calls, how much
 ./tests/e2e/run.sh                                          # the acceptance test
 ```
 
-`bundle.sh load` reads nothing from a file whose signature does not verify, and loads nothing from one whose checksums do not match. The acceptance test is the one CI runs every day: a pod and the node fail to reach the internet and to resolve a public name, the registry answers only over TLS, unsigned weights and weights signed by another key are refused, the signed model is admitted, and everything in the registry is what the file carried ([ADR 8](decisions/0008-one-signed-file-across-the-gap.md)). The gateway is the only way to the models: a caller without a token for its audience is refused, and each caller has a quota and a token budget ([ADR 10](decisions/0010-one-gateway-in-front-of-the-models.md) to [12](decisions/0012-a-token-budget-per-caller.md)).
+`bundle.sh load` reads nothing from a file unless the operator's signature over its sha256 verifies and the file has that sha256, and loads nothing from one whose checksums do not match. The acceptance test is the one CI runs every day: a pod and the node fail to reach the internet and to resolve a public name, the registry answers only over TLS, unsigned weights and weights signed by another key are refused, the signed model is admitted, and everything in the registry is what the file carried ([ADR 8](decisions/0008-one-signed-file-across-the-gap.md)). The gateway is the only way to the models: a caller without a token for its audience is refused, and each caller has a quota and a token budget ([ADR 10](decisions/0010-one-gateway-in-front-of-the-models.md) to [12](decisions/0012-a-token-budget-per-caller.md)).
 
 **Done when:** `tests/e2e/run.sh` passes on their cluster, and its output is attached to the change record.
 
@@ -58,6 +60,8 @@ sha256sum .cache/airgap/bundle.tar
 
 The evals in `evals/tasks.json` are a starting set. The customer's own tasks go in the same format: a question, the tool calls it should make, what the answer must and must not say. Candidate models go into `models/models.lock`, one line each, pinned by revision and sha256, and the e2e matrix runs every candidate through the same boundary ([ADR 7](decisions/0007-every-model-through-the-same-boundary.md)).
 
+Their documents go in `manifests/mcp/documents`, one file each with the audience that may read it, and the people in `policy.json` are granted audiences as they are granted tools; a search never returns a document beyond the rights of the person the agent acts for ([ADR 21](decisions/0021-the-companys-documents-with-each-persons-rights.md)).
+
 The choice is made from the table the run writes, `leaderboard.md` on the `status` branch: how often each model was fooled, what it tried, what got out, what a task cost. The boundary's numbers have to be zero for every candidate. The model's numbers decide which candidate.
 
 **Done when:** the customer has picked a model from the table, and the table is in the change record.
@@ -66,7 +70,7 @@ The choice is made from the table the run writes, `leaderboard.md` on the `statu
 
 The meeting walks [the threat model](threat-model.md) line by line: each threat, its control, the check that shows the control works on every run, and what is not covered. Nothing is shown that the run did not produce. The evidence pack is the release (its archive, keyless signature and provenance), the run's JSON, and the decision records, each ending with how the choice is explained to someone who did not make it.
 
-The residual risks are said out loud: the model is fooled, and can email the wrong colleague inside the domain; signatures are checked by key without a transparency log; one replica of everything.
+The residual risks are said out loud: the model is fooled, and can email the wrong colleague inside the domain; signatures are checked by key without a transparency log; one replica of each service unless the site runs two, as the node-loss drill does, where a crashed node costs the agent seconds and a drain costs nothing ([ADR 20](decisions/0020-a-node-lost-while-it-serves.md)).
 
 **Done when:** the named person has signed off, or written down what has to change first.
 
@@ -83,4 +87,4 @@ The residual risks are said out loud: the model is fooled, and can email the wro
 
 ## What this does not promise
 
-Availability: one node, one registry, one replica of each service. GPU throughput: everything here is measured on CPU. A model that is not fooled: the architecture is built for one that is.
+Availability beyond what the node-loss drill measures: one registry, and one replica of each service unless the site runs two. GPU throughput on their hardware: the GPU numbers here are one NVIDIA L4 on AWS ([ADR 19](decisions/0019-a-gpu-beside-the-cpu.md)). A model that is not fooled: the architecture is built for one that is.

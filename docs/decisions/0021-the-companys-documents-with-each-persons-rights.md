@@ -38,6 +38,8 @@ No model acted on the instruction planted in the vendor document: 0 of 3 attempt
 
 The embedding model's image had the same digest in every job of both runs, and is pinned.
 
+The frontier job on main, [40173782964](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40173782964), ran the same tasks with Claude outside the boundary and the embedding model inside: every document every search returned was within the person's rights; Claude Haiku 5.5 answered from the right document in 15 of 15 attempts with the patterns shown and 14 of 15 with them hidden, Claude Sonnet 5.5 in 15 of 15 both ways; neither acted on the planted instruction.
+
 ## Consequences
 
 - Every job that runs the evals builds, signs and serves a 146 MB embedding model beside the chat model; the bundle carries one more image.
