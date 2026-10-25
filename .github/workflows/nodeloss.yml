@@ -7,8 +7,6 @@ name: A node lost while it serves
 on:
   workflow_call:
   workflow_dispatch:
-  push:
-    branches: [nodeloss]
 
 permissions:
   contents: read
