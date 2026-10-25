@@ -144,14 +144,17 @@ case "${1:-}" in
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" "${GPU_STOPPED:-}" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" "${GPU_STOPPED:-}" "${NODES:-1}" <<'PY'
 import sys
 now = int(sys.argv[2])
 hours = (now - int(sys.argv[1])) / 3600
-node, gpu, gpu_started, gpu_stopped = sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+node, gpu, gpu_started, gpu_stopped, nodes = sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], int(sys.argv[7] or 1)
 per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776}
-# (what, per hour, hours)
-rows = [("EKS control plane", 0.10, hours), ("one %s node" % node, per_node[node], hours),
+# (what, per hour, hours). Two nodes (ADR 20) are priced as two for the
+# whole run; the one the drill loses is replaced within minutes, and both
+# bill meanwhile.
+rows = [("EKS control plane", 0.10, hours),
+        ("one %s node" % node if nodes == 1 else "two %s nodes" % node, per_node[node] * nodes, hours),
         ("six interface endpoints in two zones", 6 * 2 * 0.01, hours)]
 if gpu and gpu_started:
     # The GPU node (ADR 19) from the apply that made it to the apply that

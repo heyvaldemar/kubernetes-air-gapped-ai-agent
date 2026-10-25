@@ -55,6 +55,12 @@ on:
         type: choice
         options: ["false", "true"]
         default: "false"
+      ha:
+        description: "true runs two CPU nodes, two of each service, and loses one of them under traffic (ADR 20, about $0.30 more); not with gpu"
+        required: false
+        type: choice
+        options: ["false", "true"]
+        default: "false"
       dns_firewall:
         description: "false only to show the DNS check its violation (ADR 18)"
         required: false
@@ -77,6 +83,9 @@ env:
   AGENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.agent != 'false') || (github.event_name == 'schedule' && vars.AWS_AGENT_ENABLED == 'true') }}
   # A GPU only with the agent: it is measured against the agent's CPU server.
   WITH_GPU: ${{ ((github.event_name == 'workflow_dispatch' && inputs.agent != 'false' && inputs.gpu == 'true') || (github.event_name == 'schedule' && vars.AWS_AGENT_ENABLED == 'true' && vars.AWS_GPU_ENABLED == 'true')) }}
+  # Two CPU nodes and the node-loss drill (ADR 20): by hand, with the agent,
+  # and not with the GPU, whose comparison is one CPU server's.
+  WITH_HA: ${{ github.event_name == 'workflow_dispatch' && inputs.agent != 'false' && inputs.ha == 'true' && inputs.gpu != 'true' }}
   # The model a release ships with, held to the same gates as in the kind e2e.
   MODEL: granite-4.0-1b
   TASK_FLOOR: "on"
@@ -179,11 +188,12 @@ jobs:
               "operator_cidrs": [sys.argv[1] + "/32"],
               "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
               "node_instance_type": sys.argv[2],
+              "nodes": 2 if os.environ["WITH_HA"] == "true" else 1,
               "images": json.loads(sys.argv[3]),
           }, indent=1))
           PY
           aws s3 cp run.tfvars.json "s3://$BUCKET/airgap-runs/$RUN_ID.tfvars.json"
-          echo "agent: $AGENT, gpu: $WITH_GPU, dns_firewall: $DNS_FIREWALL, node: $node, repositories: $(jq '.images | length' run.tfvars.json)"
+          echo "agent: $AGENT, gpu: $WITH_GPU, ha: $WITH_HA, dns_firewall: $DNS_FIREWALL, node: $node x $(jq .nodes run.tfvars.json), repositories: $(jq '.images | length' run.tfvars.json)"
 
       - name: Terraform init, one state per run
         env:
@@ -231,16 +241,21 @@ jobs:
         if: env.AGENT == 'true'
         env:
           REGISTRY_CREDENTIALS: amazon
+          ADMISSION_REPLICAS: ${{ env.WITH_HA == 'true' && '2' || '' }}
         run: |
           ./scripts/admission.sh install
           ./scripts/admission.sh policy
 
       - name: The model server, the tool side and the gateway, from ECR
         if: env.AGENT == 'true'
+        env:
+          SERVE_REPLICAS: ${{ env.WITH_HA == 'true' && '2' || '' }}
+          GATEWAY_REPLICAS: ${{ env.WITH_HA == 'true' && '2' || '' }}
         run: |
           ./scripts/serve.sh
           ./scripts/tools.sh
           ./scripts/gateway.sh install
+          if [ "$WITH_HA" = true ]; then kubectl apply -f manifests/ha/disruption-budgets.yaml; fi
 
       - name: What is inside, and that nothing else runs
         if: env.AGENT == 'true'
@@ -271,6 +286,17 @@ jobs:
           SERVED_DEPLOYMENT: llama
           SERVED_MODEL: ${{ env.MODEL }}
         run: ./tests/e2e/gameday.sh
+
+      # A node's instance terminated under traffic, the one the node group
+      # launches in its place, and a node drained (ADR 20).
+      - name: A node lost, replaced and drained, while it serves
+        if: env.WITH_HA == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          NODE_LOSS: aws
+          SERVED_DEPLOYMENT: llama
+          SERVED_MODEL: ${{ env.MODEL }}
+        run: ./tests/e2e/nodeloss.sh
 
       # The GPU node exists only around its own measurement (ADR 19): the CPU
       # server is measured first, then a second apply makes the GPU node,
@@ -426,6 +452,7 @@ jobs:
           {
             echo "applied=true"
             echo "node=$(jq -r '.node_instance_type // "m7i.large"' run.tfvars.json)"
+            echo "nodes=$(jq -r '.nodes // 1' run.tfvars.json)"
           } >> "$GITHUB_OUTPUT"
           printf 'terraform {\n  backend "s3" {}\n}\n' > aws/ci_backend.tf
           terraform -chdir=aws init -input=false -lockfile=readonly \
@@ -445,6 +472,7 @@ jobs:
         env:
           STARTED: ${{ needs.up.outputs.started }}
           NODE_TYPE: ${{ steps.state.outputs.node }}
+          NODES: ${{ steps.state.outputs.nodes }}
           GPU_STARTED: ${{ needs.up.outputs.gpu_started }}
           GPU_STOPPED: ${{ needs.up.outputs.gpu_stopped }}
           GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && 'g6.xlarge' || '' }}
