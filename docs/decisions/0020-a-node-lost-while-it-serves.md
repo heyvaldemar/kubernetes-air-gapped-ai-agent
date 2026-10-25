@@ -37,7 +37,26 @@ Three runs on the branch, each finding what the next fixed.
 
 The first run, with one gateway controller on the worker that stayed, measured the same: 8 of 258 not answered, the longest wait 53.3 s, the signed model refused 4 of 87 times.
 
-**What two replicas buy, and what they do not.** A drain is a non-event: the budgets let one replica go at a time, the model server finishes the answer it is writing before it stops (its `preStop` wait, from the game day's rollout case, `manifests/inference/llama.yaml`), and every request is answered. A crash is not. For about as long as the API server takes to see the node gone, 51 s here, the lost node's pods stay in their Services, and a share of every new connection goes to a pod that no longer exists. The gateway's proxy, the model server and Kyverno's webhook each lose that share. Admission fails closed through it: what it could not check, it refused. That window is the cluster's node lifecycle, not the application's. What shortens it is in the callers: a short connect timeout and a retry on another endpoint, in the agent's harness and in the gateway's backend policy. That is the next step, measured against these numbers.
+**What two replicas buy, and what they do not.** A drain is a non-event: the budgets let one replica go at a time, the model server finishes the answer it is writing before it stops (its `preStop` wait, from the game day's rollout case, `manifests/inference/llama.yaml`), and every request is answered. A crash is not. For about as long as the API server takes to see the node gone, 51 s here, the lost node's pods stay in their Services, and a share of every new connection goes to a pod that no longer exists. The gateway's proxy, the model server and Kyverno's webhook each lose that share. Admission fails closed through it: what it could not check, it refused. That window is the cluster's node lifecycle, not the application's. What shortens it is in the callers, measured below.
+
+## Connect fast, read slow, 2026-10-25
+
+Three things lose a share of the agent's calls until the API server sees a lost node, and each is fixed where it lives.
+
+- **The gateway's way to a model server.** A policy per model backend (`manifests/gateway/route.yaml`): a connection gives up after one second, one failed connection or 5xx takes the endpoint out of the rotation for thirty seconds, and the route sends a request that got 503 once more, to another server. Static check `gateway` holds all three, two plants.
+- **The agent's way to the gateway.** `evals/harness.py` gives a connection two seconds and an answer its ten minutes, and asks again a call that never connected, which sent nothing. urllib's one timeout had covered both: a connection to a lost node's gateway pod would have waited the whole ten minutes.
+- **The agent's name lookup.** With a lookup before every connection, a query that met the CoreDNS pod of the lost node waited five seconds, the resolver's timeout, each time [40164107573](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40164107573). A Service's address does not move when its pods or nodes do: the harness looks the gateway up once.
+
+The drill's client makes its calls the way the harness does.
+
+| A worker killed under traffic | [40158438634](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40158438634), before | [40161854348](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40161854348), connect fast | [40164107573](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40164107573), lookups timed | [40165123171](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40165123171), one lookup |
+|---|---|---|---|---|
+| Requests answered, the four minutes from the loss | 250 of 258 | 258 of 259 | 254 of 256 | **274 of 274** |
+| The longest wait between two answers | 53.8 s | 48.3 s | 50.8 s | **9.1 s** |
+| Calls asked again after a connection never made | | 8 | 10 | 21 |
+| The longest name lookup | | | 5.0 s | 0.0 s |
+
+The node is still lost for as long as the cluster takes to see it, 52 s in the last run. The agent no longer waits for that.
 
 ## Consequences
 
