@@ -140,7 +140,17 @@ case "${1:-}" in
       sudo "$t" -C INPUT -i "$br" -m conntrack --ctstate NEW -j REJECT 2>/dev/null \
         || sudo "$t" -I INPUT 1 -i "$br" -m conntrack --ctstate NEW -j REJECT
     done
+    # The two names a node must still find with no resolver: the registry
+    # inside and the control plane, whose name the kubelet dials the API
+    # server by. Docker's resolver answered for that one until now; a kubelet
+    # that had to dial again found nothing, and a node started again never
+    # came back (run 40109411614, ADR 20).
+    cp="$CLUSTER-control-plane"
+    cp_ip="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' "$cp")"
     for node in $(nodes); do
+      docker exec "$node" sh -c "printf '%s\n' '$(registry_ip) $NAME' '$cp_ip $cp' > /etc/boundary-hosts
+        grep -vxF -f /etc/boundary-hosts /etc/hosts | grep -v -e ' $NAME\$' -e ' $cp\$' > /etc/hosts.new
+        cat /etc/boundary-hosts >> /etc/hosts.new && cat /etc/hosts.new > /etc/hosts && rm -f /etc/hosts.new"
       docker exec "$node" sh -c 'printf "nameserver 127.0.0.1\n" > /etc/resolv.conf'
       # Docker's embedded DNS, inside the node. kind's entrypoint sends the
       # bridge gateway's port 53 (UDP and TCP), from the node and from its
@@ -152,10 +162,11 @@ case "${1:-}" in
           docker exec "$node" "$t" -t nat -F "$chain" 2>/dev/null || true
         done
       done
-      # And at every boot. Docker gives a node that starts again its resolver
-      # and its rules back, and the node resolved example.com once more after
-      # a restart (run 40108045991, ADR 20). The node closes itself before
-      # containerd and the kubelet start.
+      # And at every boot. Docker gives a node that starts again its resolver,
+      # its rules and its hosts file back, and the node resolved example.com
+      # once more after a restart (run 40108045991, ADR 20). The node closes
+      # itself, and finds the two names again, before containerd and the
+      # kubelet start.
       docker exec -i "$node" sh -c 'cat >/etc/systemd/system/boundary-close.service && systemctl daemon-reload && systemctl enable boundary-close.service >/dev/null 2>&1' <<'UNIT'
 [Unit]
 Description=No DNS from the node, and no way to Docker's (scripts/airgap.sh close)
@@ -166,6 +177,7 @@ Before=containerd.service kubelet.service
 [Service]
 Type=oneshot
 ExecStart=/bin/sh -c 'printf "nameserver 127.0.0.1\n" > /etc/resolv.conf'
+ExecStart=/bin/sh -c 'grep -vxF -f /etc/boundary-hosts /etc/hosts > /etc/hosts.new; cat /etc/boundary-hosts >> /etc/hosts.new; cat /etc/hosts.new > /etc/hosts; rm -f /etc/hosts.new'
 ExecStart=-/usr/sbin/iptables -t nat -F DOCKER_OUTPUT
 ExecStart=-/usr/sbin/iptables -t nat -F DOCKER_POSTROUTING
 ExecStart=-/usr/sbin/ip6tables -t nat -F DOCKER_OUTPUT

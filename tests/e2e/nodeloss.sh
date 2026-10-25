@@ -61,6 +61,7 @@ svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}')"
 GW="http://$svc.gateway.svc.cluster.local:8080"
 LLAMA="app=llama,server=$SERVED"
 PROXY=gateway.networking.k8s.io/gateway-name=models
+CONTROLLER=app.kubernetes.io/name=agentgateway
 KYVERNO=app.kubernetes.io/component=admission-controller
 
 # admitted <ref>: whether the API server admits a pod that mounts this model
@@ -243,10 +244,13 @@ survivor="${workers[0]}" victim="${workers[1]}"
 measure "the workers: $survivor stays, $victim is lost ($MODE)"
 spread inference "$LLAMA" "the model server"
 spread gateway "$PROXY" "the gateway's proxy"
+spread agentgateway-system "$CONTROLLER" "the gateway's controller"
 spread kyverno "$KYVERNO" "Kyverno's admission controller"
 budget inference "$LLAMA" "the model server"
 budget gateway "$PROXY" "the gateway's proxy"
+budget agentgateway-system "$CONTROLLER" "the gateway's controller"
 budget kyverno "$KYVERNO" "Kyverno's admission controller"
+measure "CoreDNS runs on: $(on_nodes kube-system k8s-app=kube-dns | paste -sd, -)"
 
 kubectl -n agents delete pod nodeloss-client --ignore-not-found --wait=true >/dev/null 2>&1
 kubectl apply -f - >/dev/null <<EOF
@@ -316,6 +320,7 @@ else
 fi
 respread inference "$LLAMA" "the model server, again"
 respread gateway "$PROXY" "the gateway's proxy, again"
+respread agentgateway-system "$CONTROLLER" "the gateway's controller, again"
 respread kyverno "$KYVERNO" "Kyverno's admission controller, again"
 
 step "3. a worker drained, the way maintenance takes it"

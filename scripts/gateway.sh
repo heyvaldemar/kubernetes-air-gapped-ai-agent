@@ -60,8 +60,19 @@ case "${1:-}" in
     # so tag@digest is what the controller's pod and the proxy it starts run.
     # Under INSIDE when it is set, where the registry inside is not a mirror.
     registry=(); [ -z "${INSIDE:-}" ] || registry=(--set "image.registry=$(relocated cr.agentgateway.dev)")
+    # GATEWAY_REPLICAS (ADR 20): the controller too, spread over the nodes,
+    # with a budget. With one controller on a node that was lost, the proxy
+    # left on the other node learned of no endpoint change and sent a share
+    # of the requests to a model server that was gone, 503 to the end of the
+    # window (run 40109411614).
+    controller=()
+    if [ -n "${GATEWAY_REPLICAS:-}" ]; then
+      controller=(--set "controller.replicaCount=$GATEWAY_REPLICAS"
+        --set-json 'controller.podDisruptionBudget={"minAvailable":1}'
+        --set-json 'topologySpreadConstraints=[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/name":"agentgateway"}}}]')
+    fi
     helm upgrade --install agentgateway "$(chart_file agentgateway)" \
-      --namespace agentgateway-system --wait --timeout 5m "${registry[@]}" \
+      --namespace agentgateway-system --wait --timeout 5m "${registry[@]}" "${controller[@]}" \
       --set "controller.image.tag=$(tag_of controller)" --set "proxy.image.tag=$(tag_of proxy)" >/dev/null
     # The cluster's service account issuer and its public keys, read once
     # from the API server: the gateway checks a token against them with
