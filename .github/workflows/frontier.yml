@@ -69,9 +69,13 @@ jobs:
           ./scripts/airgap.sh seed
           ./scripts/airgap.sh mirror
 
-      # No model is built here, so nothing else makes the operator's key.
-      - name: The operator's key, made for this run
-        run: COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix .cache/airgap/operator >/dev/null
+      # No chat model is built here: the model is outside. The document
+      # search's embedding model is inside like everywhere else (ADR 21), and
+      # signing it makes the operator's key.
+      - name: The embedding model, built reproducibly and signed
+        run: |
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
 
       - name: The admission chart and the gateway, fetched and checked
         run: |

@@ -40,6 +40,9 @@ print(json.dumps({
              "egress": [{"to": [{"ipBlock": {"cidr": svc_ip + "/32"}}], "ports": [{"protocol": "TCP", "port": int(svc_port)}]},
                         {"to": [{"ipBlock": {"cidr": ip + "/32"}} for ip in ep_ips.split()], "ports": [{"protocol": "TCP", "port": int(ep_port)}]}]}}))
 PY
+# The document search's embedding model (ADR 21), served like the chat
+# model: its signed image, admitted on its signature and AI-BOM.
+SERVE_NAME=embed SERVE_MANIFEST=manifests/inference/embed.yaml MODEL=nomic-embed-text-v1.5 scripts/serve.sh
 for d in tools/tool-gateway corp/records-api mcp/mcp-server; do
   kubectl -n "${d%/*}" rollout status "deployment/${d#*/}" --timeout=300s >/dev/null
 done

@@ -95,6 +95,9 @@ jobs:
         run: |
           ./scripts/model.sh build
           ./scripts/model.sh sign
+          # The document search's embedding model (ADR 21).
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
           ./scripts/model.sh plants
 
       - name: The admission chart and the gateway, fetched and checked
@@ -211,7 +214,7 @@ jobs:
 
       - name: Two models, built reproducibly and signed, and the plants
         run: |
-          for m in granite-4.0-1b minicpm5-2b; do
+          for m in granite-4.0-1b minicpm5-2b nomic-embed-text-v1.5; do
             MODEL="$m" ./scripts/model.sh build
             MODEL="$m" ./scripts/model.sh sign
           done

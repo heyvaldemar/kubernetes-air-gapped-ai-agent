@@ -21,5 +21,21 @@ configMapGenerator:
     namespace: corp
     files:
       - records/records_api.py
+  - name: mcp-documents
+    namespace: mcp
+    files:
+      - mcp/documents/data-retention.md
+      - mcp/documents/escalation-runbook.md
+      - mcp/documents/holiday-coverage.md
+      - mcp/documents/invoice-disputes.md
+      - mcp/documents/pricing-tiers.md
+      - mcp/documents/q3-margins.md
+      - mcp/documents/refund-policy.md
+      - mcp/documents/renewal-playbook.md
+      - mcp/documents/security-incident-reporting.md
+      - mcp/documents/support-sla-2024.md
+      - mcp/documents/support-sla-2026.md
+      - mcp/documents/travel-policy.md
+      - mcp/documents/vendor-onboarding.md
 generatorOptions:
   disableNameSuffixHash: true

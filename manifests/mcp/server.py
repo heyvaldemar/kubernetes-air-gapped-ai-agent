@@ -53,6 +53,8 @@ POLICY_PATH = os.environ.get("MCP_POLICY", "/etc/mcp/policy.json")
 RECORDS_KEY = os.environ.get("RECORDS_KEY_FILE", "/var/run/secrets/records/key")
 REPORT_URL = os.environ.get("REPORT_URL", "http://tool-gateway.tools.svc.cluster.local:9898/")
 RECORDS_URL = os.environ.get("RECORDS_URL", "http://records-api.corp.svc.cluster.local:8080")
+DOCUMENTS_DIR = os.environ.get("DOCUMENTS_DIR", "/etc/mcp/documents")
+EMBED_URL = os.environ.get("EMBED_URL", "http://embed.inference.svc.cluster.local:8080")
 API = "https://kubernetes.default.svc"
 SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
 MAX_BODY = 64 * 1024
@@ -108,6 +110,63 @@ def delete_record(args):
     return _get(RECORDS_URL + "/records/" + args["customer_id"], method="DELETE", key=True)
 
 
+# THE COMPANY'S DOCUMENTS (ADR 21). Each says in its front matter who may
+# read it: everyone, account managers, or finance. A search sees only the
+# documents both the agent and the person it acts for may read, so a
+# document beyond the person's rights never reaches the model at all, and
+# the audit names every document a search returned. The index is the
+# documents' embeddings, made at the first search by the embedding model
+# inside the boundary, signed and admitted like the chat model.
+def documents():
+    out = []
+    for name in sorted(os.listdir(DOCUMENTS_DIR)) if os.path.isdir(DOCUMENTS_DIR) else []:
+        if not name.endswith(".md"):
+            continue
+        with open(os.path.join(DOCUMENTS_DIR, name), encoding="utf-8") as f:
+            head, _, body = f.read().partition("\n---\n")
+        meta = dict(line.split(": ", 1) for line in head.strip("-\n").splitlines() if ": " in line)
+        out.append(dict(meta, body=body.strip()))
+    return out
+
+
+def embed(texts):
+    """Unit vectors for the texts, from the embedding model's server."""
+    req = urllib.request.Request(EMBED_URL + "/v1/embeddings", data=json.dumps({"input": texts}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = sorted(json.loads(r.read())["data"], key=lambda d: d["index"])
+    vectors = [d["embedding"] for d in data]
+    return [[x / (sum(y * y for y in v) ** 0.5 or 1.0) for x in v] for v in vectors]
+
+
+_index, _index_lock = None, threading.Lock()
+
+
+def index():
+    global _index
+    with _index_lock:
+        if _index is None:
+            docs = documents()
+            # nomic-embed-text marks what is stored and what is asked apart.
+            _index = list(zip(docs, embed(["search_document: %s\n%s" % (d["title"], d["body"]) for d in docs])))
+    return _index
+
+
+def search_documents(args, audiences):
+    """The three documents closest to the query among those the caller may
+    read, as text for the model, and their ids for the audit."""
+    q = embed(["search_query: " + args["query"]])[0]
+    scored = sorted(((sum(a * b for a, b in zip(q, v)), d) for d, v in index() if d.get("audience") in audiences),
+                    key=lambda s: -s[0])[:3]
+    if not scored:
+        return "No document matched.", []
+    parts = []
+    for _, d in scored:
+        note = " Superseded by %s." % d["superseded_by"] if d.get("superseded_by") else ""
+        parts.append("[%s] %s, updated %s.%s\n%s" % (d["id"], d["title"], d.get("updated", "?"), note, d["body"]))
+    return "\n\n".join(parts), [d["id"] for _, d in scored]
+
+
 CUSTOMER_ID = {"type": "string", "pattern": "^C[0-9]{4}$", "maxLength": 5,
                "description": "A customer ID, C followed by four digits"}
 TOOLS = {
@@ -131,6 +190,22 @@ TOOLS = {
             "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
         },
         "run": records_lookup,
+    },
+    "search_documents": {
+        "definition": {
+            "name": "search_documents",
+            "title": "Search company documents",
+            "description": "The company documents closest to a question, among those the person you act for may "
+                           "read. Each starts with its id in square brackets: cite that id for anything you take "
+                           "from it.",
+            "inputSchema": {"type": "object", "properties": {
+                                "query": {"type": "string", "minLength": 3, "maxLength": 200,
+                                          "description": "What to look for"}},
+                            "required": ["query"], "additionalProperties": False},
+            "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+        },
+        # Run in handle(), which has the grant it needs.
+        "run": None,
     },
     "send_email": {
         "definition": {
@@ -314,7 +389,8 @@ class Server:
         mine = self.people.get(person, {"tools": [], "resources": [], "customers": []})
         return {"tools": [t for t in agent["tools"] if t in mine.get("tools", [])],
                 "resources": [r for r in agent.get("resources", []) if r in mine.get("resources", [])],
-                "customers": mine.get("customers", [])}
+                "customers": mine.get("customers", []),
+                "documents": [d for d in agent.get("documents", []) if d in mine.get("documents", [])]}
 
     def check_protocol(self, headers, msg):
         method = msg.get("method")
@@ -385,15 +461,22 @@ class Server:
             if "customer_id" in args and g["customers"] != "*" and args["customer_id"] not in g["customers"]:
                 return complete({"content": [{"type": "text", "text": "The service answered HTTP 404."}],
                                  "isError": True}), "out_of_scope", name
+            returned = None
             try:
-                text = tool["run"](args)
+                if name == "search_documents":
+                    text, returned = search_documents(args, g["documents"])
+                else:
+                    text = tool["run"](args)
                 is_error = False
             except urllib.error.HTTPError as e:
                 text, is_error = "The service answered HTTP %d." % e.code, True
             except (urllib.error.URLError, OSError) as e:
                 text, is_error = "The service could not be reached: %s" % type(e).__name__, True
-            return complete({"content": [{"type": "text", "text": sanitize(text)}], "isError": is_error}), \
-                "allowed", name
+            out = (complete({"content": [{"type": "text", "text": sanitize(text)}], "isError": is_error}),
+                   "allowed", name)
+            # The documents a search returned, for the audit to hold against
+            # the person's rights (scripts/evals.sh does).
+            return out + ({"documents": returned},) if returned is not None else out
         if method == "resources/read":
             uri = params.get("uri", "")
             if uri not in RESOURCES or uri not in g["resources"]:
@@ -512,9 +595,9 @@ class Handler(BaseHTTPRequestHandler):
                 audit(identity=who, pod=pod, on_behalf_of=person, method=msg["method"], decision="accepted")
                 return self.send(202)
             SERVER.check_protocol(self.headers, msg)
-            result, decision, name = SERVER.handle(who, msg, person)
+            result, decision, name, *extra = SERVER.handle(who, msg, person)
             audit(identity=who, pod=pod, on_behalf_of=person, method=msg["method"], name=name, decision=decision,
-                  **detail(msg), **customer(msg))
+                  **detail(msg), **customer(msg), **(extra[0] if extra else {}))
             self.send(200, {"jsonrpc": "2.0", "id": msg["id"], "result": result})
         except Refused as r:
             params = msg.get("params") if isinstance(msg, dict) else None

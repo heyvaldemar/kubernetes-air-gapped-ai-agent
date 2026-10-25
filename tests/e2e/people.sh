@@ -10,11 +10,18 @@
 #      shown as the agent's, a token for the people audience from someone
 #      policy.json does not know, and a person's token for the wrong audience
 #   3. acting for first-line support, the agent is listed the records tool
-#      alone, and a call to send_email is refused as if the tool did not exist
+#      and the document search alone, and a call to send_email is refused as
+#      if the tool did not exist
 #   4. acting for an account manager, the agent reads her own customer's
 #      record (the control) and is answered "not found" for another manager's
-#   5. the MCP server's audit names the person every call was made for, and
-#      records each refused for naming no one it knows
+#   5. the company's documents (ADR 21): acting for finance, a search for the
+#      quarter's margins returns the finance document (the control); acting
+#      for first-line support or an account manager the same search does not,
+#      and acting for an account manager a search for discounts returns the
+#      pricing document, which first-line support's does not
+#   6. the MCP server's audit names the person every call was made for, the
+#      documents each search returned, and records each refused for naming
+#      no one it knows
 #
 # One process mints the tokens with kubectl, keeps them in memory and makes
 # the calls: no token is an argument, a file or a log line. Appends to
@@ -43,6 +50,7 @@ tok = {
     "lead": token("people", "support-lead", people),
     "dana": token("people", "dana", people),
     "sam": token("people", "sam", people),
+    "fiona": token("people", "fiona", people),
     # A person's token for the MCP server's audience, and a token for the
     # people audience from a ServiceAccount that is no one's.
     "sam_wrong_audience": token("people", "sam", policy["audience"]),
@@ -91,7 +99,7 @@ def check(ok, line):
     print(("  PASS  " if ok else "  FAIL  ") + line, flush=True)
 
 lead = listed(tok["lead"])
-check(lead == ["quarterly_report", "records_lookup", "send_email"],
+check(lead == ["quarterly_report", "records_lookup", "search_documents", "send_email"],
       "control: acting for the support team's lead, the agent is listed every tool it is granted: %s" % lead)
 status, _ = rpc("tools/list", bearer=tok["agent"])
 check(status == 403, "the agent alone, naming no person, is refused (HTTP %d)" % status)
@@ -102,7 +110,8 @@ check(status == 403, "a token for the people audience from someone policy.json d
 status, _ = rpc("tools/list", bearer=tok["agent"], behalf=tok["sam_wrong_audience"])
 check(status == 403, "a person's token for the MCP server's audience, not the people one, is refused (HTTP %d)" % status)
 sam = listed(tok["sam"])
-check(sam == ["records_lookup"], "acting for first-line support, the agent is listed the records tool alone: %s" % sam)
+check(sam == ["records_lookup", "search_documents"],
+      "acting for first-line support, the agent is listed the records tool and the document search alone: %s" % sam)
 said = text(*rpc("tools/call", {"name": "send_email", "arguments": {"to": "dana@acme.example", "subject": "s", "body": "b"}},
                  bearer=tok["agent"], behalf=tok["sam"]))
 check(said.startswith("error: Unknown tool"),
@@ -115,17 +124,41 @@ other = text(*rpc("tools/call", {"name": "records_lookup", "arguments": {"custom
 check(other == "The service answered HTTP 404.",
       "acting for Dana, another manager's customer C1090 is answered as one that does not exist: %s" % other[:40])
 
+# The documents: what a search returns is held to the person's rights, and
+# the control shows the document is there for the person who may read it.
+def found(behalf, query):
+    said = text(*rpc("tools/call", {"name": "search_documents", "arguments": {"query": query}},
+                     bearer=tok["agent"], behalf=tok[behalf]))
+    return [w[1:-1] for w in said.split() if w.startswith("[") and w.endswith("]")]
+margins = "gross margin in the third quarter"
+got = found("fiona", margins)
+check("q3-margins" in got, "control: acting for finance, a search for the quarter's margins returns the finance document: %s" % got)
+got = found("sam", margins)
+check(got and "q3-margins" not in got and "invoice-disputes" not in got,
+      "acting for first-line support, the same search returns no finance document: %s" % got)
+got = found("dana", margins)
+check(got and "q3-margins" not in got and "invoice-disputes" not in got,
+      "acting for an account manager, the same search returns no finance document: %s" % got)
+discounts = "how large a discount may an account manager give"
+got = found("dana", discounts)
+check("pricing-tiers" in got, "control: acting for an account manager, a search for discounts returns the pricing document: %s" % got)
+got = found("sam", discounts)
+check(got and "pricing-tiers" not in got, "acting for first-line support, the same search does not: %s" % got)
+
 # The audit: every call above that got past the agent's own identity check
-# names the person it was made for, or is a refusal for naming no one.
+# names the person it was made for, or is a refusal for naming no one; and
+# every search names the documents it returned.
 logs = subprocess.run(["kubectl", "-n", "mcp", "logs", "deploy/mcp-server", "--since-time=" + since],
                       capture_output=True, text=True).stdout.splitlines()
 lines = [json.loads(l) for l in logs if l.startswith("{")]
 calls = [a for a in lines if a.get("method", "").startswith("tools/") and a.get("decision") != "unauthenticated"]
 named = [a for a in calls if a.get("on_behalf_of", "").startswith("system:serviceaccount:people:")]
 nobody = [a for a in calls if a.get("decision") == "no_person"]
-check(len(calls) == 8 and len(named) == 5 and len(nobody) == 3,
-      "the MCP server's audit names the person each of %d calls was made for, and records %d refused for naming no one it knows"
-      % (len(named), len(nobody)))
+searches = [a for a in named if a.get("name") == "search_documents"]
+check(len(calls) == 13 and len(named) == 10 and len(nobody) == 3 and len(searches) == 5
+      and all(isinstance(a.get("documents"), list) and a["documents"] for a in searches),
+      "the MCP server's audit names the person each of %d calls was made for, the documents each of %d searches returned, "
+      "and records %d refused for naming no one it knows" % (len(named), len(searches), len(nobody)))
 
 if results:
     d = json.load(open(results)) if os.path.exists(results) else {"checks": [], "measured": []}

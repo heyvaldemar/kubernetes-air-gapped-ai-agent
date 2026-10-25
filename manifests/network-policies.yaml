@@ -137,6 +137,40 @@ spec:
               app.kubernetes.io/name: records-api
       ports:
         - {protocol: TCP, port: 8080}
+    # The embedding model, for the document search (ADR 21).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: inference
+          podSelector:
+            matchLabels:
+              app: embed
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# The embedding model answers the MCP server alone, and starts nothing of its
+# own. The agents do not reach it: what they may find in the documents is
+# what the MCP server lets them search (ADR 21).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: embed-server
+  namespace: inference
+spec:
+  podSelector:
+    matchLabels:
+      app: embed
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-server
+      ports:
+        - {protocol: TCP, port: 8080}
 ---
 # The second wall: every namespace may reach corp except a sandbox.
 apiVersion: networking.k8s.io/v1

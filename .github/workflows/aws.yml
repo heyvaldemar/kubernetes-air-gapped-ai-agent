@@ -144,6 +144,9 @@ jobs:
           GPU="$([ "$WITH_GPU" = true ] && echo 1 || echo 0)" ./scripts/airgap.sh seed
           ./scripts/model.sh build
           ./scripts/model.sh sign
+          # The document search's embedding model (ADR 21).
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
           if [ "$WITH_GPU" = true ]; then
             MODEL=granite-4.1-8b ./scripts/model.sh build
             MODEL=granite-4.1-8b ./scripts/model.sh sign

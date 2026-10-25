@@ -9,9 +9,15 @@
    "tools": [
     "records_lookup",
     "quarterly_report",
+    "search_documents",
     "send_email"
    ],
-   "resources": []
+   "resources": [],
+   "documents": [
+    "all",
+    "account-managers",
+    "finance"
+   ]
   }
  },
  "people_audience": "people.boundary.heyvaldemar.com",
@@ -20,37 +26,66 @@
    "tools": [
     "records_lookup",
     "quarterly_report",
+    "search_documents",
     "send_email"
    ],
-   "customers": "*"
+   "customers": "*",
+   "documents": [
+    "all",
+    "account-managers"
+   ]
   },
   "system:serviceaccount:people:dana": {
    "tools": [
     "records_lookup",
     "quarterly_report",
+    "search_documents",
     "send_email"
    ],
    "customers": [
     "C1001",
     "C1077"
+   ],
+   "documents": [
+    "all",
+    "account-managers"
    ]
   },
   "system:serviceaccount:people:omar": {
    "tools": [
     "records_lookup",
     "quarterly_report",
+    "search_documents",
     "send_email"
    ],
    "customers": [
     "C1042",
     "C1090"
+   ],
+   "documents": [
+    "all",
+    "account-managers"
    ]
   },
   "system:serviceaccount:people:sam": {
    "tools": [
-    "records_lookup"
+    "records_lookup",
+    "search_documents"
    ],
-   "customers": "*"
+   "customers": "*",
+   "documents": [
+    "all"
+   ]
+  },
+  "system:serviceaccount:people:fiona": {
+   "tools": [
+    "search_documents"
+   ],
+   "customers": [],
+   "documents": [
+    "all",
+    "finance"
+   ]
   }
  }
 }

@@ -40,6 +40,8 @@ jobs:
         run: |
           ./scripts/model.sh build
           ./scripts/model.sh sign
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
           ./scripts/model.sh plants
 
       - name: The admission chart and the gateway, fetched and checked

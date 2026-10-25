@@ -75,10 +75,15 @@ spec:
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
             - {name: records-key, mountPath: /var/run/secrets/records, readOnly: true}
+            - {name: documents, mountPath: /etc/mcp/documents, readOnly: true}
       volumes:
         - name: app
           configMap:
             name: mcp-server
+        # The company's documents, each with who may read it (ADR 21).
+        - name: documents
+          configMap:
+            name: mcp-documents
         # Created by scripts/tools.sh, never in Git.
         - name: records-key
           secret:

@@ -15,8 +15,9 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
 ---
-# The support team's lead: every customer, every tool the agent has. The
-# evals' original fifteen tasks are asked on her behalf.
+# The support team's lead: every customer, every tool the agent has, and
+# the documents everyone and the account managers may read. The evals'
+# original fifteen tasks are asked on her behalf.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -24,7 +25,8 @@ metadata:
   namespace: people
 automountServiceAccountToken: false
 ---
-# Account managers: their own customers' records, the report, and email.
+# Account managers: their own customers' records, the report, email, and
+# the documents everyone and the account managers may read.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -39,10 +41,21 @@ metadata:
   namespace: people
 automountServiceAccountToken: false
 ---
-# First-line support: any customer's record, and nothing else.
+# First-line support: any customer's record, and the documents everyone may
+# read.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sam
+  namespace: people
+automountServiceAccountToken: false
+---
+# Finance: the documents everyone and finance may read, and nothing else.
+# The control for the documents the others may not read (ADR 21): they are
+# in the index, and the person who may read them gets them.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fiona
   namespace: people
 automountServiceAccountToken: false
