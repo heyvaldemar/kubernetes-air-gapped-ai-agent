@@ -97,12 +97,11 @@ watch_admission() {
 # watch_calls <seconds>: from the client, one short request through the
 # gateway every 0.75 s, inside the agent's quota of 100 a minute, made the way
 # the agent makes them (evals/harness.py, ADR 20): two seconds to connect, ten
-# for the answer, and a call that never connected asked again, up to five
-# times. Prints "<sent> <answered> <not answered> <longest gap, s> <first
+# for the answer, a call that never connected asked again, up to five
+# times, and the gateway's name looked up once, as the agent does. Prints "<sent> <answered> <not answered> <longest gap, s> <first
 # failure, s> <last failure, s> <the last 20 all answered: yes|no> <asked
-# again> <longest name lookup, s> <codes>". The name is looked up apart from the
-# connection, and timed: the lookup is the cluster's DNS, the connection the
-# gateway's.
+# again> <longest name lookup, s> <codes>". The one lookup is timed apart from
+# the connections: it is the cluster's DNS, they are the gateway's.
 watch_calls() {
   kubectl -n agents create token support-agent --audience "$AUDIENCE" --duration 15m \
     | kubectl -n agents exec -i nodeloss-client -- python3 -c '
@@ -112,18 +111,12 @@ u = urllib.parse.urlsplit(url)
 tok = sys.stdin.read().strip()
 body = json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "Say OK."}]})
 headers = {"Content-Type": "application/json", "Authorization": "Bearer " + tok}
-lookup = [0.0]
+t0 = time.monotonic()
+addr = socket.getaddrinfo(u.hostname, u.port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
+lookup = [time.monotonic() - t0]
 def call():
     again = 0
     for _ in range(5):
-        t0 = time.monotonic()
-        try:
-            addr = socket.getaddrinfo(u.hostname, u.port, socket.AF_INET, socket.SOCK_STREAM)[0][4]
-        except OSError:
-            lookup[0] = max(lookup[0], time.monotonic() - t0)
-            again += 1
-            continue
-        lookup[0] = max(lookup[0], time.monotonic() - t0)
         try:
             sock = socket.create_connection(addr, 2)
         except OSError:

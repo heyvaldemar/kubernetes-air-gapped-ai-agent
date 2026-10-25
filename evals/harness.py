@@ -68,8 +68,12 @@ TIMEOUT = 600
 # must not. urllib's one timeout covers both, so a connection to the gateway
 # pod of a node that was lost would wait the whole TIMEOUT before failing.
 # The connection gets CONNECT_TIMEOUT, the answer keeps TIMEOUT, and a call
-# that never connected sent nothing, so it is asked again.
+# that never connected sent nothing, so it is asked again. And the gateway's
+# name is looked up once: a Service's address does not move when its pods or
+# its nodes do, and a lookup that met the CoreDNS pod of a node that was lost
+# waited 5 s each time, until the cluster saw the node gone (run 40164107573).
 CONNECT_TIMEOUT = float(os.environ.get("CONNECT_TIMEOUT", "2"))
+_ADDRESSES = {}
 
 
 class NeverConnected(OSError):
@@ -79,7 +83,16 @@ class NeverConnected(OSError):
 class _FastConnect(http.client.HTTPConnection):
     def connect(self):
         try:
-            self.sock = socket.create_connection((self.host, self.port), CONNECT_TIMEOUT, self.source_address)
+            key = (self.host, self.port)
+            if key not in _ADDRESSES:
+                _ADDRESSES[key] = [a[4][0] for a in socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM)]
+            for i, ip in enumerate(_ADDRESSES[key]):
+                try:
+                    self.sock = socket.create_connection((ip, self.port), CONNECT_TIMEOUT, self.source_address)
+                    break
+                except OSError:
+                    if i == len(_ADDRESSES[key]) - 1:
+                        raise
         except OSError as e:
             raise NeverConnected(str(e)) from e
         self.sock.settimeout(self.timeout)
