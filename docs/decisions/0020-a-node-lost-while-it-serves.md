@@ -58,6 +58,22 @@ The drill's client makes its calls the way the harness does.
 
 The node is still lost for as long as the cluster takes to see it, 52 s in the last run. The agent no longer waits for that.
 
+## On AWS, 2026-10-25
+
+[40161497976](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40161497976), the first with two nodes, failed its evals on two gates that read one gateway proxy's count: 72 of the 157 requests the agent asked, 43,737 of 92,931 tokens. Each proxy counts what it answered; `scripts/evals.sh` reads every proxy's now. The steps after the evals did not run, the drill among them, and nothing was left behind.
+
+[40168111062](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40168111062), with every change above: every check passed, nothing was left of it or of any earlier run, about $0.56 for 0.90 h with two m7i.xlarge nodes.
+
+| On AWS, run 40168111062 | Measured |
+|---|---|
+| A node's instance terminated under traffic | the API server saw the node not ready 1 s later |
+| A model nobody signed, while the node was lost | refused 36 of 36 times |
+| Requests through the gateway, the four minutes from the loss | 320 of 320 answered, the longest wait between two answers 1.1 s, no call asked again |
+| The node the node group launched in its place | ready 234 s after the loss; no outside name resolved with its resolver, nothing opened to 1.1.1.1 |
+| That node drained under the same traffic | drained in 62 s; 320 of 320 answered, the longest wait 1.1 s; admission never stopped, 37 tries each way |
+
+A terminated instance is not a crash. EC2 shuts it down, the node leaves the cluster within a second, and nothing is left pointing at it: the agent never noticed. The case this record was built for, a node that stops answering and stays in the cluster until its grace period runs out, is kind's daily one. Its equivalent on AWS, a node whose instance is still running but cut off from the network, needs a fault injected into the network, and this run does not inject one.
+
 ## Consequences
 
 - One more job in the daily e2e, about 30 minutes on a runner with three kind nodes.
