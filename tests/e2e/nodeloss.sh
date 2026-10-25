@@ -97,8 +97,11 @@ watch_admission() {
 # watch_calls <seconds>: from the client, one short request through the
 # gateway every 0.75 s, inside the agent's quota of 100 a minute, made the way
 # the agent makes them (evals/harness.py, ADR 20): two seconds to connect, ten
-# for the answer, a call that never connected asked again, up to five
-# times, and the gateway's name looked up once, as the agent does. Prints "<sent> <answered> <not answered> <longest gap, s> <first
+# for the answer, a call that never connected asked again a second later,
+# up to ten times, and the gateway's name looked up once. Five times with no
+# pause, which is not what the agent does, left 2 of 269 calls unanswered in
+# the first scheduled run (40180090011): each try meets a lost proxy at even
+# odds. Prints "<sent> <answered> <not answered> <longest gap, s> <first
 # failure, s> <last failure, s> <the last 20 all answered: yes|no> <asked
 # again> <longest name lookup, s> <codes>". The one lookup is timed apart from
 # the connections: it is the cluster's DNS, they are the gateway's.
@@ -116,11 +119,12 @@ addr = socket.getaddrinfo(u.hostname, u.port, socket.AF_INET, socket.SOCK_STREAM
 lookup = [time.monotonic() - t0]
 def call():
     again = 0
-    for _ in range(5):
+    for _ in range(10):
         try:
             sock = socket.create_connection(addr, 2)
         except OSError:
             again += 1
+            time.sleep(1)
             continue
         conn = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
         conn.sock = sock
