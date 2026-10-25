@@ -80,6 +80,13 @@ class NeverConnected(OSError):
     """The model's side could not be reached; nothing was sent."""
 
 
+class Unparsed(Exception):
+    """The model wrote a tool call its server could not parse: most often one
+    cut off at MAX_TOKENS. The attempt's failure, not the run's: Granite-4.0-1B
+    did it once in 84 attempts on the branch, and the run stopped there (run
+    40167475997)."""
+
+
 class _FastConnect(http.client.HTTPConnection):
     def connect(self):
         try:
@@ -118,6 +125,7 @@ _model_requests = 0
 _answered = []
 _throttled = 0
 _reconnected = 0
+_unparsed = 0
 
 
 def mcp(method, params=None, person=DEFAULT_PERSON):
@@ -218,6 +226,8 @@ def chat(messages, offered, seed):
                 # names the parameter it refused. Never a credential.
                 with e:
                     said = re.sub(r"sk-ant-[A-Za-z0-9_-]+", "<redacted>", e.read().decode("utf-8", "replace"))[:600]
+                if e.code == 500 and "parse tool call" in said:
+                    raise Unparsed(said)
                 sys.exit("the model answered HTTP %d: %s" % (e.code, said))
             _throttled += 1
             time.sleep(min(60, int(e.headers.get("Retry-After") or 10)))
@@ -237,8 +247,17 @@ def attempt(task, offered, seed):
     calls, answer, t0 = [], "", time.time()
     prompt_n = cached_n = predicted_n = 0
     compute_ms = 0.0
+    global _unparsed
+    unparsed = False
     for _ in range(MAX_TURNS):
-        r = chat(messages, use, seed)
+        try:
+            r = chat(messages, use, seed)
+        except Unparsed:
+            # Nothing came back to count: the server's error has no usage,
+            # and the gateway counts none for it either.
+            _unparsed += 1
+            unparsed = True
+            break
         t = r.get("timings") or {}
         if t:
             # llama-server: the prompt it computed, the part it had cached,
@@ -270,7 +289,7 @@ def attempt(task, offered, seed):
             messages.append({"role": "tool", "tool_call_id": c.get("id", name), "content": text[:4000]})
     return {"calls": calls, "answer": answer, "seconds": round(time.time() - t0, 2),
             "prompt_tokens": prompt_n, "cached_tokens": cached_n, "completion_tokens": predicted_n,
-            "vcpu_seconds": round(compute_ms / 1000 * THREADS, 3)}
+            "vcpu_seconds": round(compute_ms / 1000 * THREADS, 3), "unparsed": unparsed}
 
 
 NEGATED = re.compile(r"\b(nothing|never|not|no(?: \w+)?)\s+$")
@@ -285,6 +304,8 @@ def _starts(text, phrase):
 
 def score(task, a):
     exp, why = task["expect"], []
+    if a.get("unparsed"):
+        why.append("the model wrote a tool call its server could not parse")
     calls = a["calls"]
     for need in exp.get("calls", []):
         if not any(c["name"] == need["name"] and all(c["args"].get(k) == v for k, v in need.get("args", {}).items())
@@ -375,6 +396,7 @@ def main():
         window = [n for t, n in _answered[i:] if t - t0 < 60]
         busiest = {"requests": max(busiest["requests"], len(window)), "tokens": max(busiest["tokens"], sum(window))}
     print(json.dumps({"model_requests": _model_requests, "throttled": _throttled, "reconnected": _reconnected,
+                      "unparsed": _unparsed,
                       "busiest_minute": busiest}), flush=True)
 
 

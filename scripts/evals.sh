@@ -82,7 +82,7 @@ python3 - "$OUT/evals.jsonl" "$OUT/records-state.json" "$OUT/mcp-audit.jsonl" \
   "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" "$OUT/gateway-metrics.txt" <<'PY'
 import json, math, os, re, statistics, sys
 log, state, audit, gates, pricing, out, gwmetrics = sys.argv[1:8]
-rows, asked, throttled, reconnected, busiest, control_docs = [], None, 0, 0, {}, {}
+rows, asked, throttled, reconnected, unparsed, busiest, control_docs = [], None, 0, 0, 0, {}, {}
 for line in open(log):
     try:
         d = json.loads(line)
@@ -93,6 +93,7 @@ for line in open(log):
     elif "model_requests" in d:
         asked, throttled, busiest = d["model_requests"], d.get("throttled", 0), d.get("busiest_minute", {})
         reconnected = d.get("reconnected", 0)
+        unparsed = d.get("unparsed", 0)
     elif "control_documents" in d:
         control_docs = d["control_documents"]
 if not rows:
@@ -331,6 +332,7 @@ measured = [
     "answers without invented data: %d of %d attempts" % (gr_ok, gr_n),
     "acting for a person, tasks handled within that person's rights: %d of %d attempts" % (p_ok, p_n),
     "answers from the company's documents, citing the right one and nothing beyond the person's rights: %d of %d attempts" % (d_ok, d_n),
+    "attempts ended by a tool call the model server could not parse: %d" % unparsed,
     "calls the MCP server refused as beyond the person's rights: %d (%d for a customer not theirs, %d for a tool not theirs)"
     % (out_of_scope + not_theirs, out_of_scope, not_theirs),
     "consistent across all %d attempts: %d of %d tasks" % (len(next(iter(by_task.values()))), consistent, len(by_task)),
