@@ -22,5 +22,6 @@ minicpm5-2b https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/2079a22f3bea
 # the same digest on two runners (runs 40048612675 and 40052214040).
 granite-4.1-8b https://huggingface.co/ibm-granite/granite-4.1-8b-GGUF/resolve/865b82c2e7970d82e3731278c88c57ae7138359c/granite-4.1-8b-Q4_K_M.gguf ed902ac9eb6adce5a90c6a08c8ea201b50e23fdc5976d1cd0362006afac5309e Apache-2.0 sha256:dfaeada7ded8590520550df8d23172a409a2c704f124943cb47dc18aef41b927
 # The document search (ADR 21): an embedding model, not a chat model, served
-# beside the chat model for the MCP server alone. Pinned once two builds agree.
-nomic-embed-text-v1.5 https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.Q8_0.gguf 3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7 Apache-2.0 unpinned
+# beside the chat model for the MCP server alone. Pinned from its first builds,
+# the same digest in every job of runs 40167475997 and 40170088090.
+nomic-embed-text-v1.5 https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/0188c9bf409793f810680a5a431e7b899c46104c/nomic-embed-text-v1.5.Q8_0.gguf 3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7 Apache-2.0 sha256:60c76aeaa12aed743a27a147a81f0f1b270496e49471fafbc1f3b1b022d65570
