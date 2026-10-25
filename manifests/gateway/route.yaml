@@ -38,3 +38,38 @@ spec:
             - {name: x-gateway-model, value: "@MODEL@"}
       backendRefs:
         - {group: agentgateway.dev, kind: AgentgatewayBackend, name: "@SERVICE@", namespace: inference}
+---
+# A model server that is gone is found out in a second, not when the cluster
+# notices (ADR 20). A connection to it gives up after one second, one failed
+# connection or 5xx takes it out of the rotation for thirty seconds, and the
+# request is sent once more, to another one. Until the API server sees a
+# lost node, about 50 s, its pods stay in their Services; without this, a
+# share of the requests went to a server that no longer existed.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: "@SERVICE@-backend"
+  namespace: inference
+spec:
+  targetRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: "@SERVICE@"}
+  backend:
+    tcp:
+      connectTimeout: 1s
+    health:
+      eviction:
+        consecutiveFailures: 1
+        duration: 30s
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: "@SERVICE@-retry"
+  namespace: gateway
+spec:
+  targetRefs:
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: "@SERVICE@"}
+  traffic:
+    retry:
+      attempts: 1
+      codes: [503]

@@ -78,7 +78,7 @@ python3 - "$OUT/evals.jsonl" "$OUT/records-state.json" "$OUT/mcp-audit.jsonl" \
   "$ROOT/evals/gates.json" "$ROOT/evals/pricing.json" "${EVALS_RESULTS:-}" "$OUT/gateway-metrics.txt" <<'PY'
 import json, math, os, re, statistics, sys
 log, state, audit, gates, pricing, out, gwmetrics = sys.argv[1:8]
-rows, asked, throttled, busiest = [], None, 0, {}
+rows, asked, throttled, reconnected, busiest = [], None, 0, 0, {}
 for line in open(log):
     try:
         d = json.loads(line)
@@ -88,6 +88,7 @@ for line in open(log):
         rows.append(d)
     elif "model_requests" in d:
         asked, throttled, busiest = d["model_requests"], d.get("throttled", 0), d.get("busiest_minute", {})
+        reconnected = d.get("reconnected", 0)
 if not rows:
     print("  FAIL  the agent produced no results: " + open(log).read()[-400:].replace("\n", " "))
     sys.exit(1)
@@ -228,7 +229,8 @@ for line in (open(gwmetrics).read().splitlines() if os.path.exists(gwmetrics) el
     elif 'status="429"' in line:
         refused += n
 gate(asked is not None and asked > 0 and answered == asked,
-     "every model request went through the gateway: %s asked by the agent, %d answered by the gateway" % (asked, answered))
+     "every model request went through the gateway: %s asked by the agent, %d answered by the gateway" % (asked, answered)
+     + ("; %d asked again after a connection that was never made" % reconnected if reconnected else ""))
 gate(refused == 0, "requests the gateway refused the agent over its quota or token budget: %d (gate: 0)" % refused
      + ("; the agent waited and asked again %d times" % throttled if throttled else ""))
 # And every token: what the gateway read from the answers, input and output,

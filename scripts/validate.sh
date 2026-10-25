@@ -329,7 +329,16 @@ check_gateway() {
   if [ -z "$backends" ] || grep -qv 'kind: AgentgatewayBackend' <<<"$backends"; then
     echo "route.yaml sends a model's requests somewhere other than an AgentgatewayBackend, where no token is counted: $backends"; ok=1
   fi
-  [ "$ok" = 0 ] && echo "every caller of the gateway needs a token for $aud, the agent holds one, every quota is keyed on its subject, every caller has a token budget, and every route goes to a model backend"
+  # A model server that is gone is found out by the gateway in a second,
+  # taken out of the rotation, and the request sent to another (ADR 20).
+  local ct ms=""
+  ct="$(sed -nE 's/^ *connectTimeout: ([0-9]+)(ms|s)$/\1 \2/p' manifests/gateway/route.yaml)"
+  case "$ct" in *" ms") ms="${ct% ms}" ;; *" s") ms="$(( ${ct% s} * 1000 ))" ;; esac
+  if [ -z "$ms" ] || [ "$ms" -gt 5000 ] || ! grep -qE '^ +consecutiveFailures: [0-9]+$' manifests/gateway/route.yaml \
+     || ! grep -qE '^ +attempts: [1-9]$' manifests/gateway/route.yaml || ! grep -qE '^ +codes: \[[^]]*503' manifests/gateway/route.yaml; then
+    echo "route.yaml lets a request wait on a model server that is gone: a connect timeout of seconds (${ct:-none}), an eviction and a retry on 503 are what stop it (ADR 20)"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "every caller of the gateway needs a token for $aud, the agent holds one, every quota is keyed on its subject, every caller has a token budget, every route goes to a model backend, and a model server that is gone is given up on in ${ms} ms and its requests sent to another"
   return "$ok"
 }
 
