@@ -264,6 +264,9 @@ jobs:
           kubectl wait nodes --all --for=condition=Ready --timeout=600s
           kubectl -n kube-system rollout status deployment/kube-dns --timeout=300s
           kubectl get nodes -L node.kubernetes.io/instance-type,topology.kubernetes.io/zone -o wide
+          # What GKE itself runs, and where: the namespaces the carried-images
+          # policy and check 11 must leave to it, as they leave kube-system.
+          kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,IMAGES:.spec.containers[*].image'
 
       # Kyverno reads signatures from Artifact Registry with its own Google
       # identity (gke/registry.tf, Workload Identity Federation for GKE),
