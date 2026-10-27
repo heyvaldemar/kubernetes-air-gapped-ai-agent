@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `docs/compliance.md` typed its plant counts by hand and had fallen behind: "Thirty-eight plants in all", "all 41 plants", "eight pods admission must refuse" and "the eleven planted pods", where `tests/static/plants.tsv` held 65 rows at 135c6b0 and 86 now, and `tests/e2e/plants/` holds 12 refusals and 2 controls. The page now points at those files and at the lines Verify and the e2e print for them instead of giving a number, and e2e check 9 lists the image volume the bundle did not carry. Two other counts there had moved with ADR 21: the agent holds the four tools `policy.json` lists, not three, and the injection tasks plant instructions in a company document too.
+- The OWASP LLM IDs follow the 2025 edition, the one OWASP's own list at genai.owasp.org/llm-top-10/ shows, and each carries its edition (`LLM03:2025`). The threat model, the tasks' `owasp` tags and the README had used a 2026 edition's numbers, under which Supply Chain was LLM04, Excessive Agency LLM03, Misinformation LLM07 and Improper Output Handling LLM10. The tags are metadata: the harness prints them and the Inspect logs carry them, and nothing is scored on them. The Agentic IDs (ASI) are unchanged.
 
 ## [1.8.0] - 2026-10-25
 
