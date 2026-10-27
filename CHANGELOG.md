@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The README named Claude Haiku 5.5 alone for the weekly job with a model outside. It runs Claude Sonnet 5.5 too, with the patterns shown and hidden (`.github/workflows/frontier.yml`), as the scheduled run of 24 October did (40083299129), and the table beside the sentence already has both.
 - The node-loss drill's client asks again as the agent does, up to ten times a second apart, where it had tried five times with no pause: the first scheduled run with the drill, 40180090011, left 2 of 269 calls unanswered that way, each try meeting a lost gateway proxy at even odds. The README's claim for the drill says what it gates: seconds, never a hole, the node back closed; not that no call fails.
 
+### Fixed
+
+- `docs/compliance.md` typed its plant counts by hand and had fallen behind: "Thirty-eight plants in all", "all 41 plants", "eight pods admission must refuse" and "the eleven planted pods", where `tests/static/plants.tsv` held 65 rows at 135c6b0 and 86 now, and `tests/e2e/plants/` holds 12 refusals and 2 controls. The page now points at those files and at the lines Verify and the e2e print for them instead of giving a number, and e2e check 9 lists the image volume the bundle did not carry. Two other counts there had moved with ADR 21: the agent holds the four tools `policy.json` lists, not three, and the injection tasks plant instructions in a company document too.
+
 ## [1.8.0] - 2026-10-25
 
 ### Changed
