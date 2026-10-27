@@ -1,6 +1,6 @@
 # 22. The boundary on GKE: no route out but to Google's own front doors, and no name lookup out
 
-- Status: proposed, 2026-10-27
+- Status: accepted for phase 1 and phase 2, 2026-10-27; the schedule's first run is pending
 - Date: 2026-10-27
 
 ## Context
@@ -54,7 +54,19 @@ Then the checks on what is inside (`CHECKS=inside`), the boundary's checks, the 
 - [40555921881](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40555921881), the boundary alone, with GKE's images through the private door from the node: the node registered and all 20 checks passed. A pod started from the run's registry through the restricted door; the pod and the node resolved the registry's name to the restricted addresses, from the network's own zone, and reached it on 443; neither could open TCP to 1.1.1.1, 8.8.8.8 or 151.101.0.81, ask 8.8.8.8 directly, or resolve example.com or example.org; the pod could not reach the private door and the node could. Nothing was left behind; about $0.05 for 0.27 h. GKE ran every one of its own pods in `kube-system`, and had turned NodeLocal DNSCache on, which answers pods on the node; it is off from here, so pods ask kube-dns as on kind and EKS.
 - [40560466605](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40560466605), the DNS check shown its violation, the response policy off the network (`dns_firewall = false`): the other 16 checks held, and the pod and the node each resolved example.com and example.org. A network with no route out to the internet still let a name lookup out. Nothing was left behind; about $0.05 for 0.26 h.
 
-The run with the agent, and the first scheduled run, are named here as they happen.
+## Phase 2 on GKE, 2026-10-27
+
+[40563292517](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40563292517), by hand: all 63 checks passed, nothing was left behind, about $0.21 for 0.73 h, one c3d-standard-4.
+
+- The file, 25 image tags, verified and loaded into a repository that held nothing; the repository then held exactly the 25, by digest, and the same file with one byte changed was refused. The 11 pods outside `kube-system` all ran images it carried; GKE ran all of its own in `kube-system`.
+- Admission admitted the signed model and the one whose licence expression was concluded to an allowed id, and refused the twelve plants the kind e2e refuses, among them weights nobody signed, weights another key signed, a model with no AI-BOM, the licences the site does not allow, a model and an image by tag, weights from outside the models path, and an image or an image volume the file never carried. Every signature and AI-BOM was read from Artifact Registry by Kyverno as its own Kubernetes service account, through Workload Identity Federation for GKE; the kubelet mounted the model from it as an image volume.
+- The boundary's 20 held, on the agent's node.
+- The evals at the release gates: 84 of 84 attempts finished and 18 of 18 ordinary tasks done; no email delivered outside acme.example, no record deleted; 206 model requests asked by the agent and 206 answered by the gateway, 157,933 tokens counted on both sides; 29 of 29 emails the agent tried are in the MCP server's audit, and every one of 72 documents its 24 searches returned was one the person and the agent may read. Measured, not gated: the model acted on 6 of 24 planted instructions, and none was delivered.
+- The game day: Kyverno at zero took its webhook for `verify-models` with it (7 configurations to 2), and the guard refused a model nobody signed, one under a licence the site does not allow, and the signed model, while the model already served answered; 38 s after Kyverno was back the signed model was admitted. The gateway's pod killed: the model server unreachable around it (an agent NetworkPolicy, enforced by Dataplane V2), the gateway answering 3 s later, no request lost. The model server rolled forward and back under traffic: 145 of 145 answered each way, and each long answer in flight was finished.
+
+One number is read against its node, as ADR 18 says: the same model on the same threads answered a task at a p50 of 6.3 s on the node's AMD EPYC 9B14, where it took 5.5 s on AWS's Intel Xeon 8488C and 2.7 s on the GitHub runner's AMD EPYC 9V45. Being AMD does not bring the runner's rate. One run on each, so no cause is named.
+
+The schedule runs phase 2 from here (`GKE_VALIDATION_ENABLED`, `GKE_AGENT_ENABLED`). The README says weekly once a scheduled run has passed; its run is named here then.
 
 ## Consequences
 
