@@ -29,7 +29,11 @@ run "no_route_out" {
   }
   assert {
     condition     = google_compute_route.google_apis.dest_range == "199.36.153.4/30" && google_compute_route.google_apis.next_hop_gateway == "default-internet-gateway"
-    error_message = "the one route out goes to restricted.googleapis.com's four addresses"
+    error_message = "one route out goes to restricted.googleapis.com's four addresses"
+  }
+  assert {
+    condition     = google_compute_route.google_images.dest_range == "199.36.153.8/30" && google_compute_route.google_images.next_hop_gateway == "default-internet-gateway"
+    error_message = "the other goes to private.googleapis.com's four, for GKE's own images"
   }
   assert {
     condition     = google_compute_subnetwork.nodes.private_ip_google_access
@@ -50,7 +54,15 @@ run "the_firewall_says_it_again" {
   }
   assert {
     condition     = toset(google_compute_firewall.egress_google_apis.destination_ranges) == toset(["199.36.153.4/30"]) && one(google_compute_firewall.egress_google_apis.allow).protocol == "tcp" && toset(one(google_compute_firewall.egress_google_apis.allow).ports) == toset(["443"])
-    error_message = "outside it, HTTPS to restricted.googleapis.com and nothing else"
+    error_message = "outside it, HTTPS to restricted.googleapis.com from anything in the network"
+  }
+  assert {
+    condition     = toset(google_compute_firewall.egress_google_images.destination_ranges) == toset(["199.36.153.8/30"]) && toset(google_compute_firewall.egress_google_images.source_ranges) == toset(["10.42.0.0/20"]) && toset(one(google_compute_firewall.egress_google_images.allow).ports) == toset(["443"])
+    error_message = "and HTTPS to private.googleapis.com from the node subnet's own addresses, never a pod's"
+  }
+  assert {
+    condition     = one(google_container_cluster.this.default_snat_status).disabled
+    error_message = "a pod leaves with its own address, so the firewall can tell it from its node"
   }
 }
 
@@ -74,8 +86,12 @@ run "no_name_lookup_out" {
     error_message = "the names let through are Google's API and registry names and the VPC's internal ones, nothing on the open internet"
   }
   assert {
-    condition     = alltrue([for z in google_dns_managed_zone.google : z.visibility == "private"]) && alltrue([for r in google_dns_record_set.google : toset(r.rrdatas) == toset(["199.36.153.4", "199.36.153.5", "199.36.153.6", "199.36.153.7"])])
-    error_message = "the names let through are answered inside the network, with restricted.googleapis.com's addresses"
+    condition     = alltrue([for z in google_dns_managed_zone.google : z.visibility == "private"]) && toset(google_dns_record_set.google["googleapis"].rrdatas) == toset(["199.36.153.4", "199.36.153.5", "199.36.153.6", "199.36.153.7"]) && toset(google_dns_record_set.google["pkg"].rrdatas) == toset(["199.36.153.4", "199.36.153.5", "199.36.153.6", "199.36.153.7"])
+    error_message = "Google's API names and the registry's are answered inside the network, with restricted.googleapis.com's addresses"
+  }
+  assert {
+    condition     = toset(google_dns_record_set.google["gcr"].rrdatas) == toset(["199.36.153.8", "199.36.153.9", "199.36.153.10", "199.36.153.11"])
+    error_message = "gcr.io, where GKE's own images are, with private.googleapis.com's, which only the node may reach"
   }
   assert {
     condition     = length(google_dns_response_policy.this.networks) == 1

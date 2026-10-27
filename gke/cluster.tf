@@ -33,6 +33,12 @@ resource "google_container_cluster" "this" {
     services_secondary_range_name = "services"
   }
 
+  # A pod's traffic leaves with the pod's own address, not its node's, so
+  # the firewall can hold private.googleapis.com to the node alone.
+  default_snat_status {
+    disabled = true
+  }
+
   private_cluster_config {
     enable_private_nodes    = true
     enable_private_endpoint = false
@@ -119,8 +125,10 @@ resource "google_container_cluster" "this" {
 
   depends_on = [
     google_compute_route.google_apis,
+    google_compute_route.google_images,
     google_compute_firewall.egress_inside,
     google_compute_firewall.egress_google_apis,
+    google_compute_firewall.egress_google_images,
     google_dns_record_set.google,
     google_dns_record_set.google_names,
     google_dns_response_policy_rule.allow,

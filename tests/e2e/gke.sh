@@ -8,18 +8,23 @@
 #      own zone; a public name does not, in .com or anywhere else, and a
 #      public resolver cannot be asked directly
 #   2. addresses: the registry answers on 443 through restricted.googleapis.com;
-#      nothing on the internet does, by address, on 443 or on 53, and neither
-#      does private.googleapis.com, Google's other front door, which serves
-#      App Engine, Cloud Run and anybody's site hosted there
-#   3. the node itself: the same, from the host network
+#      nothing on the internet does, by address, on 443 or on 53, and a pod
+#      cannot reach private.googleapis.com, Google's other front door, which
+#      serves App Engine, Cloud Run and anybody's site hosted there
+#   3. the node itself: the same, from the host network, except that the node
+#      reaches private.googleapis.com, for GKE's own images, which the
+#      firewall lets its own address do and no pod's
 #
 # Every refusal sits beside a control from the same pod, so a dead network
-# cannot pass for a closed one. Needs REGISTRY, INSIDE and GOOGLE_APIS,
+# cannot pass for a closed one. Needs REGISTRY, INSIDE, GOOGLE_APIS and
+# GOOGLE_IMAGES,
 # and kubectl pointed at the cluster. Appends to $E2E_RESULTS
 # (JSON) when set.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-: "${REGISTRY:?}" "${INSIDE:?}" "${GOOGLE_APIS:?}"
+: "${REGISTRY:?}" "${INSIDE:?}" "${GOOGLE_APIS:?}" "${GOOGLE_IMAGES:?}"
+# private.googleapis.com's first address
+images="${GOOGLE_IMAGES%/*}"
 digest="$(grep -E '^docker.io/library/busybox:' "$ROOT/airgap/images.txt" | sed 's/.*@//')"
 # Under its original path in the run's repository, as everything inside is
 # (scripts/inside.sh).
@@ -98,10 +103,17 @@ for pod in probe probe-node; do
   step "$where: addresses"
   if opens "$pod" "$REGISTRY" 443; then pass "control: $where opens TCP to $REGISTRY on 443, through restricted.googleapis.com"
   else fail "control: $where cannot open TCP to $REGISTRY on 443, so the refusals below say nothing"; fi
-  for target in 1.1.1.1:443 8.8.8.8:53 151.101.0.81:443 199.36.153.8:443; do
+  for target in 1.1.1.1:443 8.8.8.8:53 151.101.0.81:443; do
     if opens "$pod" "${target%:*}" "${target#*:}"; then fail "$where opened TCP to $target, outside the network"
     else pass "$where opens no TCP to $target"; fi
   done
+  if [ "$pod" = probe ]; then
+    if opens "$pod" "$images" 443; then fail "a pod opened TCP to private.googleapis.com ($images:443), which serves anybody's site hosted on Google"
+    else pass "a pod opens no TCP to private.googleapis.com ($images:443), Google's other front door"; fi
+  else
+    if opens "$pod" "$images" 443; then pass "control: the node itself opens TCP to private.googleapis.com ($images:443), for GKE's own images, from its own address"
+    else fail "control: the node cannot reach private.googleapis.com, so the pod's refusal above says nothing about the firewall"; fi
+  fi
 done
 
 kubectl delete namespace probe --wait=false >/dev/null 2>&1

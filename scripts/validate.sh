@@ -49,10 +49,11 @@
 #                 operator's /32, every role under the boundary); and the
 #                 workflow runs on main only and reads no stored secret
 #   gke           the GKE run (ADR 22): gke/ declares no router, NAT,
-#                 external address, peering or VPN, and one route, to
-#                 restricted.googleapis.com; its Terraform tests pass against
-#                 mocked providers (a network made without its internet
-#                 route, egress denied but to Google's restricted APIs, a
+#                 external address, peering or VPN, and two routes, to
+#                 restricted.googleapis.com and private.googleapis.com; its
+#                 Terraform tests pass against mocked providers (a network
+#                 made without its internet route, egress denied but to the
+#                 restricted door and, from the node alone, the private one, a
 #                 response policy that refuses every other name, the API from
 #                 the operator's /32, NetworkPolicies enforced, the registry
 #                 read by the nodes and Kyverno alone), and so do the
@@ -357,9 +358,12 @@ check_gke() {
   fi
   if grep -nE '^[[:space:]]*access_config[[:space:]]*\{' gke/*.tf; then echo "gke/ gives something an external address"; ok=1; fi
   routes="$(cat gke/*.tf | grep -cE '^resource "google_compute_route"' || true)"
-  [ "$routes" = 1 ] || { echo "gke/ declares $routes routes; there is one, to restricted.googleapis.com"; ok=1; }
-  { grep -qE '^  dest_range[[:space:]]+= local\.google_apis$' gke/network.tf && grep -qE '^  google_apis[[:space:]]+= "199\.36\.153\.4/30"$' gke/network.tf; } \
-    || { echo "the one route goes somewhere other than restricted.googleapis.com"; ok=1; }
+  [ "$routes" = 2 ] || { echo "gke/ declares $routes routes; there are two, to Google's two API front doors"; ok=1; }
+  if ! { [ "$(grep -E '^  dest_range[[:space:]]+=' gke/network.tf | sed -E 's/.*= //' | sort | tr '\n' ' ')" = "local.google_apis local.google_images " ] \
+          && grep -qE '^  google_apis[[:space:]]+= "199\.36\.153\.4/30"$' gke/network.tf \
+          && grep -qE '^  google_images[[:space:]]+= "199\.36\.153\.8/30"$' gke/network.tf; }; then
+    echo "a route goes somewhere other than restricted.googleapis.com and private.googleapis.com"; ok=1
+  fi
   if grep -rn --include='*.tf' 'google_service_account_key' gke/; then echo "gke/ makes a service account key; every credential is federated"; ok=1; fi
   grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.GKE_VALIDATION_ENABLED == 'true'))" .github/workflows/gke.yml \
     || { echo "the GKE run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
@@ -375,7 +379,7 @@ check_gke() {
       echo "$dir's tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1
     fi
   done
-  [ "$ok" = 0 ] && echo "the network declares one way out, to Google's restricted APIs, the resolver refuses every other name, the API answers the operator alone, the federation admits main's two workflows by the immutable subject, and nothing holds a key"
+  [ "$ok" = 0 ] && echo "the network's ways out are Google's two API front doors, the private one for the node alone, the resolver refuses every other name, the API answers the operator alone, the federation admits main's two workflows by the immutable subject, and nothing holds a key"
   return "$ok"
 }
 

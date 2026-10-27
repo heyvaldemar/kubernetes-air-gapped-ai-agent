@@ -4,9 +4,11 @@
 # name to whoever answers for that name. With no route out, DNS is the way
 # out left, as it was on AWS (ADR 18).
 #
-# Two parts close it. Private zones answer the names the nodes need, Google's
-# API and registry names, with restricted.googleapis.com's addresses, from
-# inside the VPC. And a response policy on the network answers every other
+# Two parts close it. Private zones answer the names the nodes need from
+# inside the VPC: Google's API names and the registry's (pkg.dev) with
+# restricted.googleapis.com's addresses, and gcr.io, where GKE's own images
+# are, with private.googleapis.com's, which the firewall opens to the node
+# alone (network.tf). And a response policy on the network answers every other
 # name with a name that does not exist (refused.boundary.internal), so no
 # query for it leaves Cloud DNS. The policy lets through, unchanged, only the
 # names the private zones answer and the VPC's own internal names
@@ -22,6 +24,11 @@ locals {
     googleapis = "googleapis.com."
     gcr        = "gcr.io."
     pkg        = "pkg.dev."
+  }
+  zone_addresses = {
+    googleapis = local.google_api_addresses
+    gcr        = local.google_image_addresses
+    pkg        = local.google_api_addresses
   }
   refused = {
     all = "*."
@@ -40,7 +47,7 @@ resource "google_dns_managed_zone" "google" {
   for_each    = local.google_zones
   name        = "${var.cluster_name}-${each.key}"
   dns_name    = each.value
-  description = "${each.value} answered with restricted.googleapis.com's addresses, inside the network (ADR 22)."
+  description = "${each.value} answered inside the network with Google's front door for it (ADR 22)."
   visibility  = "private"
 
   private_visibility_config {
@@ -56,7 +63,7 @@ resource "google_dns_record_set" "google" {
   name         = each.value
   type         = "A"
   ttl          = 300
-  rrdatas      = local.google_api_addresses
+  rrdatas      = local.zone_addresses[each.key]
 }
 
 resource "google_dns_record_set" "google_names" {

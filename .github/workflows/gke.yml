@@ -305,7 +305,10 @@ jobs:
       - name: The boundary, tried from inside
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
-        run: GOOGLE_APIS="$(terraform -chdir=gke output -raw google_apis)" ./tests/e2e/gke.sh
+        run: |
+          GOOGLE_APIS="$(terraform -chdir=gke output -raw google_apis)" \
+          GOOGLE_IMAGES="$(terraform -chdir=gke output -raw google_images)" \
+            ./tests/e2e/gke.sh
 
       - name: Run the agent through the evals
         if: env.AGENT == 'true'

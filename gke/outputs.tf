@@ -21,8 +21,13 @@ output "network" {
 }
 
 output "google_apis" {
-  description = "restricted.googleapis.com, the one range outside the network a node may reach."
+  description = "restricted.googleapis.com, the range outside the network every pod and the node may reach."
   value       = local.google_apis
+}
+
+output "google_images" {
+  description = "private.googleapis.com, for GKE's own images, which the node may reach and no pod may."
+  value       = local.google_images
 }
 
 output "dns_firewall" {
