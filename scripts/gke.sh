@@ -174,14 +174,22 @@ case "${1:-}" in
       swept=$((swept + 1))
     done
     say "deleted what $swept run(s) left; $kept still running"
-    # Then the same inventory again: what is left now belongs to a run still
-    # going, or the sweep failed to delete it.
+    # Then the same inventory again, held to the same rule: what is left of a
+    # finished run, or of one older than any run can be, is what the sweep
+    # failed to delete.
     after="$(what "$p" "$GKE_REGION")" left=""
-    while read -r kind name _; do
-      [ -n "$name" ] || continue
-      st="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$(owner "$name")" --jq .status 2>/dev/null || echo unknown)"
-      [ "$st" = completed ] && left="$left $kind/$name"
-    done <<<"$after"
+    for run in $(while read -r _ name _; do owner "$name"; done <<<"$after" | grep -v '^$' | sort -u || true); do
+      status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .status 2>/dev/null || echo unknown)"
+      age_h=0
+      while read -r _ name created; do
+        [ "$(owner "$name")" = "$run" ] && [ "$created" != - ] || continue
+        h=$(( (now - $(date -d "$created" +%s)) / 3600 )); [ "$h" -gt "$age_h" ] && age_h=$h
+      done <<<"$after"
+      [ "$status" != completed ] && [ "$age_h" -lt 3 ] && continue
+      while read -r kind name _; do
+        [ "$(owner "$name")" = "$run" ] && left="$left $kind/$name"
+      done <<<"$after"
+    done
     if [ -n "$left" ]; then echo "still there after the sweep:$left" >&2; exit 1; fi
     ;;
   cost)

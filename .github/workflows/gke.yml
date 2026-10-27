@@ -76,6 +76,11 @@ concurrency:
   group: ${{ github.ref == 'refs/heads/main' && 'gke-boundary' || format('gke-refused-{0}', github.ref) }}
   cancel-in-progress: false
 
+# bash -eo pipefail: a step whose pipe fails part way fails.
+defaults:
+  run:
+    shell: bash
+
 env:
   RUN_ID: ${{ github.run_id }}
   CLUSTER: airgap-${{ github.run_id }}
@@ -291,7 +296,11 @@ jobs:
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CHECKS: inside
-        run: ./tests/e2e/run.sh
+        # Artifact Registry's credential is an access token that lives an
+        # hour, where ECR's lived twelve; check 10 reads the registry again.
+        run: |
+          ./scripts/gke.sh login
+          ./tests/e2e/run.sh
 
       - name: The boundary, tried from inside
         env:

@@ -24,6 +24,11 @@ concurrency:
   group: gke-sweep
   cancel-in-progress: false
 
+# bash -eo pipefail: a step that pipes into tee fails when what it pipes does.
+defaults:
+  run:
+    shell: bash
+
 env:
   GCLOUD_VERSION: 590.0.0
   GKE_PROJECT: ${{ vars.GKE_PROJECT }}

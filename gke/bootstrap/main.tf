@@ -122,10 +122,12 @@ resource "google_project_iam_custom_role" "create" {
     "compute.subnetworks.delete",
     "compute.subnetworks.get",
     "compute.subnetworks.list",
+    "compute.subnetworks.setPrivateIpGoogleAccess",
     "compute.subnetworks.use",
     "compute.zoneOperations.get",
     # What GKE makes for a cluster, read for residue after the destroy.
     "compute.addresses.list",
+    "compute.autoscalers.list",
     "compute.backendServices.list",
     "compute.disks.list",
     "compute.forwardingRules.list",
@@ -133,6 +135,7 @@ resource "google_project_iam_custom_role" "create" {
     "compute.globalForwardingRules.list",
     "compute.healthChecks.list",
     "compute.instanceGroupManagers.list",
+    "compute.instanceGroups.list",
     "compute.instanceTemplates.list",
     "compute.instances.list",
     "compute.networkEndpointGroups.list",
@@ -187,8 +190,11 @@ resource "google_project_iam_custom_role" "create" {
 }
 
 # Delete-only, with two exceptions a delete cannot go without: a response
-# policy is taken off its network (an update) before it can be deleted, and
-# a private zone's records go through a change before the zone can be.
+# policy is taken off its network (an update of the policy, which binds the
+# network) before it can be deleted, and deleting a firewall rule or a route
+# asks for the network's updatePolicy. It lists everything scripts/gke.sh
+# what() lists, and gcloud's managed-group listing reads the groups and
+# their autoscalers too.
 resource "google_project_iam_custom_role" "sweep" {
   role_id     = "airgapRunSweep"
   title       = "GKE boundary run: sweep"
@@ -197,16 +203,24 @@ resource "google_project_iam_custom_role" "sweep" {
     "artifactregistry.repositories.delete",
     "artifactregistry.repositories.get",
     "artifactregistry.repositories.list",
+    "compute.autoscalers.list",
     "compute.disks.delete",
     "compute.disks.get",
     "compute.disks.list",
     "compute.firewalls.delete",
     "compute.firewalls.get",
     "compute.firewalls.list",
+    "compute.forwardingRules.list",
+    "compute.globalForwardingRules.list",
     "compute.globalOperations.get",
+    "compute.instanceGroupManagers.list",
+    "compute.instanceGroups.list",
+    "compute.instanceTemplates.list",
+    "compute.instances.list",
     "compute.networks.delete",
     "compute.networks.get",
     "compute.networks.list",
+    "compute.networks.updatePolicy",
     "compute.regionOperations.get",
     "compute.routes.delete",
     "compute.routes.get",
@@ -220,12 +234,11 @@ resource "google_project_iam_custom_role" "sweep" {
     "container.clusters.list",
     "container.operations.get",
     "container.operations.list",
-    "dns.changes.create",
-    "dns.changes.get",
     "dns.managedZones.delete",
     "dns.managedZones.get",
     "dns.managedZones.list",
     "dns.networks.bindDNSResponsePolicy",
+    "dns.resourceRecordSets.delete",
     "dns.resourceRecordSets.list",
     "dns.responsePolicies.delete",
     "dns.responsePolicies.get",
