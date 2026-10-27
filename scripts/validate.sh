@@ -48,6 +48,19 @@
 #                 names outside AWS and fails closed, the API from the
 #                 operator's /32, every role under the boundary); and the
 #                 workflow runs on main only and reads no stored secret
+#   gke           the GKE run (ADR 22): gke/ declares no router, NAT,
+#                 external address, peering or VPN, and one route, to
+#                 restricted.googleapis.com; its Terraform tests pass against
+#                 mocked providers (a network made without its internet
+#                 route, egress denied but to Google's restricted APIs, a
+#                 response policy that refuses every other name, the API from
+#                 the operator's /32, NetworkPolicies enforced, the registry
+#                 read by the nodes and Kyverno alone), and so do the
+#                 bootstrap's (one immutable subject, each service account
+#                 from its own workflow, a sweep that creates nothing, the
+#                 budget); no service account key anywhere; and both
+#                 workflows run on main only, outside any environment, and
+#                 read no stored secret
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -337,6 +350,35 @@ check_aws() {
   return "$ok"
 }
 
+check_gke() {
+  local ok=0 out dir routes
+  if grep -nE 'resource "google_compute_(router|router_nat|address|global_address|network_peering|vpn_gateway|ha_vpn_gateway|vpn_tunnel|external_vpn_gateway|interconnect_attachment|instance)"' gke/*.tf; then
+    echo "gke/ declares a way out of the network"; ok=1
+  fi
+  if grep -nE '^[[:space:]]*access_config[[:space:]]*\{' gke/*.tf; then echo "gke/ gives something an external address"; ok=1; fi
+  routes="$(cat gke/*.tf | grep -cE '^resource "google_compute_route"' || true)"
+  [ "$routes" = 1 ] || { echo "gke/ declares $routes routes; there is one, to restricted.googleapis.com"; ok=1; }
+  { grep -qE '^  dest_range[[:space:]]+= local\.google_apis$' gke/network.tf && grep -qE '^  google_apis[[:space:]]+= "199\.36\.153\.4/30"$' gke/network.tf; } \
+    || { echo "the one route goes somewhere other than restricted.googleapis.com"; ok=1; }
+  if grep -rn --include='*.tf' 'google_service_account_key' gke/; then echo "gke/ makes a service account key; every credential is federated"; ok=1; fi
+  grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.GKE_VALIDATION_ENABLED == 'true'))" .github/workflows/gke.yml \
+    || { echo "the GKE run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
+  # A job in an environment carries that environment in its subject, which
+  # the federation does not admit: the run would fail at its first step.
+  if grep -nE '^[[:space:]]+environment:' .github/workflows/gke.yml .github/workflows/gke-sweep.yml; then
+    echo "a GKE job runs in an environment; the federation admits main's subject alone"; ok=1
+  fi
+  if grep -n 'secrets\.' .github/workflows/gke.yml .github/workflows/gke-sweep.yml; then echo "a GKE workflow reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
+  if ! command -v terraform >/dev/null; then echo "check gke needs terraform"; return 1; fi
+  for dir in gke gke/bootstrap; do
+    if ! out="$(cd "$dir" && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then
+      echo "$dir's tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1
+    fi
+  done
+  [ "$ok" = 0 ] && echo "the network declares one way out, to Google's restricted APIs, the resolver refuses every other name, the API answers the operator alone, the federation admits main's two workflows by the immutable subject, and nothing holds a key"
+  return "$ok"
+}
+
 check_gateway() {
   local ok=0 aud keys requests budgets backends
   { grep -q '^    jwtAuthentication:$' manifests/gateway/gateway.yaml && grep -q '^      mode: Strict$' manifests/gateway/gateway.yaml; } \
@@ -520,7 +562,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws gke mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

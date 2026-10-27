@@ -1,0 +1,78 @@
+# 22. The boundary on GKE: one route, to Google's restricted APIs, and no name lookup out
+
+- Status: proposed, 2026-10-27
+- Date: 2026-10-27
+
+## Context
+
+ADR 18 made the boundary on a real AWS account and tried it from inside every week. A buyer on Google Cloud asks the same questions, and three answers differ there.
+
+- **A new VPC comes with a way out.** On AWS a VPC has no route out until someone adds an internet gateway. On Google Cloud every new network gets a route for 0.0.0.0/0 to the default internet gateway, and a node with no external address still uses it for Google's APIs.
+- **DNS is the same way out.** Every VM resolves through the metadata server, 169.254.169.254, which answers any name on the internet whatever the routes say. A workload with no route out can still put data into the names it looks up, as on AWS.
+- **Google's API front door is shared.** Nodes with no external address reach Google's APIs through Private Google Access, at one of two published ranges. Google lists `*.appspot.com`, `*.run.app` and `*.cloudfunctions.net` among the names `private.googleapis.com` (199.36.153.8/30) answers for: App Engine, Cloud Run and Cloud Functions, where anybody can put up a service and read what reaches it. A route to it is a way out to anything hosted there. `restricted.googleapis.com` (199.36.153.4/30) answers for the APIs VPC Service Controls supports, and Google lists none of those hosts for it ([Private Google Access, domain options](https://docs.cloud.google.com/vpc/docs/configure-private-google-access), read 2026-10-27).
+
+The maintainer chose on 2026-10-27 to run this weekly in a project of its own, `valdemar-platform-validation`, under his organization's node, about $5 a month or less, with a $10 budget. The organization already refuses service account keys (`iam.disableServiceAccountKeyCreation`) and IAM members from outside its own customer (`iam.allowedPolicyMemberDomains`), both enforced on the project as read on 2026-10-27.
+
+## Decision
+
+The same two phases as on AWS, the first proven before the second.
+
+**Phase 1: the boundary itself.** `gke/` is Terraform for one run:
+
+- **A network made without its route to the internet** (`delete_default_routes_on_create`), with one subnet, no external address anywhere, no Cloud NAT and no Cloud Router. Its one route out goes to `restricted.googleapis.com`'s four addresses. The route's next hop is named the default internet gateway, and Google's documentation says what is sent to its API ranges that way stays inside Google's network; Private Google Access on the subnet lets the nodes use it.
+- **The firewall says it again**: egress to anything is denied, but everything inside the network's own range (the nodes, the pods, the services, and the control plane's private endpoint in the node subnet) and HTTPS to those four addresses.
+- **No name lookup out.** Private zones answer `googleapis.com`, `gcr.io` and `pkg.dev`, and every name under them, with the restricted addresses, from inside the network. A Cloud DNS response policy on the network answers every other name with a name that does not exist (`refused.boundary.internal`), so no query for it leaves Cloud DNS. It lets through only the names the private zones answer and the network's own internal names (`metadata.google.internal`, the nodes'), which Google's servers answer and no outside party reads. A wildcard rule stops at a name another rule names: `*.` covers `example.net` but not `example.com` once a rule names `googleapis.com`, so each top-level domain above an allowed name has its own refusal. Cloud DNS answers a refused name with the CNAME and no address (NOERROR, not NXDOMAIN): the check reads the answer for an address, not the lookup's status.
+- **GKE whose API the operator reaches and nothing else does**: a zonal cluster with private nodes; the nodes reach the control plane at its private endpoint; the operator, the runner, reaches the external endpoint from its own address only (`/32`), with Google Cloud's own ranges refused and the DNS-based endpoint closed to outside traffic. One node.
+- **Images across the gap into Artifact Registry**: the runner, on the connected side, copies what it brings into this run's own repository by digest; the nodes pull from there through the restricted addresses, as the node's service account, which can read that repository and nothing else in the project.
+
+`tests/e2e/gke.sh` runs the boundary checks the AWS run runs, each refusal beside a control from the same pod and from the node's own network: no TCP to the internet by address; no answer for a public name, in `.com` or elsewhere, and no public resolver asked directly, while the registry's name resolves to the restricted addresses and the cluster's own services resolve; the registry reachable on 443. And one the AWS run has no counterpart for: no TCP to `private.googleapis.com`, the other front door. The DNS check is shown its violation once, on a run with the response policy left off the network (`dns_firewall = false`), before it is trusted.
+
+**Phase 2: the agent on it**, as on AWS (ADR 18), with the registry inside being the run's Artifact Registry repository:
+
+- **The same signed file crosses** into the run's repository, which Terraform made empty, every image under its original path; `scripts/inside.sh` names every image there by the same path and digest, as it does under ECR.
+- **Kyverno reads signatures as itself**: Workload Identity Federation for GKE gives its admission controller's Kubernetes service account a Google identity of its own, which may read this run's repository and nothing else; the model policy names the `google` credential provider. No Google service account stands behind it and no key exists.
+- **The agent's NetworkPolicies are enforced** by Dataplane V2; without it they would be accepted and enforce nothing.
+- **A pod never sees the node's credentials**: the node pool serves GKE's metadata server, which hands a pod its own identity if it has one.
+- **Nothing asks for a load balancer**: the gateway's Service is ClusterIP, as on AWS.
+
+Then the checks on what is inside (`CHECKS=inside`), the boundary's checks, the evals at the release gates and the game day. With the agent the node is a c3d-standard-4: four vCPUs, as the GitHub runner has, on AMD EPYC, as the runner's are, so the half rate ADR 18 measured on an Intel m7i can be read against a third processor.
+
+**Who may act, and as what.** No key exists for any identity here, and none can be made. `gke/bootstrap/`, applied once from the maintainer's own login, sets up:
+
+- **A workload identity pool for GitHub** whose one provider admits one subject: a job on main of this repository, in GitHub's immutable form, the owner and the repository by their numeric ids (`repo:heyvaldemar@10498744/kubernetes-air-gapped-ai-agent@1421238353:ref:refs/heads/main`; ADR 14, "A subject written by name"), from one of two workflow files. A branch, a tag, a pull request and an environment carry other subjects and are refused before any service account is asked. A push to any other branch that changes the run's files runs one job that asks for the credential and passes only when the provider's condition refuses it.
+- **A creation account** that only `gke.yml` can act as: a custom role for the network, its DNS and the registry, listed permission by permission, plus GKE's admin role, in a project that holds nothing else. It can start a cluster as the node account and as no other, and it reads and writes the runs' states under `airgap-runs/` and not the bootstrap's own.
+- **A sweep account** that only `gke-sweep.yml` can act as, which lists, reads and deletes. Two of its permissions are not deletes, because two deletes need them: taking a response policy off its network, and the DNS change that removes a zone's records.
+- **A node account** with no role in the project: each run lets it read that run's repository.
+- **A $10 monthly budget** with alerts at 50%, 90% and 100% of spend and at 100% of the forecast, counted before any credit.
+
+**The run** (`.github/workflows/gke.yml`): weekly on Fridays and by hand, on main only, behind the repository variable `GKE_VALIDATION_ENABLED`. One Terraform state per run in the project's state bucket under its own prefix. The run destroys what it made, looks for anything left of it or of any earlier run by name, and reports what it cost from list prices. A run first destroys any state an earlier one left. `.github/workflows/gke-sweep.yml` runs daily with the sweep account and deletes whatever a run left once GitHub says that run has finished, or once it is older than three hours, whether or not a state holds it.
+
+## On Google Cloud
+
+Not run yet. The runs that prove each phase, and the one that shows the DNS check its violation, are named here as they happen.
+
+## Consequences
+
+- About $0.07 a run of the boundary alone (0.4 h) and about $0.25 with the agent (0.85 h, as long as the AWS run takes), at list prices read from the Cloud Billing Catalog API on 2026-10-27: the zonal cluster's $0.10 an hour, an e2-standard-2 at $0.067 or a c3d-standard-4 at $0.182, a 50 GB balanced disk and three private zones. GKE's free tier credits one zonal cluster's fee a month per billing account, which takes about a third off; the cost table and the budget count it as if it did not. Weekly, about $1.10 a month with the agent. These are estimates until the runs below measure them.
+- The restricted addresses reach the APIs of every project, not only this one's. A workload with a credential for another project, or a bucket anybody may write to, could put data there through `storage.googleapis.com`. A VPC Service Controls perimeter around this project closes that and is the next step; it is not built here. ADR 18's S3 gateway endpoint has the default endpoint policy and is open the same way.
+- The project's number, its service accounts' addresses and the workload identity provider's name are in the run's public log and the repository's variables. None of them is a credential.
+- A budget alerts; it stops nothing. What stops a run that is left behind is the run's own destroy, then the next run's sweep, then the daily one. Google Cloud's equivalent of the AWS account's $30 deny-all action, a budget message that turns billing off, is not built.
+- The operator's external endpoint is a way in, from one address, for the length of a run, as on AWS.
+- Allowing `googleapis.com` in DNS lets a workload resolve any Google API name, which is how Private Google Access works; it gives it a way only to what the restricted addresses serve.
+
+## Alternatives
+
+- **No response policy, trusting the absence of routes.** The gap ADR 18 exists to close, and Google Cloud has it as AWS does.
+- **`private.googleapis.com` instead of `restricted`.** It serves App Engine, Cloud Run and Cloud Functions as well as the APIs: a route to it reaches any site hosted there. The check tries it and must be refused.
+- **A Private Service Connect endpoint for Google's APIs.** No route to the internet gateway at all: an address inside the network that Google's API front end answers on. It costs $0.01 an hour and its traffic $0.01 a GB, registers in Service Directory, and behind it is the same front end; with its `vpc-sc` bundle, the restricted one. A route to the restricted range is Google's documented path for private GKE clusters, and the firewall and the check hold it to that range.
+- **A private zone for the root, `.`.** It answers every name, and private zones come before the network's internal names in Cloud DNS's order, so it would shadow `metadata.google.internal` and the nodes' own names, which GKE's nodes depend on.
+- **Cloud NGFW rules by name, or Secure Web Proxy.** They act on traffic that has a route; here nothing has one, and neither sees the metadata server's lookups.
+- **Autopilot.** It refuses a pod on the node's network, so the boundary could not be tried from the node, as it is on AWS and kind.
+- **A service account key in a repository secret.** The organization refuses to make one, and there would be a credential to leak and rotate.
+- **A GitHub environment in the subject, as the AWS run uses.** The federation names main's subject by the repository's ids and the workflow file by name; an environment would add a third thing to match and change the subject's form.
+
+## How to explain this to a customer
+
+In your Google Cloud project, the cluster gets a network made without its usual way to the internet. Its one way out goes to Google's own API addresses, the restricted set, which serve Google's services and nothing anybody else hosts on Google. We also close the door most designs leave open. Even with no way out, a Google Cloud network answers questions about any name on the internet, and data can leave inside those questions. Here the network refuses to look up anything but Google's APIs and its own machines, and a weekly test on a real project shows both: that nothing gets out, and that it would have, without that rule.
+
+Nothing in it holds a key. The weekly test proves to Google who it is with a token from GitHub that only this repository's main branch can get, and it gets an identity that can build and tear down this test and do nothing else; a second identity can only delete, and it sweeps up after a run that did not finish. The agent runs inside as it does in our daily test: everything it runs arrives in one signed file, goes into your own registry, and is admitted only with its signature and its licence record, checked by an identity of its own that can read nothing else.

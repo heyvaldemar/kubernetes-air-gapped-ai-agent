@@ -1,0 +1,406 @@
+name: The boundary on GKE
+
+# ADR 22. The boundary this repository proves on kind and on AWS (ADR 18),
+# made on Google Cloud and tried from inside: a VPC made without its route to
+# the internet, whose one route out goes to restricted.googleapis.com, a
+# response policy that refuses every name outside Google's APIs and the
+# VPC's own, and a private GKE cluster whose API answers the runner's own
+# address only. tests/e2e/gke.sh tries the ways out, each beside a control.
+#
+# Phase 2, the agent on it, as on AWS: the model built, signed and given its
+# AI-BOM on the connected side, everything the cluster runs carried in one
+# signed file into the run's Artifact Registry repository, Kyverno reading
+# signatures there as itself, the model server, the MCP server and the
+# gateway, then the checks the kind e2e runs on what is inside, the evals,
+# and the game day. AGENT says whether a run does it: by hand unless the
+# dispatch says false, and on the schedule once the repository variable
+# GKE_AGENT_ENABLED is true.
+#
+# In the validation project gke/bootstrap sets up: GitHub's OIDC token,
+# exchanged through Workload Identity Federation for the creation account,
+# which this workflow on main alone can act as. No stored credential, and no
+# key exists to store. The maintainer approved it weekly, about $5 a month,
+# under the project's $10 budget (2026-10-27).
+#
+# Weekly on a schedule, and by hand on main when the dispatch says SPEND. The
+# schedule does nothing until the repository variable GKE_VALIDATION_ENABLED
+# is true. One Terraform state per run, under airgap-runs/ in the project's
+# state bucket; the teardown job destroys it whatever happened, the next run
+# destroys any state an earlier one left, and gke-sweep.yml deletes daily
+# whatever a finished run left that no state holds.
+#
+# On any other branch, a push that changes the run's files runs one job: it
+# asks for the run's credential from that branch, and passes only when the
+# federation refuses it.
+on:
+  schedule:
+    # Friday: the day after the AWS run (Thursday) and the EKS platform's
+    # (Wednesday).
+    - cron: "23 3 * * 5"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type SPEND to create billed Google Cloud resources (about $0.07 for the boundary alone, $0.25 with the agent)"
+        required: true
+        type: string
+      agent:
+        description: "true runs the agent on the boundary (phase 2); false, the boundary alone"
+        required: false
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+      dns_firewall:
+        description: "false only to show the DNS check its violation (ADR 22)"
+        required: false
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+      keep:
+        description: "true leaves everything the run made, for gke-sweep.yml to find and delete (shows the sweep its violation); never on the schedule"
+        required: false
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+  push:
+    branches-ignore: [main]
+    paths:
+      - .github/workflows/gke.yml
+      - gke/**
+
+permissions:
+  contents: read
+
+# The runs on main share the project one at a time; a branch's refusal job
+# never waits for them, and never cancels one that waits.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'gke-boundary' || format('gke-refused-{0}', github.ref) }}
+  cancel-in-progress: false
+
+env:
+  RUN_ID: ${{ github.run_id }}
+  CLUSTER: airgap-${{ github.run_id }}
+  TF_IN_AUTOMATION: "1"
+  TERRAFORM_VERSION: 1.16.5
+  GCLOUD_VERSION: 590.0.0
+  GKE_PROJECT: ${{ vars.GKE_PROJECT }}
+  GKE_REGION: ${{ vars.GKE_REGION }}
+  GKE_ZONE: ${{ vars.GKE_ZONE }}
+  GKE_STATE_BUCKET: ${{ vars.GKE_STATE_BUCKET }}
+  AGENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.agent != 'false') || (github.event_name == 'schedule' && vars.GKE_AGENT_ENABLED == 'true') }}
+  # The model a release ships with, held to the same gates as in the kind e2e.
+  MODEL: granite-4.0-1b
+  TASK_FLOOR: "on"
+  OFFER_PATTERNS: "on"
+
+jobs:
+  refused:
+    name: A branch gets no credential
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # GitHub's token for this job, with the audience the provider expects,
+      # handed to Google's STS as the run's own exchange would hand it. The
+      # token is read and sent inside the process, never in an argument or a
+      # log; what is printed is its subject and workflow, and Google's answer.
+      - name: Ask for the run's credential from this branch
+        env:
+          PROVIDER: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, sys, urllib.error, urllib.parse, urllib.request
+          provider = os.environ["PROVIDER"]
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=" + urllib.parse.quote("https://iam.googleapis.com/" + provider, safe="")
+          req = urllib.request.Request(url, headers={"Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          token = json.load(urllib.request.urlopen(req))["value"]
+          claims = json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))
+          print("asking as", claims["sub"], "from", claims["workflow_ref"])
+          body = json.dumps({
+              "audience": "//iam.googleapis.com/" + provider,
+              "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
+              "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
+              "scope": "https://www.googleapis.com/auth/cloud-platform",
+              "subjectTokenType": "urn:ietf:params:oauth:token-type:jwt",
+              "subjectToken": token,
+          }).encode()
+          try:
+              urllib.request.urlopen(urllib.request.Request("https://sts.googleapis.com/v1/token", data=body, headers={"Content-Type": "application/json"}))
+          except urllib.error.HTTPError as e:
+              said = json.load(e).get("error_description", "")
+              print("Google answered HTTP %d: %s" % (e.code, said))
+              if e.code in (400, 403) and "attribute condition" in said:
+                  print("refused by the provider's attribute condition: a branch gets no credential")
+                  sys.exit(0)
+              sys.exit("refused, but not by the attribute condition: this says nothing about it")
+          sys.exit("a branch got a credential: the federation admits more than main")
+          PY
+
+  up:
+    name: Apply, load, check
+    if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.GKE_VALIDATION_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      # The OIDC token the federation exchanges, for this workflow on main.
+      id-token: write
+    outputs:
+      started: ${{ steps.start.outputs.at }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      # The vendor's side, before anything is billed, as on AWS: a staging
+      # registry on the runner, the model built reproducibly, signed and
+      # attested, the plants, the charts, and all of it in one signed file.
+      # The staging registry is gone before the file crosses.
+      - name: Everything the cluster runs, in one signed file
+        if: env.AGENT == 'true'
+        run: |
+          df -h / | tail -1
+          NETWORK=bridge ./scripts/airgap.sh registry
+          GPU=0 ./scripts/airgap.sh seed
+          ./scripts/model.sh build
+          ./scripts/model.sh sign
+          # The document search's embedding model (ADR 21).
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
+          ./scripts/model.sh plants
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+          ./scripts/bundle.sh create
+          ./scripts/airgap.sh open
+          df -h / | tail -1
+
+      - name: The creation account, through the federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GKE_CREATE_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ${{ env.GCLOUD_VERSION }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: What an earlier run left, destroyed first
+        run: ./scripts/gke.sh sweep
+
+      # The run's variables go to the state bucket beside its state, so the
+      # teardown job, and a later run's sweep, destroy exactly what this job
+      # applied.
+      - name: The run's variables
+        env:
+          DNS_FIREWALL: ${{ inputs.dns_firewall != 'false' }}
+          NODE_SERVICE_ACCOUNT: ${{ vars.GKE_NODE_SERVICE_ACCOUNT }}
+        run: |
+          ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
+          node=e2-standard-2; [ "$AGENT" = true ] && node=c3d-standard-4
+          python3 - "$ip" "$node" > run.tfvars.json <<'PY'
+          import json, os, sys
+          print(json.dumps({
+              "project": os.environ["GKE_PROJECT"],
+              "region": os.environ["GKE_REGION"],
+              "zone": os.environ["GKE_ZONE"],
+              "run_id": os.environ["RUN_ID"],
+              "cluster_name": os.environ["CLUSTER"],
+              "operator_cidrs": [sys.argv[1] + "/32"],
+              "node_service_account": os.environ["NODE_SERVICE_ACCOUNT"],
+              "node_machine_type": sys.argv[2],
+              "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
+          }, indent=1))
+          PY
+          gcloud storage cp --no-user-output-enabled run.tfvars.json "gs://$GKE_STATE_BUCKET/airgap-runs/$RUN_ID/run.tfvars.json"
+          echo "agent: $AGENT, dns_firewall: $DNS_FIREWALL, node: $node"
+
+      - name: Terraform init, one state per run
+        run: |
+          printf 'terraform {\n  backend "gcs" {}\n}\n' > gke/ci_backend.tf
+          terraform -chdir=gke init -input=false -lockfile=readonly \
+            -backend-config="bucket=$GKE_STATE_BUCKET" -backend-config="prefix=airgap-runs/$RUN_ID"
+
+      # From here the run is billed: the cost table counts from this clock.
+      - name: Start the clock
+        id: start
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Apply
+        run: terraform -chdir=gke apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json"
+
+      # With the agent, the file that crossed is checked and loaded into the
+      # run's repository, which holds nothing until then; without it,
+      # busybox alone, by digest.
+      - name: Across the gap, into Artifact Registry
+        run: |
+          REGISTRY="$(terraform -chdir=gke output -raw registry)"; export REGISTRY
+          INSIDE="$(terraform -chdir=gke output -raw inside)"; export INSIDE
+          echo "INSIDE=$INSIDE" >> "$GITHUB_ENV"
+          echo "REGISTRY=$REGISTRY" >> "$GITHUB_ENV"
+          if [ "$AGENT" = true ]; then
+            ./scripts/gke.sh login
+            ./scripts/bundle.sh load
+          else
+            ./scripts/gke.sh images
+          fi
+
+      - name: The cluster, from the operator's address
+        run: |
+          gcloud container clusters get-credentials "$CLUSTER" --zone "$GKE_ZONE" --project "$GKE_PROJECT"
+          kubectl wait nodes --all --for=condition=Ready --timeout=600s
+          kubectl -n kube-system rollout status deployment/kube-dns --timeout=300s
+          kubectl get nodes -L node.kubernetes.io/instance-type,topology.kubernetes.io/zone -o wide
+
+      # Kyverno reads signatures from Artifact Registry with its own Google
+      # identity (gke/registry.tf, Workload Identity Federation for GKE),
+      # named in the policy.
+      - name: Kyverno and the model policies, from Artifact Registry
+        if: env.AGENT == 'true'
+        env:
+          REGISTRY_CREDENTIALS: google
+        run: |
+          ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: The model server, the tool side and the gateway, from Artifact Registry
+        if: env.AGENT == 'true'
+        run: |
+          ./scripts/serve.sh
+          ./scripts/tools.sh
+          ./scripts/gateway.sh install
+
+      - name: What is inside, and that nothing else runs
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          CHECKS: inside
+        run: ./tests/e2e/run.sh
+
+      - name: The boundary, tried from inside
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: GOOGLE_APIS="$(terraform -chdir=gke output -raw google_apis)" ./tests/e2e/gke.sh
+
+      - name: Run the agent through the evals
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+        run: ./scripts/evals.sh
+
+      # It takes parts of the cluster down and puts them back.
+      - name: Game day, parts of the boundary taken down while it serves
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          SERVED_DEPLOYMENT: llama
+          SERVED_MODEL: ${{ env.MODEL }}
+        run: ./tests/e2e/gameday.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          gcloud container clusters describe "$CLUSTER" --zone "$GKE_ZONE" --project "$GKE_PROJECT" --format='yaml(status,statusMessage,currentMasterVersion,currentNodeVersion,conditions)' || true
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=60 || true
+          kubectl -n inference describe pod -l app=llama | tail -30 || true
+          kubectl -n agents logs job/evals --tail=20 || true
+          kubectl -n mcp logs deploy/mcp-server --tail=20 || true
+          kubectl -n agentgateway-system logs deploy/agentgateway --tail=40 || true
+
+      - name: Keep the checks
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-gke
+          path: |
+            ${{ runner.temp }}/e2e-results.json
+            ${{ runner.temp }}/evals-results.json
+            .cache/airgap/evals.jsonl
+            .cache/airgap/mcp-audit.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+
+  down:
+    name: Destroy, look for residue, report the cost
+    needs: up
+    # Whatever happened to the run, unless it never started for real.
+    if: always() && github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.GKE_VALIDATION_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: The creation account, through the federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GKE_CREATE_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ${{ env.GCLOUD_VERSION }}
+
+      - name: The run's variables and state
+        id: state
+        run: |
+          if ! gcloud storage cp --no-user-output-enabled "gs://$GKE_STATE_BUCKET/airgap-runs/$RUN_ID/run.tfvars.json" run.tfvars.json; then
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+            echo "the run wrote no variables: nothing was applied"
+            exit 0
+          fi
+          {
+            echo "applied=true"
+            echo "node=$(jq -r .node_machine_type run.tfvars.json)"
+          } >> "$GITHUB_OUTPUT"
+          printf 'terraform {\n  backend "gcs" {}\n}\n' > gke/ci_backend.tf
+          terraform -chdir=gke init -input=false -lockfile=readonly \
+            -backend-config="bucket=$GKE_STATE_BUCKET" -backend-config="prefix=airgap-runs/$RUN_ID"
+
+      - name: Destroy
+        if: steps.state.outputs.applied == 'true' && inputs.keep != 'true'
+        run: terraform -chdir=gke destroy -input=false -auto-approve -var-file="$PWD/run.tfvars.json"
+
+      - name: Nothing left behind
+        if: steps.state.outputs.applied == 'true' && inputs.keep != 'true'
+        run: ./scripts/gke.sh residue
+
+      - name: Left for the sweep
+        if: steps.state.outputs.applied == 'true' && inputs.keep == 'true'
+        run: echo "keep is true, so everything $CLUSTER made is left for gke-sweep.yml, which must find and delete it"
+
+      - name: What the run cost
+        if: always() && needs.up.outputs.started != ''
+        env:
+          STARTED: ${{ needs.up.outputs.started }}
+          NODE_TYPE: ${{ steps.state.outputs.node }}
+        run: ./scripts/gke.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true

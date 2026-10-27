@@ -1,0 +1,65 @@
+name: The GKE run's sweep
+
+# ADR 22. Daily, and by hand on main: anything a run of gke.yml made that is
+# still in the project once GitHub says that run has finished, or that is
+# older than three hours, is deleted. A run destroys what its state holds,
+# and the next run destroys any state an earlier one left; this is the
+# third line, for what no state holds or no later run comes to.
+#
+# It acts as the sweep account (gke/bootstrap), which this workflow on main
+# alone can act as, and which lists, reads and deletes: it can make nothing.
+# It finds a run's parts by name (airgap-<run>, gke-airgap-<run>-...) and
+# deletes them in the order their dependencies need: the cluster, the
+# registry, the DNS, the firewall and the route, the subnet, the network.
+# It fails when anything of a finished run is still there afterwards.
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gke-sweep
+  cancel-in-progress: false
+
+env:
+  GCLOUD_VERSION: 590.0.0
+  GKE_PROJECT: ${{ vars.GKE_PROJECT }}
+  GKE_REGION: ${{ vars.GKE_REGION }}
+  GKE_ZONE: ${{ vars.GKE_ZONE }}
+
+jobs:
+  sweep:
+    name: Delete what a finished run left
+    if: github.ref == 'refs/heads/main' && vars.GKE_PROJECT != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Whether each run it finds parts of has finished.
+      actions: read
+      # The OIDC token the federation exchanges for the sweep account.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The sweep account, through the federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GKE_SWEEP_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ${{ env.GCLOUD_VERSION }}
+
+      - name: Delete what a finished run left
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/gke.sh leftovers | tee -a "$GITHUB_STEP_SUMMARY"

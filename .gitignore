@@ -6,3 +6,11 @@ out/
 aws/.terraform/
 aws/*.tfplan
 aws/*.tfstate*
+
+# Terraform for the GKE run (gke/) and its bootstrap: providers, plans and
+# local state stay local; the bootstrap's state lives in the state bucket
+gke/.terraform/
+gke/bootstrap/.terraform/
+gke/**/*.tfplan
+gke/**/*.tfstate*
+gke/**/backend_override.tf

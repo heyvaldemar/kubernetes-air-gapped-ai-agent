@@ -235,6 +235,7 @@ The [threat model](docs/threat-model.md) lists every threat with its control and
 | 19 | [A GPU beside the CPU: the same model, the same weights, measured side by side](docs/decisions/0019-a-gpu-beside-the-cpu.md) |
 | 20 | [A node lost while it serves: two of everything the boundary depends on](docs/decisions/0020-a-node-lost-while-it-serves.md) |
 | 21 | [The company's documents, searched inside the boundary, with each person's rights](docs/decisions/0021-the-companys-documents-with-each-persons-rights.md) |
+| 22 | [The boundary on GKE: one route, to Google's restricted APIs, and no name lookup out](docs/decisions/0022-the-boundary-on-gke.md) |
 
 ## Related
 

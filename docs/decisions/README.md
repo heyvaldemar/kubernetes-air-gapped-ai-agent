@@ -25,3 +25,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 19 | [A GPU beside the CPU: the same model, the same weights, measured side by side](0019-a-gpu-beside-the-cpu.md) | accepted |
 | 20 | [A node lost while it serves: two of everything the boundary depends on](0020-a-node-lost-while-it-serves.md) | accepted |
 | 21 | [The company's documents, searched inside the boundary, with each person's rights](0021-the-companys-documents-with-each-persons-rights.md) | accepted |
+| 22 | [The boundary on GKE: one route, to Google's restricted APIs, and no name lookup out](0022-the-boundary-on-gke.md) | proposed |
