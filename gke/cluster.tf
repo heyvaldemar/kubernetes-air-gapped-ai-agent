@@ -85,6 +85,12 @@ resource "google_container_cluster" "this" {
     http_load_balancing {
       disabled = true
     }
+    # Pods ask kube-dns, as on kind and EKS, and the agent's NetworkPolicies
+    # name kube-dns's pods for DNS. GKE turned NodeLocal DNSCache on in the
+    # second run (40555921881), which answers on the node instead.
+    dns_cache_config {
+      enabled = false
+    }
   }
 
   # One node pool, declared with the cluster, so no default pool is made
