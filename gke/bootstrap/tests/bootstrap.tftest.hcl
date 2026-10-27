@@ -60,9 +60,9 @@ run "the_sweep_creates_nothing" {
   assert {
     condition = alltrue([
       for p in google_project_iam_custom_role.sweep.permissions :
-      can(regex("\\.(list|get|delete)$", p)) || contains(["dns.responsePolicies.update", "dns.networks.bindDNSResponsePolicy", "compute.networks.updatePolicy", "serviceusage.services.use"], p)
+      can(regex("\\.(list|get|delete)$", p)) || contains(["dns.responsePolicies.update", "dns.networks.bindDNSResponsePolicy", "dns.changes.create", "compute.networks.updatePolicy", "serviceusage.services.use"], p)
     ])
-    error_message = "the sweep lists, reads and deletes; the only exceptions are taking a response policy off its network and the network permission a rule's or route's delete asks for"
+    error_message = "the sweep lists, reads and deletes; the only exceptions are taking a response policy off its network, the DNS change a record's delete goes through, and the network permission a rule's or route's delete asks for"
   }
 }
 

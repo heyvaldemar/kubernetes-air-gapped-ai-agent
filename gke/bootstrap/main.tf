@@ -189,10 +189,12 @@ resource "google_project_iam_custom_role" "create" {
   ]
 }
 
-# Delete-only, with two exceptions a delete cannot go without: a response
+# Delete-only, with three exceptions a delete cannot go without: a response
 # policy is taken off its network (an update of the policy, which binds the
-# network) before it can be deleted, and deleting a firewall rule or a route
-# asks for the network's updatePolicy. It lists everything scripts/gke.sh
+# network) before it can be deleted; Cloud DNS deletes a record through a
+# change, so a record's delete asks for dns.changes.create (the first sweep,
+# run 40573690895, was refused there without it); and deleting a firewall
+# rule or a route asks for the network's updatePolicy. It lists everything scripts/gke.sh
 # what() lists, and gcloud's managed-group listing reads the groups and
 # their autoscalers too.
 resource "google_project_iam_custom_role" "sweep" {
@@ -234,6 +236,8 @@ resource "google_project_iam_custom_role" "sweep" {
     "container.clusters.list",
     "container.operations.get",
     "container.operations.list",
+    "dns.changes.create",
+    "dns.changes.get",
     "dns.managedZones.delete",
     "dns.managedZones.get",
     "dns.managedZones.list",
