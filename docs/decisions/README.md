@@ -26,3 +26,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 20 | [A node lost while it serves: two of everything the boundary depends on](0020-a-node-lost-while-it-serves.md) | accepted |
 | 21 | [The company's documents, searched inside the boundary, with each person's rights](0021-the-companys-documents-with-each-persons-rights.md) | accepted |
 | 22 | [The boundary on GKE: no route out but to Google's own front doors, and no name lookup out](0022-the-boundary-on-gke.md) | accepted |
+| 23 | [The boundary on AKS: a network isolated cluster, no name lookup out, and one delete](0023-the-boundary-on-aks.md) | accepted for phase 1 |
