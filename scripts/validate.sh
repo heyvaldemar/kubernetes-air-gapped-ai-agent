@@ -62,6 +62,18 @@
 #                 budget); no service account key anywhere; and both
 #                 workflows run on main only, outside any environment, and
 #                 read no stored secret
+#   aks           the AKS run (ADR 23): aks/ declares no public address,
+#                 NAT gateway, route table, firewall, peering or gateway, and
+#                 every subnet turns Azure's default outbound access off; its
+#                 Terraform tests pass against mocked providers (outbound type
+#                 none, egress denied but inside the network, a resolver
+#                 policy that refuses every name but the registry's and the
+#                 network's own, the API from the operator's /32, AKS's own
+#                 images from the registry inside, NetworkPolicies enforced,
+#                 the registry reached through its private endpoint); and the
+#                 run's workflow holds to main, a typed SPEND or the schedule
+#                 behind its variable, runs its cloud jobs in the federated
+#                 environments, and reads no stored secret
 #   mlbom         every model's AI-BOM, written from its line in
 #                 models/models.lock by scripts/mlbom.py, is a valid
 #                 CycloneDX 1.6 document (cyclonedx-cli, pinned in
@@ -383,6 +395,40 @@ check_gke() {
   return "$ok"
 }
 
+check_aks() {
+  local ok=0 out
+  if grep -nE 'resource "(azurerm|azapi)_[a-z_]*(public_ip|nat_gateway|route_table|route|firewall|virtual_network_peering|virtual_network_gateway|vpn_gateway|express_route|bastion_host)[a-z_]*"' aks/*.tf; then
+    echo "aks/ declares a way out of the network"; ok=1
+  fi
+  if grep -nE 'Microsoft\.Network/(publicIPAddresses|natGateways|routeTables|azureFirewalls|virtualNetworkGateways|bastionHosts)' aks/*.tf; then
+    echo "aks/ declares a way out of the network through the Azure API"; ok=1
+  fi
+  local subnets off
+  subnets="$(grep -cE '^resource "azurerm_subnet"' aks/network.tf || true)"
+  off="$(grep -cE '^  default_outbound_access_enabled[[:space:]]+= false$' aks/network.tf || true)"
+  [ "$subnets" = "$off" ] || { echo "aks/ has $subnets subnets and $off with default outbound access off"; ok=1; }
+  grep -qE '^    outbound_type[[:space:]]+= "none"$' aks/cluster.tf || { echo "the AKS cluster's outbound type is not none"; ok=1; }
+  grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AZURE_VALIDATION_ENABLED == 'true'))" .github/workflows/aks.yml \
+    || { echo "the AKS run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
+  # The federation's subjects name an environment; a cloud job outside it is
+  # refused at its first step, and one in the wrong one acts as the wrong
+  # identity.
+  [ "$(grep -cE '^    environment: azure-validation$' .github/workflows/aks.yml)" = 2 ] \
+    || { echo "aks.yml's two cloud jobs do not both run in azure-validation"; ok=1; }
+  grep -qE '^    environment: azure-sweeper$' .github/workflows/aks-sweep.yml || { echo "aks-sweep.yml does not run in azure-sweeper"; ok=1; }
+  if grep -n 'AZURE_SWEEP_CLIENT_ID' .github/workflows/aks.yml | grep -v '^[0-9]*:          SWEEP: '; then
+    echo "aks.yml logs in as the sweep identity"; ok=1
+  fi
+  if grep -n 'AZURE_CREATE_CLIENT_ID' .github/workflows/aks-sweep.yml; then echo "aks-sweep.yml can act as the creation identity"; ok=1; fi
+  if grep -n 'secrets\.' .github/workflows/aks.yml .github/workflows/aks-sweep.yml; then echo "an AKS workflow reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
+  if ! command -v terraform >/dev/null; then echo "check aks needs terraform"; return 1; fi
+  if ! out="$(cd aks && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then
+    echo "aks/'s tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "the network declares no way out and AKS makes none, egress is denied but inside it, the resolver refuses every name but the registry's and the network's own, AKS's images come from the registry inside, the API answers the operator alone, and each workflow is main's, in its own federated environment, with no stored secret"
+  return "$ok"
+}
+
 check_gateway() {
   local ok=0 aud keys requests budgets backends
   { grep -q '^    jwtAuthentication:$' manifests/gateway/gateway.yaml && grep -q '^      mode: Strict$' manifests/gateway/gateway.yaml; } \
@@ -566,7 +612,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws gke mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws gke aks mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

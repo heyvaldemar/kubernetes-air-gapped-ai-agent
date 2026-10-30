@@ -1,0 +1,66 @@
+name: The AKS run's sweep
+
+# ADR 23. Daily, and by hand on main: any resource group a run of aks.yml
+# made that is still in the subscription once GitHub says that run has
+# finished, or that is older than three hours, is deleted. A run deletes its
+# own group, and the next run deletes any an earlier one left; this is the
+# third line, for what no later run comes to.
+#
+# It acts as the sweep identity, an Entra application federated to this
+# repository's main branch in the environment azure-sweeper alone, whose one
+# role (airgap-sweeper) reads and deletes resource groups: it can make
+# nothing. It finds a run's groups by name (airgap-<run>, and AKS's
+# airgap-<run>-nodes) and deletes the run's first, which takes the cluster
+# and AKS's group with it. It fails when anything of a finished run is still
+# there afterwards.
+on:
+  schedule:
+    - cron: "53 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aks-sweep
+  cancel-in-progress: false
+
+# bash -eo pipefail: a step that pipes into tee fails when what it pipes does.
+defaults:
+  run:
+    shell: bash
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+jobs:
+  sweep:
+    name: Delete what a finished run left
+    if: github.ref == 'refs/heads/main' && vars.AZURE_SUBSCRIPTION_ID != ''
+    runs-on: ubuntu-latest
+    # The federation names this environment in the subject it admits.
+    environment: azure-sweeper
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Whether each run it finds a group of has finished.
+      actions: read
+      # The OIDC token the federation exchanges for the sweep identity.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The sweep identity, through the federation
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_SWEEP_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete what a finished run left
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/aks.sh leftovers | tee -a "$GITHUB_STEP_SUMMARY"

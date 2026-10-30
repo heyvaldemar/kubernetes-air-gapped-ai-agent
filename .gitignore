@@ -14,3 +14,10 @@ gke/bootstrap/.terraform/
 gke/**/*.tfplan
 gke/**/*.tfstate*
 gke/**/backend_override.tf
+
+# Terraform for the AKS run (aks/): providers, plans and local state stay
+# local; a run's state lives in the state account
+aks/.terraform/
+aks/*.tfplan
+aks/*.tfstate*
+aks/ci_backend.tf

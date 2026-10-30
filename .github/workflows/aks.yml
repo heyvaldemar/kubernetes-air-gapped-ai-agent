@@ -1,0 +1,305 @@
+name: The boundary on AKS
+
+# ADR 23. The boundary this repository proves on kind, on AWS (ADR 18) and on
+# Google Cloud (ADR 22), made on Azure and tried from inside: a network
+# isolated AKS cluster, whose outbound type is none and whose own images come
+# from a registry inside the network, not from mcr.microsoft.com; a network
+# with no way out and a security group that denies egress again; a DNS
+# resolver policy that refuses every name but the registry's and the
+# network's own; and an API that answers the runner's own address only.
+# tests/e2e/aks.sh tries the ways out, each beside a control.
+#
+# Phase 1, the boundary alone. Phase 2, the agent on it, waits: the trial
+# subscription allows four vCPUs in the region, and the maintainer decides
+# whether to upgrade it (ADR 23).
+#
+# In the subscription the maintainer set up: an Entra application federated
+# to this repository's main branch, in the environment azure-validation, by
+# the repository's immutable subject; GitHub's OIDC token is exchanged for
+# it, Contributor on a subscription that holds nothing but these runs. No
+# stored credential, and no secret exists to store. He approved it on
+# 2026-10-28, with a $10 monthly budget.
+#
+# Weekly on a schedule, and by hand on main when the dispatch says SPEND. The
+# schedule does nothing until the repository variable AZURE_VALIDATION_ENABLED
+# is true. Everything a run makes is in one resource group, airgap-<run>; the
+# teardown job deletes it whatever happened, the next run deletes any an
+# earlier one left, and aks-sweep.yml deletes daily whatever a finished run
+# left.
+#
+# On any other branch, a push that changes the run's files runs one job: it
+# asks Entra for each of the two identities' tokens from that branch, and
+# passes only when the federation refuses both.
+on:
+  schedule:
+    # Tuesday: EKS's platform runs on Wednesday, AWS on Thursday and GKE on
+    # Friday.
+    - cron: "37 3 * * 2"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type SPEND to create billed Azure resources (about $1.80 a run, most of it the registry's day)"
+        required: true
+        type: string
+      dns_firewall:
+        description: "false only to show the DNS check its violation (ADR 23)"
+        required: false
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+      keep:
+        description: "true leaves everything the run made, for aks-sweep.yml to find and delete (shows the sweep its violation); never on the schedule"
+        required: false
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+  push:
+    branches-ignore: [main]
+    paths:
+      - .github/workflows/aks.yml
+      - aks/**
+
+permissions:
+  contents: read
+
+# The runs on main share the subscription one at a time; a branch's refusal
+# job never waits for them, and never cancels one that waits.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/main' && 'aks-boundary' || format('aks-refused-{0}', github.ref) }}
+  cancel-in-progress: false
+
+# bash -eo pipefail: a step whose pipe fails part way fails.
+defaults:
+  run:
+    shell: bash
+
+env:
+  RUN_ID: ${{ github.run_id }}
+  CLUSTER: airgap-${{ github.run_id }}
+  TF_IN_AUTOMATION: "1"
+  TERRAFORM_VERSION: 1.16.5
+  AZURE_REGION: ${{ vars.AZURE_REGION }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_STATE_ACCOUNT: ${{ vars.AZURE_STATE_ACCOUNT }}
+  # Terraform, its state backend included, asks GitHub for the OIDC token
+  # itself and exchanges it as the creation identity.
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  NODE_SIZE: Standard_D2as_v7
+
+jobs:
+  refused:
+    name: A branch gets no credential
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # GitHub's token for this job, with the audience Entra expects, handed
+      # to Entra as each identity's own login would hand it. The token is
+      # read and sent inside the process, never in an argument or a log;
+      # what is printed is its subject, and Entra's error code and message.
+      - name: Ask for each identity's token from this branch
+        env:
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          CREATE: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          SWEEP: ${{ vars.AZURE_SWEEP_CLIENT_ID }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, sys, urllib.error, urllib.parse, urllib.request
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=" + urllib.parse.quote("api://AzureADTokenExchange", safe="")
+          req = urllib.request.Request(url, headers={"Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          token = json.load(urllib.request.urlopen(req))["value"]
+          claims = json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))
+          print("asking as", claims["sub"])
+          bad = 0
+          for name in ("CREATE", "SWEEP"):
+              body = urllib.parse.urlencode({
+                  "client_id": os.environ[name],
+                  "scope": "https://management.azure.com/.default",
+                  "grant_type": "client_credentials",
+                  "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+                  "client_assertion": token,
+              }).encode()
+              try:
+                  urllib.request.urlopen(urllib.request.Request(
+                      "https://login.microsoftonline.com/%s/oauth2/v2.0/token" % os.environ["TENANT"], data=body))
+              except urllib.error.HTTPError as e:
+                  said = json.load(e)
+                  codes = said.get("error_codes", [])
+                  print("%s identity: Entra answered HTTP %d, %s: %s" % (name.lower(), e.code, codes, said.get("error_description", "").split("\r\n")[0][:300]))
+                  # AADSTS700213: no federated credential matches the subject.
+                  if 700213 in codes:
+                      print("refused by the federation: no credential of it names this branch's subject")
+                      continue
+                  print("refused, but not by the federation: this says nothing about it")
+                  bad = 1
+                  continue
+              print("%s identity: a branch got a token: the federation admits more than main" % name.lower())
+              bad = 1
+          sys.exit(bad)
+          PY
+
+  up:
+    name: Apply, load, check
+    if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AZURE_VALIDATION_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    # The federation names this environment in the subject it admits.
+    environment: azure-validation
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # The OIDC token the federation exchanges, for this environment on main.
+      id-token: write
+    outputs:
+      started: ${{ steps.start.outputs.at }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned tools
+        run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: The creation identity, through the federation
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What an earlier run left, deleted first
+        run: ./scripts/aks.sh sweep
+
+      # The run's variables go to the state account beside its state, for
+      # the record of what this job applied.
+      - name: The run's variables
+        env:
+          DNS_FIREWALL: ${{ inputs.dns_firewall != 'false' }}
+        run: |
+          ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
+          python3 - "$ip" > run.tfvars.json <<'PY'
+          import json, os, sys
+          print(json.dumps({
+              "location": os.environ["AZURE_REGION"],
+              "run_id": os.environ["RUN_ID"],
+              "cluster_name": os.environ["CLUSTER"],
+              "operator_cidrs": [sys.argv[1] + "/32"],
+              "node_vm_size": os.environ["NODE_SIZE"],
+              "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
+          }, indent=1))
+          PY
+          az storage blob upload --auth-mode login --account-name "$AZURE_STATE_ACCOUNT" --container-name airgap-runs \
+            --name "$RUN_ID/run.tfvars.json" --file run.tfvars.json --overwrite -o none
+          echo "dns_firewall: $DNS_FIREWALL, node: $NODE_SIZE"
+
+      - name: Terraform init, one state per run
+        run: |
+          printf 'terraform {\n  backend "azurerm" {}\n}\n' > aks/ci_backend.tf
+          terraform -chdir=aks init -input=false -lockfile=readonly \
+            -backend-config="storage_account_name=$AZURE_STATE_ACCOUNT" -backend-config="container_name=airgap-runs" \
+            -backend-config="key=$RUN_ID/terraform.tfstate" -backend-config="use_azuread_auth=true"
+
+      # From here the run is billed: the cost table counts from this clock.
+      - name: Start the clock
+        id: start
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Apply
+        run: terraform -chdir=aks apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json"
+
+      - name: Across the gap, into the registry inside
+        run: |
+          for o in registry registry_name inside registry_cidr; do
+            echo "$(tr '[:lower:]' '[:upper:]' <<<"$o")=$(terraform -chdir=aks output -raw "$o")" >> "$GITHUB_ENV"
+          done
+          REGISTRY="$(terraform -chdir=aks output -raw registry)" REGISTRY_NAME="$(terraform -chdir=aks output -raw registry_name)" \
+          INSIDE="$(terraform -chdir=aks output -raw inside)" ./scripts/aks.sh images
+
+      - name: The cluster, from the operator's address
+        run: |
+          az aks get-credentials --resource-group "$CLUSTER" --name "$CLUSTER" --overwrite-existing --only-show-errors
+          kubectl wait nodes --all --for=condition=Ready --timeout=600s
+          kubectl -n kube-system rollout status deployment/coredns --timeout=300s
+          kubectl get nodes -L node.kubernetes.io/instance-type,topology.kubernetes.io/zone -o wide
+          # What AKS itself runs, and from where: every image of it named
+          # mcr.microsoft.com, which the node's container runtime asks the
+          # registry inside for instead.
+          kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,IMAGES:.spec.containers[*].image'
+
+      - name: The boundary, tried from inside
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/aks.sh
+
+      - name: What the cluster looked like
+        if: failure()
+        run: |
+          az aks show --resource-group "$CLUSTER" --name "$CLUSTER" --query '{state:provisioningState, power:powerState.code, version:currentKubernetesVersion, network:networkProfile, bootstrap:bootstrapProfile}' -o json || true
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+
+      - name: Keep the checks
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results-aks
+          path: ${{ runner.temp }}/e2e-results.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  down:
+    name: Delete, look for residue, report the cost
+    needs: up
+    # Whatever happened to the run, unless it never started for real.
+    if: always() && github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AZURE_VALIDATION_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    environment: azure-validation
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The creation identity, through the federation
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # One delete: the run's resource group holds everything it made, and
+      # AKS deletes the node's group with the cluster.
+      - name: Delete the run's resource group
+        if: inputs.keep != 'true'
+        run: ./scripts/aks.sh delete
+
+      - name: Nothing left behind
+        if: inputs.keep != 'true'
+        run: ./scripts/aks.sh residue
+
+      - name: Left for the sweep
+        if: inputs.keep == 'true'
+        run: echo "keep is true, so everything $CLUSTER made is left for aks-sweep.yml, which must find and delete it"
+
+      - name: What the run cost
+        if: always() && needs.up.outputs.started != ''
+        env:
+          STARTED: ${{ needs.up.outputs.started }}
+        run: ./scripts/aks.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true
