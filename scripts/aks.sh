@@ -93,6 +93,19 @@ case "${1:-}" in
       drop "$name"; swept=$((swept + 1))
     done <<<"$(groups | sort -r)"
     say "deleted $swept group(s) earlier runs left"
+    # A state whose run left no group behind records nothing that exists:
+    # its teardown deleted the group and stopped before the state.
+    if [ -n "${AZURE_STATE_ACCOUNT:-}" ]; then
+      left="$(groups)"
+      for run in $(az storage blob list --auth-mode login --account-name "$AZURE_STATE_ACCOUNT" -c "$STATE_CONTAINER" \
+          --query '[].name' -o tsv | sed -n 's#^\([0-9]*\)/.*#\1#p' | sort -u); do
+        [ "$run" = "${CLUSTER#airgap-}" ] && continue
+        grep -qE "^airgap-$run(-nodes)?[[:space:]]" <<<"$left" && continue
+        az storage blob delete-batch --auth-mode login --account-name "$AZURE_STATE_ACCOUNT" \
+          --source "$STATE_CONTAINER" --pattern "$run/*" -o none
+        say "run $run: no group left, so its state is deleted too"
+      done
+    fi
     ;;
   delete)
     : "${CLUSTER:?}"

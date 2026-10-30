@@ -290,6 +290,18 @@ jobs:
         if: inputs.keep != 'true'
         run: ./scripts/aks.sh delete
 
+      # az exchanges GitHub's token for each new scope it needs, and GitHub's
+      # token is good for five minutes: the delete takes ten, and the state
+      # account's scope is asked for only after it (AADSTS700024, run
+      # 41001631612). So once more, with a fresh token.
+      - name: The creation identity again, for the state account
+        if: inputs.keep != 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Nothing left behind
         if: inputs.keep != 'true'
         run: ./scripts/aks.sh residue
