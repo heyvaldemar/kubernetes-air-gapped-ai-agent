@@ -64,3 +64,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/aks.sh leftovers | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Read every day, so a budget that went missing or a month that ran
+      # over is in a log before the next run: the run's own guard refuses to
+      # apply past $10 a month.
+      - name: The budget, and what the runs have cost this month
+        if: always()
+        run: |
+          {
+            ./scripts/aks.sh budget
+            printf '\nCost Management, this month, by run:\n\n'
+            ./scripts/aks.sh spend
+          } | tee -a "$GITHUB_STEP_SUMMARY"

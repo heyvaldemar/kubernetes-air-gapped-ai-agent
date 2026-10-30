@@ -18,7 +18,9 @@ name: The boundary on AKS
 # the repository's immutable subject; GitHub's OIDC token is exchanged for
 # it, Contributor on a subscription that holds nothing but these runs. No
 # stored credential, and no secret exists to store. He approved it on
-# 2026-10-28, with a $10 monthly budget.
+# 2026-10-28, with a $10 monthly budget, and weekly on 2026-10-30, the runs
+# held to $10 a month together: a run that Cost Management says would pass
+# that applies nothing (scripts/aks.sh guard).
 #
 # Weekly on a schedule, and by hand on main when the dispatch says SPEND. The
 # schedule does nothing until the repository variable AZURE_VALIDATION_ENABLED
@@ -178,6 +180,12 @@ jobs:
           client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Before anything is billed: the budget is there, and this month's
+      # runs, as Cost Management counts them, leave room for this one under
+      # the $10 a month the maintainer allowed them. A budget only alerts.
+      - name: The budget, and room in the month for this run
+        run: ./scripts/aks.sh guard
 
       - name: What an earlier run left, deleted first
         run: ./scripts/aks.sh sweep

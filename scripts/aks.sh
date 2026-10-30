@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# aks.sh <login|images|sweep|delete|residue|leftovers|cost> - the parts of the
-# AKS run (ADR 23) that are not Terraform. .github/workflows/aks.yml and
-# aks-sweep.yml call them, logged in with az as the run's identity; each
-# reads the environment the workflow sets: AZURE_SUBSCRIPTION_ID,
-# AZURE_STATE_ACCOUNT, CLUSTER (the run's cluster name, and its resource
-# group's), REGISTRY (the registry's login server), REGISTRY_NAME and INSIDE
-# (where images go in it).
+# aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|guard>
+# - the parts of the AKS run (ADR 23) that are not Terraform.
+# .github/workflows/aks.yml and aks-sweep.yml call them, logged in with az as
+# the run's identity; each reads the environment the workflow sets:
+# AZURE_SUBSCRIPTION_ID, AZURE_STATE_ACCOUNT, CLUSTER (the run's cluster name,
+# and its resource group's), REGISTRY (the registry's login server),
+# REGISTRY_NAME and INSIDE (where images go in it).
 #
 #   login      the registry's credential for this run, into the DOCKER_CONFIG
 #              the bundle and the checks read, on oras's stdin; never printed
@@ -25,12 +25,22 @@
 #              is older than three hours
 #   cost       what the run cost, from its length and list prices, and what
 #              Cost Management has measured for the runs before it
+#   spend      what Cost Management has counted for each run this month
+#   budget     the subscription's budget is there, $10 a month at most, with
+#              its alerts on
+#   guard      before a run applies: the budget, and room under the $10 a
+#              month the maintainer allowed the runs for one more
 set -euo pipefail
 # An az that fails inside $(...) must stop the script, not read as "nothing
 # there".
 shopt -s inherit_errexit
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_CONTAINER=airgap-runs
+# The maintainer's limits (2026-10-29 and 2026-10-30): the subscription's
+# budget, and what the runs may cost in a month; one run at list prices.
+BUDGET=flagship-monthly
+CAP=10
+ONE_RUN=1.75
 # The credential store bundle.sh and the checks read, as on kind.
 export DOCKER_CONFIG="$ROOT/.cache/airgap/docker"
 say() { printf '== %s\n' "$*"; }
@@ -61,6 +71,38 @@ drop() {
     az group delete -n "$1" --yes
     say "deleted $1"
   fi
+}
+
+# month_costs: this month's cost of every run, as JSON {run: {meter: cost}},
+# from Cost Management, by the runs' resource groups. On no answer it
+# prints why and fails; it asks again while Cost Management says 429.
+month_costs() {
+  local body out attempt
+  body='{"type":"ActualCost","timeframe":"MonthToDate","dataset":{"granularity":"None","aggregation":{"cost":{"name":"Cost","function":"Sum"}},"grouping":[{"type":"Dimension","name":"ResourceGroupName"},{"type":"Dimension","name":"MeterCategory"}]}}'
+  for attempt in 1 2 3 4; do
+    if out="$(az rest --method post --body "$body" -o json --only-show-errors \
+        --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.CostManagement/query?api-version=2025-03-01" 2>&1)"; then
+      python3 -c '
+import json, re, sys
+d = json.loads(sys.argv[1])["properties"]
+cols = [c["name"] for c in d["columns"]]
+runs = {}
+for row in d["rows"]:
+    r = dict(zip(cols, row))
+    m = re.match(r"airgap-(\d+)(-nodes)?$", str(r.get("ResourceGroupName", "")), re.I)
+    if m:
+        runs.setdefault(m.group(1), {}).setdefault(r["MeterCategory"], 0.0)
+        runs[m.group(1)][r["MeterCategory"]] += r["Cost"]
+print(json.dumps(runs))
+' "$out"
+      return 0
+    fi
+    case "$out" in
+      *"Too many requests"*|*"429"*) sleep $((attempt * 20)) ;;
+      *) printf 'Cost Management answered: %s\n' "$(grep -o '"message":"[^"]*"' <<<"$out" | head -1)"; return 1 ;;
+    esac
+  done
+  echo "Cost Management kept answering 429, too many requests"; return 1
 }
 
 case "${1:-}" in
@@ -211,41 +253,62 @@ print("| a Premium registry, priced per day | $1.6666 a day | $1.67 |")
 total = sum(r * h for _, r, h in rows) + 1.6666
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, total))
 PY
-    # What Azure itself has counted, by run, from Cost Management. It reports
-    # a day or so late, so this run is not in it yet; the ones before it are.
     printf '\nCost Management, this month, by run:\n\n'
-    body='{"type":"ActualCost","timeframe":"MonthToDate","dataset":{"granularity":"None","aggregation":{"cost":{"name":"Cost","function":"Sum"}},"grouping":[{"type":"Dimension","name":"ResourceGroupName"},{"type":"Dimension","name":"MeterCategory"}]}}'
-    for attempt in 1 2 3 4; do
-      if out="$(az rest --method post --body "$body" -o json \
-          --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.CostManagement/query?api-version=2025-03-01" 2>&1)"; then
-        python3 -c '
-import json, re, sys
-d = json.loads(sys.argv[1])["properties"]
-cols = [c["name"] for c in d["columns"]]
-runs = {}
-for row in d["rows"]:
-    r = dict(zip(cols, row))
-    m = re.match(r"airgap-(\d+)(-nodes)?$", str(r.get("ResourceGroupName", "")), re.I)
-    if not m:
-        continue
-    runs.setdefault(m.group(1), {}).setdefault(r["MeterCategory"], 0.0)
-    runs[m.group(1)][r["MeterCategory"]] += r["Cost"]
+    "$0" spend
+    ;;
+  spend)
+    # What Azure itself has counted for the runs this month, by run, from
+    # their resource groups. Cost Management reports a day or so late, so
+    # the run that asks is not in it yet; the ones before it are.
+    : "${AZURE_SUBSCRIPTION_ID:?}"
+    if ! out="$(month_costs)"; then printf '%s\n' "$out"; exit 0; fi
+    python3 -c '
+import json, sys
+runs = json.loads(sys.argv[1])
 if not runs:
     print("no run has a cost recorded yet")
-print("| Run | What | Cost |\n|---|---|---|") if runs else None
+    sys.exit(0)
+print("| Run | What | Cost |\n|---|---|---|")
 for run in sorted(runs):
     for what, cost in sorted(runs[run].items()):
         print("| %s | %s | $%.4f |" % (run, what, cost))
     print("| %s | **total** | **$%.2f** |" % (run, sum(runs[run].values())))
+print("| **this month** | | **$%.2f** |" % sum(sum(r.values()) for r in runs.values()))
 ' "$out"
-        exit 0
-      fi
-      case "$out" in
-        *"Too many requests"*|*"429"*) sleep $((attempt * 20)) ;;
-        *) printf 'Cost Management answered: %s\n' "$(grep -o '"message":"[^"]*"' <<<"$out" | head -1)"; exit 0 ;;
-      esac
-    done
-    echo "Cost Management kept answering 429, too many requests"
     ;;
-  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost>" >&2; exit 2 ;;
+  budget)
+    # The subscription's budget, as the maintainer set it on 2026-10-29: $10
+    # a month with its alerts on. Printed without its addresses, which a
+    # public log has no need of; missing, larger or silent, it fails.
+    : "${AZURE_SUBSCRIPTION_ID:?}"
+    b="$(az rest --method get -o json --only-show-errors \
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Consumption/budgets/$BUDGET?api-version=2024-08-01")"
+    python3 -c '
+import json, sys
+p = json.loads(sys.argv[1])["properties"]
+on = [n for n in p.get("notifications", {}).values() if n.get("enabled")]
+print("budget %s: $%s a %s, $%s spent so far, %d alerts on: %s" % (sys.argv[2], p["amount"], {"Monthly": "month", "Quarterly": "quarter", "Annually": "year"}.get(p["timeGrain"], p["timeGrain"]),
+      (p.get("currentSpend") or {}).get("amount", 0), len(on),
+      ", ".join(sorted("%s %s%%" % (n.get("thresholdType", "Actual").lower(), n["threshold"]) for n in on))))
+if float(p["amount"]) > float(sys.argv[3]) or not on:
+    sys.exit("the budget is not the $%s a month with alerts the maintainer approved" % sys.argv[3])
+' "$b" "$BUDGET" "$CAP"
+    ;;
+  guard)
+    # Before anything is billed: the budget is there, and this month's runs
+    # have left room for one more under the $10 a month the maintainer
+    # allowed for them (2026-10-30). A budget only alerts; this refuses.
+    : "${AZURE_SUBSCRIPTION_ID:?}"
+    "$0" budget
+    if ! out="$(month_costs)"; then printf '%s; going on, with list prices as the only count\n' "$out"; exit 0; fi
+    python3 -c '
+import json, sys
+spent = sum(sum(r.values()) for r in json.loads(sys.argv[1]).values())
+cap, one = float(sys.argv[2]), float(sys.argv[3])
+print("this month the runs have cost $%.2f in Cost Management; with one more, about $%.2f, of the $%.2f a month allowed" % (spent, spent + one, cap))
+if spent + one > cap:
+    sys.exit("one more run would pass the $%.2f a month the maintainer allowed: none until next month, unless he raises it" % cap)
+' "$out" "$CAP" "$ONE_RUN"
+    ;;
+  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|guard>" >&2; exit 2 ;;
 esac
