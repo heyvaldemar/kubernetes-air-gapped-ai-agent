@@ -49,7 +49,18 @@ case "${1:-}" in
       for tag in $(api "$repo/tags/list" | jq -r '.tags[]?'); do
         # -r: the signatures and attestations that refer to an image travel
         # with it. One layout per repository, so its path is its name.
-        oras cp -r --from-ca-file "$CA" "$REG/$repo:$tag" --to-oci-layout "$work/oci/$repo:$tag" >/dev/null
+        # Three tries: the GPU's 5 GB model once broke off mid-copy with an
+        # HTTP/2 INTERNAL_ERROR from the registry, and the scheduled weekly
+        # run went with it before it had applied anything (40845619217). A
+        # layout stores blobs by digest and verifies each one, so a retry
+        # writes into the same layout.
+        tries=1
+        until oras cp -r --from-ca-file "$CA" "$REG/$repo:$tag" --to-oci-layout "$work/oci/$repo:$tag" >/dev/null; do
+          [ "$tries" -lt 3 ] || { echo "copying $repo:$tag into the bundle failed three times" >&2; exit 1; }
+          tries=$((tries + 1))
+          echo "copying $repo:$tag into the bundle failed; try $tries of 3" >&2
+          sleep 10
+        done
         n=$((n + 1))
       done
     done
