@@ -67,10 +67,13 @@ case "${1:-}" in
   login)
     : "${REGISTRY:?}" "${REGISTRY_NAME:?}"
     mkdir -p "$DOCKER_CONFIG"
-    # An ACR refresh token for the run's identity; the user name ACR asks
-    # for with one is this fixed GUID.
-    az acr login --name "$REGISTRY_NAME" --expose-token --query accessToken -o tsv 2>/dev/null \
-      | oras login --username 00000000-0000-0000-0000-000000000000 --password-stdin "$REGISTRY" >/dev/null
+    # An ACR refresh token for the run's identity, on stdout and into oras;
+    # az's errors and notes go to stderr, which carries no token. The user
+    # name ACR asks for with one is this fixed GUID.
+    token="$(az acr login --name "$REGISTRY_NAME" --expose-token --query accessToken -o tsv --only-show-errors)"
+    [ -n "$token" ] || { echo "the registry gave no token" >&2; exit 1; }
+    oras login --username 00000000-0000-0000-0000-000000000000 --password-stdin "$REGISTRY" <<<"$token" >/dev/null
+    unset token
     say "logged in to $REGISTRY for this run"
     ;;
   images)
