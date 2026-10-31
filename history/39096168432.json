@@ -1,0 +1,10 @@
+{
+ "at": "2026-10-18T04:10:23Z",
+ "checks_failed": 0,
+ "checks_passed": 0,
+ "commit": "3514ff1",
+ "conclusion": "failure",
+ "models": {},
+ "run": 39096168432,
+ "url": "https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39096168432"
+}
