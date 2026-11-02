@@ -5,6 +5,14 @@
 # nothing inside the boundary can reach one. That is a weaker guarantee than
 # keyless signing with a log, and this file says so where it does it.
 #
+# The path is model-volumes.yaml's, not this policy's. Kyverno evaluates an
+# ImageValidatingPolicy only for images that match matchImageReferences, so
+# a model volume from anywhere but the registry's models path never reaches
+# the first rule below; only its digest half can fire. With model-volumes
+# removed, a planted pod mounting a model from elsewhere is admitted
+# (heyvaldemar/kubernetes-oscal-evidence, plant remove:model-volumes). This
+# policy holds the digest, the signature, the AI-BOM and its licence.
+#
 # The model also carries an AI-BOM, a CycloneDX ML-BOM attested with the same
 # key (scripts/mlbom.py, scripts/model.sh): what the model is, where its file
 # came from, its sha256, and its licence, which must be on the site's list.
