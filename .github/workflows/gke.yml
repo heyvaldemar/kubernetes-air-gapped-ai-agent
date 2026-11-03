@@ -169,6 +169,24 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
+      - name: The creation account, through the federation
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GKE_CREATE_SERVICE_ACCOUNT }}
+
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: ${{ env.GCLOUD_VERSION }}
+          install_components: gke-gcloud-auth-plugin
+
+      # Before the bundle is built, so a run that cannot clear an earlier one
+      # stops in a minute, not after twenty (run 41038578800 built the whole
+      # bundle and then died here).
+      - name: What an earlier run left, destroyed first
+        run: ./scripts/gke.sh sweep
+
       # The vendor's side, before anything is billed, as on AWS: a staging
       # registry on the runner, the model built reproducibly, signed and
       # attested, the plants, the charts, and all of it in one signed file.
@@ -190,21 +208,6 @@ jobs:
           ./scripts/bundle.sh create
           ./scripts/airgap.sh open
           df -h / | tail -1
-
-      - name: The creation account, through the federation
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
-        with:
-          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GKE_CREATE_SERVICE_ACCOUNT }}
-
-      - name: Install gcloud
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
-        with:
-          version: ${{ env.GCLOUD_VERSION }}
-          install_components: gke-gcloud-auth-plugin
-
-      - name: What an earlier run left, destroyed first
-        run: ./scripts/gke.sh sweep
 
       # The run's variables go to the state bucket beside its state, so the
       # teardown job, and a later run's sweep, destroy exactly what this job
@@ -408,6 +411,12 @@ jobs:
       - name: Nothing left behind
         if: steps.state.outputs.applied == 'true' && inputs.keep != 'true'
         run: ./scripts/gke.sh residue
+
+      # Only once nothing is left: a state whose resources are gone is what
+      # stopped the first scheduled run (41038578800).
+      - name: The run's state, removed
+        if: steps.state.outputs.applied == 'true' && inputs.keep != 'true'
+        run: ./scripts/gke.sh drop
 
       - name: Left for the sweep
         if: steps.state.outputs.applied == 'true' && inputs.keep == 'true'

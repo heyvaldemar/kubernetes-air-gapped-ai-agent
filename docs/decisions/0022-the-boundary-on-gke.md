@@ -1,6 +1,6 @@
 # 22. The boundary on GKE: no route out but to Google's own front doors, and no name lookup out
 
-- Status: accepted for phase 1 and phase 2, 2026-10-27; the schedule's first run is pending
+- Status: accepted for phase 1 and phase 2, 2026-10-27, by hand; not weekly: the first scheduled run (41038578800, 2026-10-30) failed before it made anything, and weekly waits for one that passes
 - Date: 2026-10-27
 
 ## Context
@@ -71,6 +71,18 @@ One number is read against its node, as ADR 18 says: the same model on the same 
 [40571490437](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40571490437), the boundary alone with `keep: true`, passed and left everything it made. The daily sweep, run by hand after it, found the run finished on GitHub and deleted its parts in order. The first sweep, [40573690895](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40573690895), deleted the cluster, the repository, the response policy's 12 rules and the policy, and was refused at the first DNS record (HTTP 403): Cloud DNS deletes a record through a change, and the sweep account's role had been given the record's delete without `dns.changes.create`. It failed, as it must when something is left. With that permission, [40575492541](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40575492541) deleted the zones, the firewall rules, the routes, the subnet and the network, and its own inventory afterwards, and the project's, held nothing.
 
 The schedule runs phase 2 from here (`GKE_VALIDATION_ENABLED`, `GKE_AGENT_ENABLED`). The README says weekly once a scheduled run has passed; its run is named here then.
+
+## The first scheduled run, 2026-10-30
+
+[41038578800](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/41038578800), on 6f81741, failed in its first Google Cloud step, before it made or billed anything. The run first clears what an earlier run left: it found the state of 40571490437, the run that kept its resources for the sweep to find, 34 resources and 62 h old, and destroyed against it. The daily sweep had deleted those resources by name three days before and left the state, and Terraform's refresh failed reading the IAM bindings of a repository that no longer existed. Every scheduled run would have failed the same way.
+
+What changed:
+- The run's own sweep reads the project before it trusts a state. A state none of whose run's resources are in the project is removed. One whose resources are is destroyed, and when Terraform cannot, what is left is deleted by name, as the daily sweep deletes; whatever is still there after that fails the run, and the state stays for the next one.
+- The run's teardown removes its own state once its residue check finds nothing, so a state outlives its resources only when the daily sweep deleted them, and the next run's sweep removes it.
+- The run's sweep goes before the bundle is built: 41038578800 built and signed the whole bundle, about 20 minutes, and then stopped.
+- The daily sweep still reads no state and can delete none; the state bucket stays the creation account's.
+
+`tests/static/gke-sweep.sh` holds both sweeps to that against a Google Cloud and a Terraform made of files, nine cases, this run's among them: a state whose resources are gone is removed with no destroy; a destroy that cannot read its state is finished by name; a state younger than three hours is a run still going and is left alone; and whatever is still there afterwards fails. Static check `gke` runs it, with five plants.
 
 ## Consequences
 

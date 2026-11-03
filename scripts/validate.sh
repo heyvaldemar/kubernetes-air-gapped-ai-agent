@@ -59,9 +59,13 @@
 #                 read by the nodes and Kyverno alone), and so do the
 #                 bootstrap's (one immutable subject, each service account
 #                 from its own workflow, a sweep that creates nothing, the
-#                 budget); no service account key anywhere; and both
-#                 workflows run on main only, outside any environment, and
-#                 read no stored secret
+#                 budget); no service account key anywhere; both workflows
+#                 run on main only, outside any environment, and read no
+#                 stored secret; the run's teardown removes its own state;
+#                 and scripts/gke.sh's sweep and leftovers pass
+#                 tests/static/gke-sweep.sh against a Google Cloud and a
+#                 Terraform made of files (a state whose resources are gone,
+#                 a destroy that cannot read its state, a run still going)
 #   aks           the AKS run (ADR 23): aks/ declares no public address,
 #                 NAT gateway, route table, firewall, peering or gateway, and
 #                 every subnet turns Azure's default outbound access off; its
@@ -385,6 +389,18 @@ check_gke() {
     echo "a GKE job runs in an environment; the federation admits main's subject alone"; ok=1
   fi
   if grep -n 'secrets\.' .github/workflows/gke.yml .github/workflows/gke-sweep.yml; then echo "a GKE workflow reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
+  grep -qF 'run: ./scripts/gke.sh drop' .github/workflows/gke.yml \
+    || { echo "the GKE run's teardown leaves its state behind, for the next run to trip on (41038578800)"; ok=1; }
+  # gke.sh needs bash 4 or later (inherit_errexit), as the runner has.
+  local b sweep_bash=""
+  for b in bash /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    # shellcheck disable=SC2016  # the version is the other bash's, expanded there
+    if command -v "$b" >/dev/null && [ "$("$b" -c 'echo "${BASH_VERSINFO[0]}"')" -ge 4 ]; then sweep_bash="$b"; break; fi
+  done
+  if [ -z "$sweep_bash" ]; then echo "check gke needs bash 4 or later for the sweep's tests"; ok=1
+  elif ! out="$("$sweep_bash" tests/static/gke-sweep.sh 2>&1)"; then
+    echo "the sweep's tests failed: $(grep '^FAIL' <<<"$out" | head -3 | tr '\n' ' ')"; ok=1
+  fi
   if ! command -v terraform >/dev/null; then echo "check gke needs terraform"; return 1; fi
   for dir in gke gke/bootstrap; do
     if ! out="$(cd "$dir" && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then

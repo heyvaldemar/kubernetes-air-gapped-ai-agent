@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gke.sh <login|images|sweep|residue|leftovers|cost> - the parts of the GKE
+# gke.sh <login|images|sweep|drop|residue|leftovers|cost> - the parts of the GKE
 # run (ADR 22) that are not Terraform. .github/workflows/gke.yml and
 # gke-sweep.yml call them; each reads the environment the workflow sets:
 # GKE_PROJECT, GKE_REGION, GKE_STATE_BUCKET, CLUSTER (the run's cluster
@@ -13,15 +13,22 @@
 #              the digest airgap/images.txt pins, the connected side, before
 #              anything inside can ask for it. With the agent, the bundle
 #              carries everything instead (bundle.sh load)
-#   sweep      destroy this workflow's own runs that an earlier run left: any
-#              state under airgap-runs/ older than three hours that still
-#              holds resources, with the creation account
+#   sweep      clear this workflow's own runs that an earlier run left, with
+#              the creation account: any state under airgap-runs/ older than
+#              three hours. A state whose resources are no longer in the
+#              project (the daily sweep deleted them) is removed; one whose
+#              resources are is destroyed, or, when Terraform cannot, cleared
+#              by name as the daily sweep clears; whatever is still there
+#              after that fails the run. Run 41038578800 died destroying
+#              against a state whose repository the daily sweep had deleted
+#   drop       remove this run's own state, once its destroy left nothing
 #   residue    after the destroy, look for anything of this run's, and of any
 #              earlier run's, still in the project: none is the only passing
 #              answer
 #   leftovers  the daily sweep, with the delete-only account: delete what any
 #              run left, once GitHub says that run has finished or it is
-#              older than three hours
+#              older than three hours. It reads no state and touches none:
+#              the next run's sweep removes the state of what it deleted
 #   cost       what the run cost, from its length and list prices
 set -euo pipefail
 # A gcloud that fails inside $(what ...) must stop the script, not read as
@@ -59,6 +66,91 @@ what() {
 # owner <name>: the run a resource belongs to, from airgap-<run> in its name
 owner() { sed -nE 's/^(gke-)?airgap-([0-9]+)([^0-9].*)?$/\2/p' <<<"$1"; }
 
+# parts <run> <inventory>: the lines of an inventory from what() that are
+# that run's
+parts() {
+  local kind name created
+  while read -r kind name created; do
+    [ -n "$name" ] && [ "$(owner "$name")" = "$1" ] && printf '%s %s %s\n' "$kind" "$name" "$created"
+  done <<<"$2"
+  return 0
+}
+
+# epoch <time>: seconds since 1970 for any of the times Google Cloud prints.
+# GNU date reads them all; python3 where there is none (a Mac).
+epoch() {
+  date -d "$1" +%s 2>/dev/null \
+    || python3 -c 'import datetime, sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp()))' "$1"
+}
+
+# age_h <run> <inventory>: how many hours ago the oldest of its parts was
+# made, 0 when none says
+age_h() {
+  local kind name created h oldest=0 now
+  now=$(date +%s)
+  while read -r kind name created; do
+    [ -n "$created" ] && [ "$created" != - ] || continue
+    h=$(( (now - $(epoch "$created")) / 3600 )); [ "$h" -gt "$oldest" ] && oldest=$h
+  done < <(parts "$1" "$2")
+  echo "$oldest"
+}
+
+# delete_run <run>: delete, by name and in the order their dependencies
+# need, everything of that run in the project. The cluster first: GKE
+# deletes its node VMs, groups and firewall rules with it. Then the
+# registry, the DNS, and the network last. What this misses, the inventory
+# after it shows; the callers fail on it.
+delete_run() {
+  local c="airgap-$1" p="$GKE_PROJECT" rule zone rname rtype fw route disk
+  if gcloud container clusters describe "$c" --project "$p" --zone "$GKE_ZONE" >/dev/null 2>&1; then
+    gcloud container clusters delete "$c" --project "$p" --zone "$GKE_ZONE" --quiet
+  fi
+  gcloud artifacts repositories delete "$c" --project "$p" --location "$GKE_REGION" --quiet 2>/dev/null || true
+  if gcloud dns response-policies describe "$c" --project "$p" >/dev/null 2>&1; then
+    for rule in $(gcloud dns response-policies rules list "$c" --project "$p" --format='value(ruleName)'); do
+      gcloud dns response-policies rules delete "$rule" --response-policy "$c" --project "$p" --quiet
+    done
+    gcloud dns response-policies update "$c" --project "$p" --networks="" --quiet
+    gcloud dns response-policies delete "$c" --project "$p" --quiet
+  fi
+  for zone in $(gcloud dns managed-zones list --project "$p" --filter="name ~ ^$c-" --format='value(name)'); do
+    gcloud dns record-sets list --zone "$zone" --project "$p" --format='value(name,type)' | while read -r rname rtype; do
+      case "$rtype" in SOA|NS) continue ;; esac
+      gcloud dns record-sets delete "$rname" --type "$rtype" --zone "$zone" --project "$p" --quiet
+    done
+    gcloud dns managed-zones delete "$zone" --project "$p" --quiet
+  done
+  for fw in $(gcloud compute firewall-rules list --project "$p" --filter="network ~ /$c\$" --format='value(name)'); do
+    gcloud compute firewall-rules delete "$fw" --project "$p" --quiet
+  done
+  for route in $(gcloud compute routes list --project "$p" --filter="network ~ /$c\$ AND NOT name ~ ^default-route-" --format='value(name)'); do
+    gcloud compute routes delete "$route" --project "$p" --quiet
+  done
+  gcloud compute networks subnets delete "$c" --project "$p" --region "$GKE_REGION" --quiet 2>/dev/null || true
+  gcloud compute networks delete "$c" --project "$p" --quiet 2>/dev/null || true
+  for disk in $(gcloud compute disks list --project "$p" --filter="labels.goog-k8s-cluster-name=$c" --format='value(name,zone.basename())' | tr '\t' ':'); do
+    gcloud compute disks delete "${disk%%:*}" --zone "${disk#*:}" --project "$p" --quiet
+  done
+}
+
+# destroy_state <run>: terraform destroy against that run's own state and
+# variables, from a copy of gke/
+destroy_state() {
+  local work
+  work="$(mktemp -d)"
+  gcloud storage cp --no-user-output-enabled "gs://$GKE_STATE_BUCKET/$PREFIX/$1/run.tfvars.json" "$work/run.tfvars.json" \
+    && mkdir -p "$work/tf" && cp -r "$ROOT/gke/." "$work/tf/" \
+    && rm -rf "$work/tf/.terraform" "$work/tf/bootstrap" \
+    && printf 'terraform {\n  backend "gcs" {}\n}\n' >"$work/tf/ci_backend.tf" \
+    && terraform -chdir="$work/tf" init -input=false -lockfile=readonly -backend-config="bucket=$GKE_STATE_BUCKET" \
+         -backend-config="prefix=$PREFIX/$1" >/dev/null \
+    && terraform -chdir="$work/tf" destroy -input=false -auto-approve -var-file="$work/run.tfvars.json" \
+         -var 'operator_cidrs=["198.51.100.1/32"]' >/dev/null
+}
+
+# drop_state <run>: the run's state and variables, gone from the bucket
+drop_state() { gcloud storage rm --recursive --no-user-output-enabled "gs://$GKE_STATE_BUCKET/$PREFIX/$1/"; }
+
 case "${1:-}" in
   login)
     : "${REGISTRY:?}"
@@ -77,29 +169,42 @@ case "${1:-}" in
     say "$repo copied into $INSIDE/$repo, by digest $got"
     ;;
   sweep)
-    : "${GKE_STATE_BUCKET:?}"
-    now=$(date +%s); swept=0
+    : "${GKE_STATE_BUCKET:?}" "${GKE_PROJECT:?}" "${GKE_REGION:?}" "${GKE_ZONE:?}"
+    now=$(date +%s); destroyed=0 removed=0 inventory=""
     for run in $(gcloud storage ls "gs://$GKE_STATE_BUCKET/$PREFIX/" 2>/dev/null | sed -n "s#^gs://$GKE_STATE_BUCKET/$PREFIX/\([0-9]*\)/\$#\1#p"); do
       [ "$run" = "${RUN_ID:-}" ] && continue
       state="gs://$GKE_STATE_BUCKET/$PREFIX/$run/default.tfstate"
-      updated="$(gcloud storage objects describe "$state" --format='value(update_time)' 2>/dev/null)" || continue
-      age_h=$(( (now - $(date -d "$updated" +%s)) / 3600 ))
-      left="$(gcloud storage cat "$state" | python3 -c 'import json,sys; print(sum(len(r.get("instances", [])) for r in json.load(sys.stdin).get("resources", []) if r.get("mode") == "managed"))')"
-      [ "$left" = 0 ] && continue
-      if [ "$age_h" -lt 3 ]; then say "run $run: $left resources, $age_h h old: still inside its run"; continue; fi
-      say "run $run: $left resources left for $age_h h: destroying"
-      work="$(mktemp -d)"
-      gcloud storage cp --no-user-output-enabled "gs://$GKE_STATE_BUCKET/$PREFIX/$run/run.tfvars.json" "$work/run.tfvars.json"
-      mkdir -p "$work/tf" && cp -r "$ROOT/gke/." "$work/tf/"
-      rm -rf "$work/tf/.terraform" "$work/tf/bootstrap"
-      printf 'terraform {\n  backend "gcs" {}\n}\n' >"$work/tf/ci_backend.tf"
-      terraform -chdir="$work/tf" init -input=false -lockfile=readonly -backend-config="bucket=$GKE_STATE_BUCKET" \
-        -backend-config="prefix=$PREFIX/$run" >/dev/null
-      terraform -chdir="$work/tf" destroy -input=false -auto-approve -var-file="$work/run.tfvars.json" \
-        -var 'operator_cidrs=["198.51.100.1/32"]' >/dev/null
-      say "run $run: destroyed"; swept=$((swept + 1))
+      if ! updated="$(gcloud storage objects describe "$state" --format='value(update_time)' 2>/dev/null)"; then
+        # Variables and no state: the run stopped before Terraform wrote one.
+        updated="$(gcloud storage objects describe "gs://$GKE_STATE_BUCKET/$PREFIX/$run/run.tfvars.json" --format='value(update_time)')"
+        left=0
+      else
+        left="$(gcloud storage cat "$state" | python3 -c 'import json,sys; print(sum(len(r.get("instances", [])) for r in json.load(sys.stdin).get("resources", []) if r.get("mode") == "managed"))')"
+      fi
+      age=$(( (now - $(epoch "$updated")) / 3600 ))
+      if [ "$age" -lt 3 ]; then say "run $run: $left resources in its state, $age h old: still inside its run"; continue; fi
+      [ -n "$inventory" ] || inventory="$(what "$GKE_PROJECT" "$GKE_REGION")"
+      mine="$(parts "$run" "$inventory")"
+      if [ -z "$mine" ]; then
+        say "run $run: $left resources in its state, none of them in the project, $age h old: its state removed"
+        drop_state "$run"; removed=$((removed + 1)); continue
+      fi
+      say "run $run: $left resources in its state, $(grep -c . <<<"$mine") of its parts in the project, $age h old: destroying"
+      if ! destroy_state "$run"; then
+        say "run $run: Terraform could not destroy against its state: deleting what is left by name"
+        delete_run "$run"
+      fi
+      inventory="$(what "$GKE_PROJECT" "$GKE_REGION")"
+      still="$(parts "$run" "$inventory" | awk '{print $1 "/" $2}' | tr '\n' ' ')"
+      if [ -n "$still" ]; then echo "run $run: still in the project after its destroy: $still" >&2; exit 1; fi
+      drop_state "$run"; say "run $run: destroyed, its state removed"; destroyed=$((destroyed + 1))
     done
-    say "swept $swept earlier run(s)"
+    say "destroyed $destroyed earlier run(s), removed $removed state(s) whose resources were gone"
+    ;;
+  drop)
+    : "${GKE_STATE_BUCKET:?}" "${RUN_ID:?}"
+    drop_state "$RUN_ID"
+    say "run $RUN_ID: its state removed"
     ;;
   residue)
     : "${GKE_PROJECT:?}" "${GKE_REGION:?}" "${CLUSTER:?}"
@@ -121,56 +226,21 @@ case "${1:-}" in
     ;;
   leftovers)
     : "${GKE_PROJECT:?}" "${GKE_REGION:?}" "${GKE_ZONE:?}" "${GITHUB_REPOSITORY:?}"
-    p="$GKE_PROJECT"; now=$(date +%s)
+    p="$GKE_PROJECT"
     inventory="$(what "$p" "$GKE_REGION")"
     runs="$(while read -r _ name _; do owner "$name"; done <<<"$inventory" | grep -v '^$' | sort -u || true)"
     [ -n "$runs" ] || { say "nothing of any run in $p"; exit 0; }
     swept=0 kept=0
     for run in $runs; do
-      c="airgap-$run"
       # A run that GitHub says has finished owns nothing any more; one still
       # going keeps what it has, unless it is older than any run can be.
       status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .status 2>/dev/null || echo unknown)"
-      age_h=0
-      while read -r _ name created; do
-        [ "$(owner "$name")" = "$run" ] && [ "$created" != - ] || continue
-        h=$(( (now - $(date -d "$created" +%s)) / 3600 )); [ "$h" -gt "$age_h" ] && age_h=$h
-      done <<<"$inventory"
-      if [ "$status" != completed ] && [ "$age_h" -lt 3 ]; then
-        say "run $run: $status on GitHub, $age_h h old: leaving it to its own teardown"; kept=$((kept + 1)); continue
+      age="$(age_h "$run" "$inventory")"
+      if [ "$status" != completed ] && [ "$age" -lt 3 ]; then
+        say "run $run: $status on GitHub, $age h old: leaving it to its own teardown"; kept=$((kept + 1)); continue
       fi
-      say "run $run: $status on GitHub, $age_h h old: deleting what it left"
-      # The cluster first: GKE deletes its node VMs, groups and firewall rules
-      # with it. Then the registry, the DNS, and the network last.
-      if gcloud container clusters describe "$c" --project "$p" --zone "$GKE_ZONE" >/dev/null 2>&1; then
-        gcloud container clusters delete "$c" --project "$p" --zone "$GKE_ZONE" --quiet
-      fi
-      gcloud artifacts repositories delete "$c" --project "$p" --location "$GKE_REGION" --quiet 2>/dev/null || true
-      if gcloud dns response-policies describe "$c" --project "$p" >/dev/null 2>&1; then
-        for rule in $(gcloud dns response-policies rules list "$c" --project "$p" --format='value(ruleName)'); do
-          gcloud dns response-policies rules delete "$rule" --response-policy "$c" --project "$p" --quiet
-        done
-        gcloud dns response-policies update "$c" --project "$p" --networks="" --quiet
-        gcloud dns response-policies delete "$c" --project "$p" --quiet
-      fi
-      for zone in $(gcloud dns managed-zones list --project "$p" --filter="name ~ ^$c-" --format='value(name)'); do
-        gcloud dns record-sets list --zone "$zone" --project "$p" --format='value(name,type)' | while read -r rname rtype; do
-          case "$rtype" in SOA|NS) continue ;; esac
-          gcloud dns record-sets delete "$rname" --type "$rtype" --zone "$zone" --project "$p" --quiet
-        done
-        gcloud dns managed-zones delete "$zone" --project "$p" --quiet
-      done
-      for fw in $(gcloud compute firewall-rules list --project "$p" --filter="network ~ /$c\$" --format='value(name)'); do
-        gcloud compute firewall-rules delete "$fw" --project "$p" --quiet
-      done
-      for route in $(gcloud compute routes list --project "$p" --filter="network ~ /$c\$ AND NOT name ~ ^default-route-" --format='value(name)'); do
-        gcloud compute routes delete "$route" --project "$p" --quiet
-      done
-      gcloud compute networks subnets delete "$c" --project "$p" --region "$GKE_REGION" --quiet 2>/dev/null || true
-      gcloud compute networks delete "$c" --project "$p" --quiet 2>/dev/null || true
-      for disk in $(gcloud compute disks list --project "$p" --filter="labels.goog-k8s-cluster-name=$c" --format='value(name,zone.basename())' | tr '\t' ':'); do
-        gcloud compute disks delete "${disk%%:*}" --zone "${disk#*:}" --project "$p" --quiet
-      done
+      say "run $run: $status on GitHub, $age h old: deleting what it left"
+      delete_run "$run"
       swept=$((swept + 1))
     done
     say "deleted what $swept run(s) left; $kept still running"
@@ -180,16 +250,11 @@ case "${1:-}" in
     after="$(what "$p" "$GKE_REGION")" left=""
     for run in $(while read -r _ name _; do owner "$name"; done <<<"$after" | grep -v '^$' | sort -u || true); do
       status="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq .status 2>/dev/null || echo unknown)"
-      age_h=0
-      while read -r _ name created; do
-        [ "$(owner "$name")" = "$run" ] && [ "$created" != - ] || continue
-        h=$(( (now - $(date -d "$created" +%s)) / 3600 )); [ "$h" -gt "$age_h" ] && age_h=$h
-      done <<<"$after"
-      [ "$status" != completed ] && [ "$age_h" -lt 3 ] && continue
-      while read -r kind name _; do
-        [ "$(owner "$name")" = "$run" ] && left="$left $kind/$name"
-      done <<<"$after"
+      age="$(age_h "$run" "$after")"
+      [ "$status" != completed ] && [ "$age" -lt 3 ] && continue
+      left="$left $(parts "$run" "$after" | awk '{print $1 "/" $2}' | tr '\n' ' ')"
     done
+    left="${left%% }"; [ -n "${left// /}" ] || left=""
     if [ -n "$left" ]; then echo "still there after the sweep:$left" >&2; exit 1; fi
     ;;
   cost)
@@ -218,5 +283,5 @@ for what, rate, h in rows:
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, sum(r * h for _, r, h in rows)))
 PY
     ;;
-  *) echo "usage: gke.sh <login|images|sweep|residue|leftovers|cost>" >&2; exit 2 ;;
+  *) echo "usage: gke.sh <login|images|sweep|drop|residue|leftovers|cost>" >&2; exit 2 ;;
 esac
