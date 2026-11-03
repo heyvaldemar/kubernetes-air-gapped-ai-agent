@@ -34,6 +34,11 @@ import zipfile
 
 API = "https://api.github.com"
 WINDOW_DAYS = 30
+# Jobs of the e2e run that are not a model. Their checks count in the run's
+# badges like any other job's, but they get no leaderboard row: the node-loss
+# drill prints measurements of its own, and from 2026-10-24 to 2026-11-02 it
+# had a row of question marks among the models (run 41447479555).
+NOT_MODELS = ("nodeloss", "gateway")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -113,7 +118,7 @@ def leaderboard(res):
     rows = {}
     for line in res["measured"]:
         job, sep, rest = line.partition(" · ")
-        if not sep:
+        if not sep or job in NOT_MODELS:
             continue
         name, _, value = rest.partition(": ")
         rows.setdefault(job, {})[name] = value
