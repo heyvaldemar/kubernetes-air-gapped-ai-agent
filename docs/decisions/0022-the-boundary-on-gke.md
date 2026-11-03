@@ -84,6 +84,8 @@ What changed:
 
 `tests/static/gke-sweep.sh` holds both sweeps to that against a Google Cloud and a Terraform made of files, nine cases, this run's among them: a state whose resources are gone is removed with no destroy; a destroy that cannot read its state is finished by name; a state younger than three hours is a run still going and is left alone; and whatever is still there afterwards fails. Static check `gke` runs it, with five plants.
 
+[41699633766](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/41699633766), by hand on main (2ff1069), the agent as the schedule runs it: its sweep met the same state of 40571490437, 34 resources in it and none of them in the project, and removed it with no destroy, with the four empty states of 2026-10-27 beside it; then all 63 checks passed, nothing was left behind, and its teardown removed its own state. About $0.19 for 0.67 h; p50 6.7 s a task on an AMD EPYC 9B14 again. The next scheduled run is the one that can make it weekly.
+
 ## Consequences
 
 - About $0.07 a run of the boundary alone (0.4 h) and about $0.25 with the agent (0.85 h, as long as the AWS run takes), at list prices read from the Cloud Billing Catalog API on 2026-10-27: the zonal cluster's $0.10 an hour, an e2-standard-2 at $0.067 or a c3d-standard-4 at $0.182, a 50 GB balanced disk and three private zones. GKE's free tier credits one zonal cluster's fee a month per billing account, which takes about a third off; the cost table and the budget count it as if it did not. Weekly, about $1.10 a month with the agent. These are estimates until the runs below measure them.
