@@ -21,9 +21,12 @@ name: Release Evidence
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 #
 # Started by hand with the tag and the run, after the release is published.
-# It refuses a run that is not this repository's e2e on main, green, for the
-# tag's commit or the one before it (a release commit is docs only, right
-# after a green one).
+# It refuses a run that is not this repository's e2e, green, for the tag's
+# commit or the one before it (a release commit is docs only, right after a
+# green one), on main or on a branch whose commit is on main now. The same
+# commit runs the same e2e: v1.4.0 was checked on its branch before the
+# fast-forward, and the next push cancelled the run on main. EVIDENCE.md says
+# when the run was not on main.
 on:
   workflow_dispatch:
     inputs:
@@ -67,17 +70,24 @@ jobs:
         run: |
           case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "not a release tag: $TAG"; exit 1 ;; esac
           case "$RUN" in *[!0-9]*|"") echo "not a run id: $RUN"; exit 1 ;; esac
-          read -r path branch conclusion head created < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" \
-            --jq '"\(.path) \(.head_branch) \(.conclusion) \(.head_sha) \(.created_at)"')
+          read -r path branch event conclusion head created < <(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN" \
+            --jq '"\(.path) \(.head_branch) \(.event) \(.conclusion) \(.head_sha) \(.created_at)"')
           tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)"
           parent="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag_sha" --jq '.parents[0].sha')"
-          echo "run $RUN: $path on $branch, $conclusion, commit $head; $TAG is $tag_sha, after $parent"
+          echo "run $RUN: $path on $branch by $event, $conclusion, commit $head; $TAG is $tag_sha, after $parent"
           [ "$path" = .github/workflows/e2e.yml ] || { echo "run $RUN is not the e2e workflow"; exit 1; }
-          [ "$branch" = main ] || { echo "run $RUN is not on main"; exit 1; }
+          if [ "$branch" != main ]; then
+            # main is ahead of the commit, or is the commit.
+            on_main="$(gh api "repos/$GITHUB_REPOSITORY/compare/$head...main" --jq .status)"
+            case "$on_main" in
+              ahead|identical) echo "run $RUN is on $branch; its commit is on main" ;;
+              *) echo "run $RUN is on $branch, and its commit is not on main ($on_main)"; exit 1 ;;
+            esac
+          fi
           [ "$conclusion" = success ] || { echo "run $RUN did not pass"; exit 1; }
           [ "$head" = "$tag_sha" ] || [ "$head" = "$parent" ] \
             || { echo "run $RUN checked $head, neither $TAG's commit nor the one before it"; exit 1; }
-          { echo "HEAD_SHA=$head"; echo "CREATED=$created"; } >> "$GITHUB_ENV"
+          { echo "HEAD_SHA=$head"; echo "CREATED=$created"; echo "BRANCH=$branch"; echo "EVENT=$event"; } >> "$GITHUB_ENV"
 
       - name: Every artifact of the run, with a manifest
         run: |
@@ -89,6 +99,12 @@ jobs:
             printf 'Every artifact of e2e run %s (https://github.com/%s/actions/runs/%s),\n' "$RUN" "$GITHUB_REPOSITORY" "$RUN"
             printf 'started %s on commit %s, downloaded and archived by\n' "$CREATED" "$HEAD_SHA"
             printf '.github/workflows/evidence.yml. scripts/release-numbers.py reads the same files.\n\n'
+            # A run on main says nothing more, so its archive keeps the bytes
+            # it had before branch runs were taken.
+            if [ "$BRANCH" != main ]; then
+              printf 'The run was started by %s on branch %s, not on main.\n' "$EVENT" "$BRANCH"
+              printf 'Its commit is on main.\n\n'
+            fi
             printf '```\n'
             (cd "out/$name" && find artifacts -type f | LC_ALL=C sort | xargs sha256sum)
             printf '```\n'
