@@ -68,3 +68,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/gke.sh leftovers | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # GKE keeps a disk made for a claim when the cluster goes, and its
+      # name says nothing of the run (ADR 24): one Vault's claim left, that
+      # no VM uses and older than three hours.
+      - name: Delete the disks Vault's claims left
+        run: ./scripts/gke.sh volumes sweep | tee -a "$GITHUB_STEP_SUMMARY"

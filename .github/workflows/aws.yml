@@ -256,7 +256,10 @@ jobs:
           GATEWAY_REPLICAS: ${{ env.WITH_HA == 'true' && '2' || '' }}
         run: |
           ./scripts/serve.sh
+          # Vault's volume (ADR 24): EKS makes no default StorageClass.
+          kubectl apply -f aws/storage-class.yaml
           ./scripts/tools.sh
+          ./scripts/aws.sh volumes 1
           ./scripts/gateway.sh install
           if [ "$WITH_HA" = true ]; then kubectl apply -f manifests/ha/disruption-budgets.yaml; fi
 
@@ -280,6 +283,14 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
         run: ./scripts/evals.sh
+
+      # The records credential from Vault (ADR 24), as on kind: who may get
+      # one, what the records service refuses, and three cut-offs.
+      - name: The records credential from Vault, and its revocation
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/vault.sh
 
       # It takes parts of the cluster down and puts them back.
       - name: Game day, parts of the boundary taken down while it serves
@@ -410,6 +421,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
+      # A volume the EBS CSI driver made is in no Terraform state, and only
+      # this job can reach the API (the operator's /32): Vault's claim goes
+      # before the destroy, whatever happened above (ADR 24).
+      - name: Vault's volume, released before the destroy
+        if: always() && env.AGENT == 'true' && steps.start.outputs.at != ''
+        run: |
+          ./scripts/vault.sh release
+          ./scripts/aws.sh volumes 0
+
   down:
     name: Destroy, look for residue, report the cost
     needs: up
@@ -468,7 +488,9 @@ jobs:
 
       - name: Nothing left behind
         if: steps.state.outputs.applied == 'true'
-        run: ./scripts/aws.sh residue
+        run: |
+          ./scripts/aws.sh residue
+          ./scripts/aws.sh volumes 0
 
       - name: What the run cost
         if: always() && needs.up.outputs.started != ''

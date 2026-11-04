@@ -98,10 +98,16 @@ resource "aws_eks_addon" "before_nodes" {
 }
 
 resource "aws_eks_addon" "after_nodes" {
-  for_each                    = toset(["coredns"])
+  for_each = {
+    coredns = null
+    # Vault's volume (ADR 24, storage.tf): every volume it makes carries the
+    # run's tags.
+    aws-ebs-csi-driver = jsonencode({ controller = { extraVolumeTags = local.volume_tags } })
+  }
   cluster_name                = aws_eks_cluster.this.name
-  addon_name                  = each.value
+  addon_name                  = each.key
+  configuration_values        = each.value
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
-  depends_on                  = [aws_eks_node_group.this]
+  depends_on                  = [aws_eks_node_group.this, aws_eks_pod_identity_association.ebs_csi]
 }

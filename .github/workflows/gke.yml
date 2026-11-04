@@ -292,6 +292,7 @@ jobs:
         run: |
           ./scripts/serve.sh
           ./scripts/tools.sh
+          ./scripts/gke.sh volumes 1
           ./scripts/gateway.sh install
 
       - name: What is inside, and that nothing else runs
@@ -321,6 +322,14 @@ jobs:
         run: ./scripts/evals.sh
 
       # It takes parts of the cluster down and puts them back.
+      # The records credential from Vault (ADR 24), as on kind: who may get
+      # one, what the records service refuses, and three cut-offs.
+      - name: The records credential from Vault, and its revocation
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/vault.sh
+
       - name: Game day, parts of the boundary taken down while it serves
         if: env.AGENT == 'true'
         env:
@@ -354,6 +363,15 @@ jobs:
             .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore
           retention-days: 90
+
+      # GKE keeps a disk made for a claim when the cluster goes, and only
+      # this job can reach the API (the operator's /32): Vault's claim goes
+      # before the destroy, whatever happened above (ADR 24).
+      - name: Vault's volume, released before the destroy
+        if: always() && env.AGENT == 'true' && steps.start.outputs.at != ''
+        run: |
+          ./scripts/vault.sh release
+          ./scripts/gke.sh volumes 0
 
   down:
     name: Destroy, look for residue, report the cost
@@ -410,7 +428,9 @@ jobs:
 
       - name: Nothing left behind
         if: steps.state.outputs.applied == 'true' && inputs.keep != 'true'
-        run: ./scripts/gke.sh residue
+        run: |
+          ./scripts/gke.sh residue
+          ./scripts/gke.sh volumes 0
 
       # Only once nothing is left: a state whose resources are gone is what
       # stopped the first scheduled run (41038578800).

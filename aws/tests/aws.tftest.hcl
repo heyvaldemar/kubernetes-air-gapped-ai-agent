@@ -126,11 +126,11 @@ run "every_role_carries_the_boundary" {
   command = plan
 
   assert {
-    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno] : r.permissions_boundary == var.iam_permissions_boundary])
+    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno, aws_iam_role.ebs_csi] : r.permissions_boundary == var.iam_permissions_boundary])
     error_message = "every role a run makes carries the account's permissions boundary"
   }
   assert {
-    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno] : startswith(r.name, "reference-platform")])
+    condition     = alltrue([for r in [aws_iam_role.cluster, aws_iam_role.node, aws_iam_role.kyverno, aws_iam_role.ebs_csi] : startswith(r.name, "reference-platform")])
     error_message = "every role is under the prefix the account's guardrails allow"
   }
 }
@@ -184,6 +184,25 @@ run "kyverno_reads_this_runs_images_as_itself" {
       ]
     ]))
     error_message = "Kyverno's role reads images; it can write, delete or change nothing"
+  }
+}
+
+# Vault's volume (ADR 24): the EBS CSI driver, as itself, and every volume
+# it makes tagged with the run, since no Terraform state holds one.
+run "vaults_volume_driver" {
+  command = plan
+
+  assert {
+    condition     = jsondecode(aws_iam_role.ebs_csi.assume_role_policy).Statement[0].Principal.Service == "pods.eks.amazonaws.com" && aws_iam_role_policy_attachment.ebs_csi.policy_arn == "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+    error_message = "the EBS CSI driver's role is assumed through EKS Pod Identity and holds AWS's policy for the driver, nothing more"
+  }
+  assert {
+    condition     = aws_eks_pod_identity_association.ebs_csi.namespace == "kube-system" && aws_eks_pod_identity_association.ebs_csi.service_account == "ebs-csi-controller-sa"
+    error_message = "the role goes to the driver's controller alone"
+  }
+  assert {
+    condition     = jsondecode(aws_eks_addon.after_nodes["aws-ebs-csi-driver"].configuration_values).controller.extraVolumeTags["airgap.heyvaldemar.com/cluster"] == var.cluster_name && jsondecode(aws_eks_addon.after_nodes["aws-ebs-csi-driver"].configuration_values).controller.extraVolumeTags["airgap.heyvaldemar.com/project"] == "kubernetes-air-gapped-ai-agent"
+    error_message = "every volume the driver makes carries the run's cluster and the project, for residue and the sweep to find"
   }
 }
 

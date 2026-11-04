@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vault.sh <install|unseal|keys> - Vault Community inside the boundary, the
+# vault.sh <install|unseal|keys|release> - Vault Community inside the boundary, the
 # issuer of the records credential (ADR 24). scripts/tools.sh runs install
 # after it applies the manifests.
 #
@@ -13,6 +13,9 @@
 #   unseal   after Vault's pod restarted: three of the shares again
 #   keys     Vault's public key set into the records service's ConfigMap
 #            again, after a rotation
+#   release  before a cloud cluster is destroyed: Vault and its claim
+#            deleted, and the volume behind it gone, which a destroy would
+#            leave (no Terraform state holds it)
 #
 # The CA's key, the certificate's key, the shares and the operator's token
 # stay in .cache/airgap/vault/ on this machine, mode 600, and are never
@@ -46,11 +49,29 @@ tls() {
 
 case "${1:-}" in
   install)
+    # Vault's volume comes from the cluster's default StorageClass: kind's,
+    # GKE's, or aws/storage-class.yaml on EKS. With none, the pod would wait
+    # for ever; say so now.
+    sc="$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name} ({.provisioner}) {end}')"
+    [ -n "$sc" ] || { echo "vault: the cluster has no default StorageClass, so Vault's volume would never be made (ADR 24)" >&2; exit 1; }
+    say "Vault's volume from the default StorageClass: ${sc% }"
     tls
     python3 "$ROOT/scripts/vault_api.py" install
+    say "Vault's claim: $(kubectl -n vault get pvc data-vault-0 -o jsonpath='{.spec.storageClassName}, {.status.capacity.storage}, volume {.spec.volumeName}')"
+    ;;
+  release)
+    if ! kubectl get namespace vault >/dev/null 2>&1; then say "no Vault here: nothing to release"; exit 0; fi
+    pvs="$(kubectl -n vault get pvc -o jsonpath='{.items[*].spec.volumeName}')"
+    kubectl -n vault delete statefulset vault --ignore-not-found --cascade=foreground --timeout=180s >/dev/null
+    kubectl -n vault delete pvc --all --timeout=180s >/dev/null
+    for pv in $pvs; do
+      kubectl wait --for=delete "pv/$pv" --timeout=300s >/dev/null 2>&1 \
+        || { kubectl get pv "$pv" -o wide >&2 || true; echo "vault: $pv still there after 300 s" >&2; exit 1; }
+    done
+    say "Vault and its claim deleted, and the volume behind it gone: ${pvs:-none}"
     ;;
   unseal|keys)
     python3 "$ROOT/scripts/vault_api.py" "$1"
     ;;
-  *) echo "usage: vault.sh <install|unseal|keys>" >&2; exit 2 ;;
+  *) echo "usage: vault.sh <install|unseal|keys|release>" >&2; exit 2 ;;
 esac

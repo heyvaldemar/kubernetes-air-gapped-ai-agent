@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aws.sh <repositories|login|images|sweep|residue|cost> - the parts of the AWS
+# aws.sh <repositories|login|images|sweep|volumes|residue|cost> - the parts of the AWS
 # run (ADR 18) that are not Terraform. .github/workflows/aws.yml calls them;
 # each reads the environment the workflow sets: AWS_REGION, TF_STATE_BUCKET,
 # CLUSTER (the run's cluster name), and REGISTRY, the account's ECR.
@@ -19,6 +19,10 @@
 #   residue  after the destroy, look for anything still tagged with the run's
 #            cluster, or named after it: none is the only passing answer
 #   cost     what the run cost, from its length and list prices
+#   volumes [N]  the EBS volumes the driver made for this run (ADR 24),
+#            found by the run's tag: id, state, type, size, encrypted. With
+#            N, there must be exactly N, each gp3 and encrypted: 1 once
+#            Vault is up, 0 once its claim is released and after the destroy
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX=airgap-runs
@@ -77,6 +81,35 @@ case "${1:-}" in
       say "run $run: destroyed"; swept=$((swept + 1))
     done
     say "swept $swept earlier run(s)"
+    # A volume the EBS CSI driver made is in no state (ADR 24): one an
+    # earlier run left, no longer attached and more than three hours old,
+    # found by the project's tag the driver writes.
+    vols=0
+    # shellcheck disable=SC2016  # the backticks are JMESPath's, not the shell's
+    while read -r vol cluster created; do
+      [ -n "$vol" ] || continue
+      [ "$cluster" = "${CLUSTER:-}" ] && continue
+      [ $(( (now - $(date -d "$created" +%s)) / 3600 )) -ge 3 ] || continue
+      say "volume $vol of $cluster, left since $created: deleting"
+      aws ec2 delete-volume --volume-id "$vol"; vols=$((vols + 1))
+    done < <(aws ec2 describe-volumes --filters "Name=tag:airgap.heyvaldemar.com/project,Values=kubernetes-air-gapped-ai-agent" "Name=status,Values=available" \
+               --query 'Volumes[].[VolumeId, Tags[?Key==`airgap.heyvaldemar.com/cluster`]|[0].Value, CreateTime]' --output text | tr '\t' ' ')
+    say "deleted $vols volume(s) earlier runs left"
+    ;;
+  volumes)
+    : "${CLUSTER:?}" "${AWS_REGION:?}"
+    want="${2:-}" list="$(mktemp)"
+    aws ec2 describe-volumes --filters "Name=tag:airgap.heyvaldemar.com/cluster,Values=$CLUSTER" \
+      --query 'Volumes[].{id: VolumeId, state: State, type: VolumeType, size_gib: Size, encrypted: Encrypted}' --output json >"$list"
+    python3 - "$list" "$want" "$CLUSTER" <<'PY'
+import json, sys
+vols, want, cluster = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+for v in vols:
+    print("  %(id)s  %(state)s  %(type)s  %(size_gib)s GiB  encrypted=%(encrypted)s" % v)
+print("== %d EBS volume(s) tagged airgap.heyvaldemar.com/cluster=%s" % (len(vols), cluster))
+if want and (len(vols) != int(want) or not all(v["type"] == "gp3" and v["encrypted"] for v in vols)):
+    sys.exit("expected %s, each gp3 and encrypted" % want)
+PY
     ;;
   residue)
     : "${CLUSTER:?}" "${AWS_REGION:?}"
@@ -167,5 +200,5 @@ for what, rate, h in rows:
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, sum(r * h for _, r, h in rows)))
 PY
     ;;
-  *) echo "usage: aws.sh <repositories|login|images|sweep|residue|cost>" >&2; exit 2 ;;
+  *) echo "usage: aws.sh <repositories|login|images|sweep|volumes|residue|cost>" >&2; exit 2 ;;
 esac
