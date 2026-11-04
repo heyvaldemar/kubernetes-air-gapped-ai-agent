@@ -97,9 +97,12 @@ def vault(run):
     for line in res.get("measured", []):
         if line.startswith(words):
             print("  " + line)
-    vault_checks = [c for c in res["checks"] if any(w in c["name"] for w in ("Vault", "credential", "records service", "records tool"))]
-    print("\n%d of %d checks on the records credential passed" % (sum(c["passed"] for c in vault_checks), len(vault_checks)))
-    for c in vault_checks:
+    # The gateway job's checks are its own and people.sh's and vault.sh's
+    # and the drills' after it, in one file: all of them, and any that failed.
+    checks = res["checks"]
+    print("\n%d of %d checks in the gateway job passed (tests/e2e/vault.sh prints its own count in the job's log)"
+          % (sum(c["passed"] for c in checks), len(checks)))
+    for c in checks:
         if not c["passed"]:
             print("  FAILED  " + c["name"])
 
