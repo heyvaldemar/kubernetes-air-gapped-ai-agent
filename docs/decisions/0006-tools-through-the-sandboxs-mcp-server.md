@@ -1,6 +1,6 @@
 # 6. Tools through the sandbox's MCP server, with arguments held by schema
 
-- Status: accepted
+- Status: accepted; amended by [ADR 24](0024-a-one-minute-records-credential-from-vault.md), which replaces the records service's key with a credential from Vault that lives a minute
 - Date: 2026-10-18
 
 ## Context

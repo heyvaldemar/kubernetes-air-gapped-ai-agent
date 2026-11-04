@@ -1,0 +1,31 @@
+{
+ "_comment": "What scripts/vault.sh install writes into Vault (ADR 24). Static check vault holds it: one service account, Vault's audience, and no TTL above the records service's limit.",
+ "kubernetes_role": {
+  "name": "mcp-server",
+  "bound_service_account_names": ["mcp-server"],
+  "bound_service_account_namespaces": ["mcp"],
+  "audience": "vault.boundary.heyvaldemar.com",
+  "alias_name_source": "serviceaccount_name",
+  "token_policies": ["records-caller"],
+  "token_no_default_policy": true,
+  "token_type": "service",
+  "token_ttl": "60s",
+  "token_max_ttl": "60s",
+  "token_num_uses": 1
+ },
+ "oidc_issuer": "https://vault.vault.svc.cluster.local:8200",
+ "key": {
+  "name": "records",
+  "algorithm": "RS256",
+  "rotation_period": "24h",
+  "verification_ttl": "1h",
+  "allowed_client_ids": ["records-api"]
+ },
+ "role": {
+  "name": "records-api",
+  "key": "records",
+  "client_id": "records-api",
+  "ttl": "60s",
+  "scope": "records:read outbox:send"
+ }
+}

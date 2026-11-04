@@ -1,0 +1,16 @@
+# a real Vault image, 2.2.0, that the bundle never carried: only 2.2.1 is in
+# airgap/images.txt (ADR 24)
+# expect: one the bundle carried
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vault-not-carried
+  namespace: inference
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 100, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: vault
+      image: docker.io/hashicorp/vault:2.2.0@sha256:e0acd3c681bdf57f002d7214e5d050b876e1704678005c6b0406dd96a65be919
+      command: [vault, version]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}

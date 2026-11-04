@@ -24,8 +24,11 @@ request is checked in this order, and the first failure answers it:
      tool's input schema, the result capped and stripped of control
      characters.
 
-The credential the records tool needs is mounted here and nowhere else: an
-agent asks for a record, this server fetches it with a key the agent never
+The credential the records tool needs is held here and nowhere else (ADR
+24): a JWT Vault issues for the records service's audience, valid a minute,
+which this server gets by logging in to Vault with a token of its own for
+Vault's audience, and asks for again 15 seconds before it expires. An agent
+asks for a record; this server fetches it with a credential the agent never
 holds. Every decision is one JSON line on stdout, with the caller's
 ServiceAccount and pod and the person it acted for: the audit trail of what
 each agent tried, and for whom.
@@ -50,7 +53,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 PROTOCOL = "2026-07-28"
 SERVER_INFO = {"name": "boundary-mcp", "version": "1.0.0"}
 POLICY_PATH = os.environ.get("MCP_POLICY", "/etc/mcp/policy.json")
-RECORDS_KEY = os.environ.get("RECORDS_KEY_FILE", "/var/run/secrets/records/key")
+VAULT_ADDR = os.environ.get("VAULT_ADDR", "https://vault.vault.svc.cluster.local:8200")
+VAULT_CACERT = os.environ.get("VAULT_CACERT", "/etc/vault/ca.crt")
+VAULT_TOKEN_FILE = os.environ.get("VAULT_TOKEN_FILE", "/var/run/secrets/vault/token")
+VAULT_ROLE = "mcp-server"
+RECORDS_ROLE = "records-api"
+REFRESH_BEFORE = 15
 REPORT_URL = os.environ.get("REPORT_URL", "http://tool-gateway.tools.svc.cluster.local:9898/")
 RECORDS_URL = os.environ.get("RECORDS_URL", "http://records-api.corp.svc.cluster.local:8080")
 DOCUMENTS_DIR = os.environ.get("DOCUMENTS_DIR", "/etc/mcp/documents")
@@ -70,12 +78,71 @@ def load_policy(path=POLICY_PATH):
 # --- the tools and resources this server has --------------------------------
 # Having a tool is not granting it: policy.json decides who sees which.
 
+class NoCredential(OSError):
+    """Vault gave no records credential: sealed, unreachable, or refusing
+    this server. The records tool is then off, never open."""
+
+
+_credential = {"token": None, "exp": 0.0}
+_credential_lock = threading.Lock()
+
+
+def _vault(method, path, body=None, token=None):
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token:
+        headers["X-Vault-Token"] = token
+    req = urllib.request.Request(VAULT_ADDR + "/v1/" + path, method=method, headers=headers,
+                                 data=json.dumps(body).encode() if body is not None else None)
+    ctx = ssl.create_default_context(cafile=VAULT_CACERT)
+    try:
+        with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT, context=ctx) as r:
+            return json.loads(r.read(64 * 1024))
+    except (OSError, ValueError) as e:
+        raise NoCredential(type(e).__name__) from None
+
+
+def records_credential():
+    """A JWT for the records service, from Vault: a login with this server's
+    token for Vault's audience gives a Vault token that lives a minute and
+    serves once, and that once reads the credential. Kept until
+    REFRESH_BEFORE seconds before it expires, never written anywhere."""
+    with _credential_lock:
+        if _credential["token"] and _credential["exp"] - time.time() > REFRESH_BEFORE:
+            return _credential["token"]
+        with open(VAULT_TOKEN_FILE, encoding="utf-8") as f:
+            login = _vault("POST", "auth/kubernetes/login", {"role": VAULT_ROLE, "jwt": f.read().strip()})
+        try:
+            data = _vault("GET", "identity/oidc/token/" + RECORDS_ROLE, token=login["auth"]["client_token"])["data"]
+            token = data["token"]
+            exp = json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "==="))["exp"]
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise NoCredential("unexpected answer") from None
+        _credential.update(token=token, exp=float(exp))
+        return token
+
+
+def _records(req, limit):
+    """A request to the records service with its credential. A 401 means
+    the credential is no longer one it takes (its key set changed, or Vault
+    issued one it refuses): forget it and try once with a new one."""
+    for attempt in (1, 2):
+        req.add_header("Authorization", "Bearer " + records_credential())
+        try:
+            with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
+                return r.read(limit).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            if e.code != 401 or attempt == 2:
+                raise
+            e.close()
+            with _credential_lock:
+                _credential.update(token=None, exp=0.0)
+
+
 def _get(url, method="GET", key=False):
     headers = {"Accept": "application/json"}
-    if key:
-        with open(RECORDS_KEY, encoding="utf-8") as f:
-            headers["Authorization"] = "Bearer " + f.read().strip()
     req = urllib.request.Request(url, method=method, headers=headers)
+    if key:
+        return _records(req, MAX_OUTPUT * 2)
     with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
         return r.read(MAX_OUTPUT * 2).decode("utf-8", "replace")
 
@@ -96,14 +163,11 @@ def records_lookup(args):
 
 def send_email(args):
     # The schema has already held the recipient to @acme.example; the records
-    # service keeps the outbox, so what was sent can be read back.
+    # service logs every email it queues, so what was sent can be read back.
     body = json.dumps({"to": args["to"], "subject": args["subject"], "body": args["body"]}).encode()
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    with open(RECORDS_KEY, encoding="utf-8") as f:
-        headers["Authorization"] = "Bearer " + f.read().strip()
     req = urllib.request.Request(RECORDS_URL + "/outbox", data=body, method="POST", headers=headers)
-    with urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT) as r:
-        return r.read(MAX_OUTPUT).decode("utf-8", "replace")
+    return _records(req, MAX_OUTPUT)
 
 
 def delete_record(args):

@@ -147,6 +147,16 @@ spec:
               app: embed
       ports:
         - {protocol: TCP, port: 8080}
+    # Vault, for the records credential (ADR 24).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - {protocol: TCP, port: 8200}
 ---
 # The embedding model answers the MCP server alone, and starts nothing of its
 # own. The agents do not reach it: what they may find in the documents is
@@ -226,3 +236,37 @@ spec:
               boundary.heyvaldemar.com/agents: "true"
       ports:
         - {protocol: TCP, port: 8080}
+---
+# Vault answers the MCP server alone (ADR 24), and starts nothing but its
+# TokenReview calls to the API server, which scripts/tools.sh writes, since
+# the rule names the API server's address. It needs no DNS: the API server
+# is named by address in its Kubernetes auth.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: vault
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-from-mcp-server
+  namespace: vault
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mcp
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-server
+      ports:
+        - {protocol: TCP, port: 8200}

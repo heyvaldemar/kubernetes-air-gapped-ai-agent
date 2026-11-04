@@ -1,6 +1,7 @@
-# Another team's service that wants a key (records_api.py). The MCP server
-# holds the key and calls it for an agent that is granted the records tool;
-# no agent can reach it, and none holds the key.
+# Another team's service that wants a credential (records_api.py): a JWT
+# from Vault that lives a minute, which only the MCP server can get (ADR 24).
+# The service checks it against Vault's public keys, a file
+# scripts/vault.sh keys writes, and calls nobody. No agent can reach it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,15 +49,15 @@ spec:
               drop: [ALL]
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
-            - {name: records-key, mountPath: /var/run/secrets/records, readOnly: true}
+            - {name: vault-keys, mountPath: /etc/records/keys, readOnly: true}
       volumes:
         - name: app
           configMap:
             name: records-api
-        - name: records-key
-          secret:
-            secretName: records-api-key
-            defaultMode: 0440
+        # Vault's published key set, public, written by scripts/vault.sh.
+        - name: vault-keys
+          configMap:
+            name: records-api-keys
 ---
 apiVersion: v1
 kind: Service

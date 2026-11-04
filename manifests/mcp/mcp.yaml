@@ -3,9 +3,12 @@
 #
 # It parses whatever a fooled agent sends, so it runs under the restricted
 # Pod Security profile; it does not run on gVisor here, and neither do the
-# agents (ADR 6: the sandbox repository is where that isolation is). It holds the one credential its tools need, the records key,
-# and its own Kubernetes token can do one thing: ask the API server whether
-# an agent's token is genuine (system:auth-delegator, TokenReview).
+# agents (ADR 6: the sandbox repository is where that isolation is). The one
+# credential its tools need, the records service's, it gets from Vault and
+# holds a minute at a time (ADR 24), logging in with a token of its own for
+# Vault's audience. Its Kubernetes token can do one thing: ask the API
+# server whether an agent's token is genuine (system:auth-delegator,
+# TokenReview).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -58,6 +61,7 @@ spec:
           env:
             - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
             - {name: MCP_POLICY, value: /app/policy.json}
+            - {name: VAULT_ADDR, value: "https://vault.vault.svc.cluster.local:8200"}
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
@@ -74,7 +78,8 @@ spec:
               drop: [ALL]
           volumeMounts:
             - {name: app, mountPath: /app, readOnly: true}
-            - {name: records-key, mountPath: /var/run/secrets/records, readOnly: true}
+            - {name: vault-token, mountPath: /var/run/secrets/vault, readOnly: true}
+            - {name: vault-ca, mountPath: /etc/vault, readOnly: true}
             - {name: documents, mountPath: /etc/mcp/documents, readOnly: true}
       volumes:
         - name: app
@@ -84,11 +89,20 @@ spec:
         - name: documents
           configMap:
             name: mcp-documents
-        # Created by scripts/tools.sh, never in Git.
-        - name: records-key
-          secret:
-            secretName: records-api-key
-            defaultMode: 0440
+        # Its token for Vault's audience alone: the API server, this server
+        # and the gateway each refuse it, and Vault's role takes it from
+        # this service account only (ADR 24). The kubelet rotates it.
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: vault.boundary.heyvaldemar.com
+                  expirationSeconds: 600
+        # The CA of Vault's certificate, made for this run by scripts/vault.sh.
+        - name: vault-ca
+          configMap:
+            name: vault-ca
 ---
 apiVersion: v1
 kind: Service
