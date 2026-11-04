@@ -25,7 +25,9 @@ jobs:
   verify:
     name: Static checks, and that each can fail
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 14 minutes at 664b08d (run 41886690565), past 15 once the plants for
+    # Vault's volume ran the AWS and GKE Terraform tests (41900337130).
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
