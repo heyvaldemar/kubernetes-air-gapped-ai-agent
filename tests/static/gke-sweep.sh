@@ -22,6 +22,10 @@
 #   G  leftovers deletes what a finished run left, and touches no state
 #   H  leftovers leaves a run still going alone
 #   I  leftovers fails when something of a finished run is still there
+#   J  volumes sweep deletes a disk Vault's claim left (ADR 24), unused and
+#      older than three hours, and keeps one in use and one younger
+#   K  volumes 0 fails while a disk made for Vault's claim is there, and
+#      volumes 1 passes with it
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 T="$(mktemp -d)"
@@ -90,6 +94,17 @@ deletes = {
     ("compute", "networks", "delete"): "network",
     ("compute", "disks", "delete"): "disk",
 }
+# The disks made for claims (ADR 24): pvc-disks holds them as gcloud's JSON
+# would, name, zone, users, creation time and the provisioner's description.
+pvc_path = os.path.join(W, "pvc-disks")
+pvc = __import__("json").load(open(pvc_path)) if os.path.exists(pvc_path) else []
+if tuple(words[:3]) == ("compute", "disks", "list") and "created-for" in opts.get("--filter", ""):
+    print(__import__("json").dumps(pvc)); sys.exit(0)
+if tuple(words[:3]) == ("compute", "disks", "delete") and words[3].startswith("pvc-"):
+    left = [d for d in pvc if d["name"] != words[3]]
+    if len(left) == len(pvc) or "disk %s" % words[3] in refuse:
+        sys.exit("fake gcloud: cannot delete disk %s" % words[3])
+    open(pvc_path, "w").write(__import__("json").dumps(left)); sys.exit(0)
 for n in (4, 3):
     key = tuple(words[:n])
     if key in lists:
@@ -231,6 +246,35 @@ world I; made 999 0; echo completed >"$W/gh/999"; echo "network airgap-999" >"$W
 if [ "$(rc)" != 0 ] && said "still there after the sweep"; then
   pass "I: leftovers fails when something of a finished run is still there"
 else fail "I: leftovers passed with a finished run's network still there (rc $(rc)): $(why)"; fi
+
+# pvc_disk <name> <hours ago> <used|unused> [namespace]: a disk made for a
+# claim, as gcloud lists it
+pvc_disk() {
+  python3 - "$W/pvc-disks" "$1" "$(ago "$2")" "$3" "${4:-vault}" <<'PY'
+import json, os, sys
+path, name, created, use, ns = sys.argv[1:]
+disks = json.load(open(path)) if os.path.exists(path) else []
+desc = json.dumps({"kubernetes.io/created-for/pv/name": name, "kubernetes.io/created-for/pvc/name": "data-vault-0",
+                   "kubernetes.io/created-for/pvc/namespace": ns, "storage.gke.io/created-by": "pd.csi.storage.gke.io"})
+disks.append({"name": name, "zone": "us-central1-a", "sizeGb": "1", "type": "pd-balanced", "creationTimestamp": created,
+              "description": desc, **({"users": ["projects/p/zones/z/instances/gke-airgap-1-node"]} if use == "used" else {})})
+json.dump(disks, open(path, "w"))
+PY
+}
+disks_left() { python3 -c 'import json, sys; print(" ".join(sorted(d["name"] for d in json.load(open(sys.argv[1])))))' "$W/pvc-disks"; }
+
+world J; pvc_disk pvc-old 30 unused; pvc_disk pvc-used 30 used; pvc_disk pvc-young 1 unused; pvc_disk pvc-other 30 unused records
+"$BASH" "$ROOT/scripts/gke.sh" volumes sweep >"$W/out" 2>&1; echo $? >"$W/rc"
+if [ "$(rc)" = 0 ] && [ "$(disks_left)" = "pvc-other pvc-used pvc-young" ] && said "deleted 1 disk(s)"; then
+  pass "J: volumes sweep deletes the unused disk Vault's claim left three hours ago, and keeps the one in use, the young one and another namespace's"
+else fail "J: volumes sweep kept or took the wrong disks (rc $(rc), left: $(disks_left)): $(why)"; fi
+
+world K; pvc_disk pvc-vault 0 used
+"$BASH" "$ROOT/scripts/gke.sh" volumes 0 >"$W/out" 2>&1; echo $? >"$W/rc"; zero="$(rc)"
+"$BASH" "$ROOT/scripts/gke.sh" volumes 1 >"$W/out" 2>&1; echo $? >"$W/rc"
+if [ "$zero" != 0 ] && [ "$(rc)" = 0 ] && said "pvc-vault"; then
+  pass "K: volumes 0 fails while Vault's disk is there, and volumes 1 passes and lists it"
+else fail "K: volumes counted Vault's disk wrong (0: rc $zero, 1: rc $(rc)): $(why)"; fi
 
 printf '%s\n' "${results[@]}"
 exit "$failed"

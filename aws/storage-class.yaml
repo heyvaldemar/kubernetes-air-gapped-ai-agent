@@ -1,0 +1,19 @@
+# The cluster's default StorageClass on AWS (ADR 24), for Vault's volume:
+# gp3 through the EBS CSI driver (aws/storage.tf), encrypted, made only once
+# a pod is scheduled so it lands in that pod's zone, and deleted with its
+# claim. EKS makes no default class; kind and GKE keep their own, so
+# manifests/vault/vault.yaml names none. .github/workflows/aws.yml applies
+# this before the tool side; static check aws holds each field.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3-encrypted
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: false

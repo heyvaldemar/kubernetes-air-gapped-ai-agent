@@ -120,7 +120,7 @@ check_kubeconform() {
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml out/embed.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/ha/disruption-budgets.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml out/embed.yaml aws/storage-class.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/ha/disruption-budgets.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
@@ -512,6 +512,30 @@ check_aws() {
   grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AWS_VALIDATION_ENABLED == 'true'))" .github/workflows/aws.yml \
     || { echo "the AWS run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
   if grep -n 'secrets\.' .github/workflows/aws.yml; then echo "the AWS run reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
+  # Vault's volume (ADR 24): the cluster's default class, gp3 and encrypted,
+  # deleted with its claim; and the claim released before the destroy, since
+  # no Terraform state holds the volume, then none left after it.
+  python3 - <<'PY' || ok=1
+import re, sys
+sc = open("aws/storage-class.yaml").read()
+bad = [what for what, pat in (
+    ("the EBS CSI driver", r"(?m)^provisioner: ebs\.csi\.aws\.com$"),
+    ("gp3", r'(?m)^  type: gp3$'),
+    ("encrypted", r'(?m)^  encrypted: "true"$'),
+    ("made where its pod is scheduled", r"(?m)^volumeBindingMode: WaitForFirstConsumer$"),
+    ("deleted with its claim", r"(?m)^reclaimPolicy: Delete$"),
+    ("the cluster's default", r'(?m)^    storageclass\.kubernetes\.io/is-default-class: "true"$')) if not re.search(pat, sc)]
+wf = open(".github/workflows/aws.yml").read()
+if "kubectl apply -f aws/storage-class.yaml" not in wf:
+    bad.append("applied before the tool side")
+release = wf.partition("- name: Vault's volume, released before the destroy")[2].partition("- name:")[0]
+if "if: always()" not in release or "./scripts/vault.sh release" not in release or "./scripts/aws.sh volumes 0" not in release:
+    bad.append("Vault's claim released before the destroy, whatever happened, and no volume left")
+if wf.partition("  down:")[2].count("./scripts/aws.sh volumes 0") != 1:
+    bad.append("no volume left after the destroy")
+if bad:
+    print("Vault's volume on AWS: not " + "; not ".join(bad)); sys.exit(1)
+PY
   if ! command -v terraform >/dev/null; then echo "check aws needs terraform"; return 1; fi
   if ! out="$(cd aws && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then
     echo "aws/'s tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1
@@ -544,6 +568,23 @@ check_gke() {
   if grep -n 'secrets\.' .github/workflows/gke.yml .github/workflows/gke-sweep.yml; then echo "a GKE workflow reads a stored secret; it has GitHub's OIDC token"; ok=1; fi
   grep -qF 'run: ./scripts/gke.sh drop' .github/workflows/gke.yml \
     || { echo "the GKE run's teardown leaves its state behind, for the next run to trip on (41038578800)"; ok=1; }
+  # GKE keeps a disk made for a claim when the cluster goes (ADR 24): Vault's
+  # claim is released before the destroy, whatever happened, none is left
+  # after it, and the daily sweep takes one a run left.
+  python3 - <<'PY' || ok=1
+import sys
+wf = open(".github/workflows/gke.yml").read()
+release = wf.partition("- name: Vault's volume, released before the destroy")[2].partition("- name:")[0]
+bad = []
+if "if: always()" not in release or "./scripts/vault.sh release" not in release or "./scripts/gke.sh volumes 0" not in release:
+    bad.append("Vault's claim released before the destroy, whatever happened, and no disk left")
+if wf.partition("  down:")[2].count("./scripts/gke.sh volumes 0") != 1:
+    bad.append("no disk left after the destroy")
+if "./scripts/gke.sh volumes sweep" not in open(".github/workflows/gke-sweep.yml").read():
+    bad.append("the daily sweep taking a disk a run left")
+if bad:
+    print("Vault's disk on GKE: not " + "; not ".join(bad)); sys.exit(1)
+PY
   # gke.sh needs bash 4 or later (inherit_errexit), as the runner has.
   local b sweep_bash=""
   for b in bash /opt/homebrew/bin/bash /usr/local/bin/bash; do

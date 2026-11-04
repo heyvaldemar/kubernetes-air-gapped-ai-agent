@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gke.sh <login|images|sweep|drop|residue|leftovers|cost> - the parts of the GKE
+# gke.sh <login|images|sweep|drop|residue|leftovers|volumes|cost> - the parts of the GKE
 # run (ADR 22) that are not Terraform. .github/workflows/gke.yml and
 # gke-sweep.yml call them; each reads the environment the workflow sets:
 # GKE_PROJECT, GKE_REGION, GKE_STATE_BUCKET, CLUSTER (the run's cluster
@@ -30,6 +30,15 @@
 #              older than three hours. It reads no state and touches none:
 #              the next run's sweep removes the state of what it deleted
 #   cost       what the run cost, from its length and list prices
+#   volumes N  the disks made for Vault's claim (ADR 24), found by the
+#              claim the provisioner writes in a disk's description, which
+#              names no run: name, zone, size, type, whether a VM uses it,
+#              its labels. There must be exactly N: 1 once Vault is up, 0
+#              after the destroy, since GKE keeps such a disk when the
+#              cluster goes
+#   volumes sweep  delete such a disk that no VM uses and that is more than
+#              three hours old, which only a run that never released it
+#              can have left; fail if one is still there after
 set -euo pipefail
 # A gcloud that fails inside $(what ...) must stop the script, not read as
 # "nothing there".
@@ -283,5 +292,43 @@ for what, rate, h in rows:
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, sum(r * h for _, r, h in rows)))
 PY
     ;;
-  *) echo "usage: gke.sh <login|images|sweep|drop|residue|leftovers|cost>" >&2; exit 2 ;;
+  volumes)
+    : "${GKE_PROJECT:?}"
+    want="${2:?volumes needs a count or sweep}" list="$(mktemp)"
+    gcloud compute disks list --project "$GKE_PROJECT" --filter='description ~ created-for/pvc/namespace' \
+      --format='json(name,zone.basename(),users,labels,sizeGb,type.basename(),creationTimestamp,description)' >"$list"
+    # The disks Vault's claim left: their description is the provisioner's
+    # JSON, naming the claim's namespace.
+    vault="$(python3 - "$list" <<'PY'
+import json, sys
+for d in json.load(open(sys.argv[1])):
+    try:
+        ns = json.loads(d.get("description") or "{}").get("kubernetes.io/created-for/pvc/namespace")
+    except ValueError:
+        continue
+    if ns == "vault":
+        print(" ".join([d["name"], d.get("zone", "-"), str(d.get("sizeGb", "-")), d.get("type", "-"), d.get("creationTimestamp", "-"),
+                        "used" if d.get("users") else "unused",
+                        ",".join("%s=%s" % kv for kv in sorted((d.get("labels") or {}).items())) or "no-labels"]))
+PY
+)"
+    if [ "$want" = sweep ]; then
+      now=$(date +%s) deleted=0 left=""
+      while read -r name zone _ _ created use _; do
+        [ -n "$name" ] && [ "$use" = unused ] || continue
+        [ $(( (now - $(epoch "$created")) / 3600 )) -ge 3 ] || continue
+        if gcloud compute disks delete "$name" --zone "$zone" --project "$GKE_PROJECT" --quiet; then
+          say "disk $name, left by Vault's claim since $created: deleted"; deleted=$((deleted + 1))
+        else left="$left $name"; fi
+      done <<<"$vault"
+      say "deleted $deleted disk(s) Vault's claims left"
+      if [ -n "$left" ]; then echo "still there after the sweep:$left" >&2; exit 1; fi
+      exit 0
+    fi
+    [ -z "$vault" ] || while read -r line; do printf '  %s\n' "$line"; done <<<"$vault"
+    n=$(grep -c . <<<"$vault" || true)
+    say "$n disk(s) made for Vault's claim in $GKE_PROJECT"
+    [ "$n" = "$want" ] || { echo "expected $want" >&2; exit 1; }
+    ;;
+  *) echo "usage: gke.sh <login|images|sweep|drop|residue|leftovers|volumes|cost>" >&2; exit 2 ;;
 esac

@@ -16,10 +16,12 @@ A model outside the boundary comes from a frontier run (ADR 14), whose
 artifacts are named frontier-results-<model>, and is priced by its tokens.
 
     scripts/release-numbers.py 41700000000 vault
+    scripts/release-numbers.py 41700000000 vault aws
 
-prints instead what the gateway job measured of the records credential from
-Vault (ADR 24, tests/e2e/vault.sh): its lifetime, revocation, and Vault's
-cost, with the checks behind them.
+prints instead what tests/e2e/vault.sh measured of the records credential
+from Vault (ADR 24): its lifetime, revocation, and Vault's cost, with the
+checks behind them; from the e2e run's gateway job, or from an AWS or GKE
+run (aws, gke).
 """
 import collections
 import json
@@ -87,20 +89,22 @@ def grab(value, pattern):
     return hit.groups() if hit else ("?",) * re.compile(pattern).groups
 
 
-def vault(run):
+def vault(run, where="gateway"):
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run(["gh", "run", "download", run, "-R", REPO, "-n", "e2e-results-gateway", "-D", d],
+        subprocess.run(["gh", "run", "download", run, "-R", REPO, "-n", "e2e-results-" + where, "-D", d],
                        check=True, stdout=subprocess.DEVNULL)
-        res = json.load(open(os.path.join(d, "e2e-results.json")))
+        found = {f: os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs}
+        res = json.load(open(found["e2e-results.json"]))
     words = ("records credential", "revocation", "Vault", "Kubernetes' shortest")
-    print("Run %s (https://github.com/%s/actions/runs/%s), the gateway job, tests/e2e/vault.sh\n" % (run, REPO, run))
+    print("Run %s (https://github.com/%s/actions/runs/%s), %s, tests/e2e/vault.sh\n"
+          % (run, REPO, run, "the gateway job" if where == "gateway" else "the " + where.upper() + " run"))
     for line in res.get("measured", []):
         if line.startswith(words):
             print("  " + line)
     # The gateway job's checks are its own and people.sh's and vault.sh's
     # and the drills' after it, in one file: all of them, and any that failed.
     checks = res["checks"]
-    print("\n%d of %d checks in the gateway job passed (tests/e2e/vault.sh prints its own count in the job's log)"
+    print("\n%d of %d checks in the job passed (tests/e2e/vault.sh prints its own count in the job's log)"
           % (sum(c["passed"] for c in checks), len(checks)))
     for c in checks:
         if not c["passed"]:
@@ -110,8 +114,8 @@ def vault(run):
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    if sys.argv[2:] == ["vault"]:
-        return vault(sys.argv[1])
+    if sys.argv[2:3] == ["vault"]:
+        return vault(sys.argv[1], (sys.argv[3:] or ["gateway"])[0])
     run, models = sys.argv[1], sys.argv[2:] or release_models()
     with tempfile.TemporaryDirectory() as work:
         data = {m: facts(run, m, work) for m in models}
