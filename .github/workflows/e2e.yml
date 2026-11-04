@@ -157,6 +157,8 @@ jobs:
           kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=40 || true
           kubectl -n agents logs job/evals --tail=20 || true
           kubectl -n mcp logs deploy/mcp-server --tail=20 || true
+          kubectl -n vault describe pod vault-0 | tail -30 || true
+          kubectl -n vault logs vault-0 --tail=30 | grep -v '^{"' || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
           node="$(kind get nodes --name air-gapped | head -1)"
           docker exec "$node" sh -c 'cat /etc/resolv.conf; ls /etc/containerd/certs.d; cat /etc/containerd/certs.d/docker.io/hosts.toml' || true
@@ -268,6 +270,13 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/people.sh
 
+      # The records credential from Vault (ADR 24): who may get one, what the
+      # records service refuses, and how long a cut-off takes, three rounds.
+      - name: Prove the records credential from Vault, and its revocation
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/vault.sh
+
       # The operator's key, rotated with Granite served (ADR 16): last, since
       # it restarts that model server and puts the policy back as it was.
       - name: Rotate the operator's key with a model served
@@ -290,6 +299,9 @@ jobs:
           kubectl get pods -A -o wide || true
           kubectl -n gateway get gateway,httproute,agentgatewaypolicy -o yaml | tail -80 || true
           kubectl -n agentgateway-system logs deploy/agentgateway --tail=60 || true
+          kubectl -n vault describe pod vault-0 | tail -30 || true
+          kubectl -n vault logs vault-0 --tail=30 | grep -v '^{"' || true
+          kubectl -n corp logs deploy/records-api --tail=20 || true
           kubectl -n gateway logs deploy --tail=60 --all-containers || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -30 || true
 

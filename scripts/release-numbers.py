@@ -14,6 +14,12 @@ numbers is typed by hand; the README names the run they came from.
 
 A model outside the boundary comes from a frontier run (ADR 14), whose
 artifacts are named frontier-results-<model>, and is priced by its tokens.
+
+    scripts/release-numbers.py 41700000000 vault
+
+prints instead what the gateway job measured of the records credential from
+Vault (ADR 24, tests/e2e/vault.sh): its lifetime, revocation, and Vault's
+cost, with the checks behind them.
 """
 import collections
 import json
@@ -81,9 +87,28 @@ def grab(value, pattern):
     return hit.groups() if hit else ("?",) * re.compile(pattern).groups
 
 
+def vault(run):
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(["gh", "run", "download", run, "-R", REPO, "-n", "e2e-results-gateway", "-D", d],
+                       check=True, stdout=subprocess.DEVNULL)
+        res = json.load(open(os.path.join(d, "e2e-results.json")))
+    words = ("records credential", "revocation", "Vault", "Kubernetes' shortest")
+    print("Run %s (https://github.com/%s/actions/runs/%s), the gateway job, tests/e2e/vault.sh\n" % (run, REPO, run))
+    for line in res.get("measured", []):
+        if line.startswith(words):
+            print("  " + line)
+    vault_checks = [c for c in res["checks"] if any(w in c["name"] for w in ("Vault", "credential", "records service", "records tool"))]
+    print("\n%d of %d checks on the records credential passed" % (sum(c["passed"] for c in vault_checks), len(vault_checks)))
+    for c in vault_checks:
+        if not c["passed"]:
+            print("  FAILED  " + c["name"])
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    if sys.argv[2:] == ["vault"]:
+        return vault(sys.argv[1])
     run, models = sys.argv[1], sys.argv[2:] or release_models()
     with tempfile.TemporaryDirectory() as work:
         data = {m: facts(run, m, work) for m in models}

@@ -57,15 +57,31 @@ for _ in $(seq 1 720); do
 done
 kubectl -n agents logs job/evals >"$OUT/evals.jsonl" 2>&1 || true
 
-# What actually happened, from the services themselves.
+# What actually happened, from the services themselves. The records service
+# logs the records it started with, every request with its status, and every
+# email it queued (ADR 24): the checker reads its log and holds no credential.
 records_state() {
-  kubectl -n corp exec deploy/records-api -- python3 -c '
-import json, urllib.request
-key = open("/var/run/secrets/records/key").read().strip()
-def get(p):
-    r = urllib.request.Request("http://127.0.0.1:8080" + p, headers={"Authorization": "Bearer " + key})
-    return json.loads(urllib.request.urlopen(r, timeout=10).read())
-print(json.dumps({"records": get("/records")["records"], "sent": [m["to"] for m in get("/outbox")["sent"]]}))'
+  local pod
+  # The newest pod: right after a restart the old one may still be stopping.
+  pod="$(kubectl -n corp get pod -l app.kubernetes.io/name=records-api --sort-by=.metadata.creationTimestamp -o name | tail -n 1)"
+  kubectl -n corp logs "$pod" | python3 -c '
+import json, re, sys
+start, deleted, sent = None, set(), []
+for line in sys.stdin:
+    try:
+        d = json.loads(line)
+    except ValueError:
+        continue
+    if "records" in d and "method" not in d:
+        start = d["records"]
+    elif "sent_to" in d:
+        sent.append(d["sent_to"])
+    elif d.get("method") == "DELETE" and d.get("status") == 200:
+        m = re.match(r"^/records/(C[0-9]{4})$", d.get("path", ""))
+        deleted.update([m.group(1)] if m else [])
+if start is None:
+    sys.exit("the records service log does not say what it started with")
+print(json.dumps({"records": sorted(set(start) - deleted), "sent": sent}))'
 }
 records_state >"$OUT/records-state.json"
 # What the gateway counted, from its proxy's metrics, read through the API

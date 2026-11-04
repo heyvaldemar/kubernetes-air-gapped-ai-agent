@@ -17,6 +17,16 @@
 #                 an audience of its own; and the server, run here, gives an
 #                 agent acting for a person what both are granted and no more
 #                 (ADR 15)
+#   vault         the records credential from Vault (ADR 24): no records
+#                 key in any manifest or script, and no Secret mounted in the
+#                 records service or the MCP server; no TTL in Vault above
+#                 the records service's limit, and that limit 60 s; Vault's
+#                 Kubernetes role takes mcp/mcp-server alone, by a token for
+#                 Vault's audience, to read one path; only the MCP server
+#                 reaches Vault; Vault runs its own configuration, Raft and
+#                 TLS, not dev mode; and the records service's check, run
+#                 here against tokens signed by a key made for the check,
+#                 takes the valid one and refuses fourteen others
 #   evals         the agent compiles; every task has a known category and
 #                 only known expectations; the gates and the price say where
 #                 they come from
@@ -136,7 +146,7 @@ import re, sys
 inside = {l.strip() for f in ("airgap/images.txt", "airgap/images-gpu.txt")
           for l in open(f) if l.strip() and not l.startswith("#")}
 need = set()
-for f in ("manifests/mcp/mcp.yaml", "manifests/records/records.yaml", "manifests/tools/gateway.yaml",
+for f in ("manifests/mcp/mcp.yaml", "manifests/records/records.yaml", "manifests/tools/gateway.yaml", "manifests/vault/vault.yaml",
           "manifests/inference/llama.yaml", "manifests/agents/evals.yaml",
           "manifests/inference/llama-gpu.yaml", "manifests/inference/embed.yaml", "manifests/gpu/device-plugin.yaml", "manifests/gpu/capacity.yaml"):
     need.update(re.findall(r"^\s*-?\s*image:\s*(\S+@sha256:[0-9a-f]{64})", open(f).read(), re.M))
@@ -272,6 +282,149 @@ for person, grant in policy["people"].items():
 if tools_for("system:serviceaccount:people:nobody"):
     bad.append("the server lists tools for a person policy.json does not know")
 print("\n".join(bad) or "every grant names a tool the server has; none is destructive; a pattern refuses a trailing newline; the agent's MCP token is for the server's audience; acting for a person, the server gives what both are granted, down to the person's customers and the documents both may read")
+sys.exit(1 if bad else 0)
+PY
+}
+
+check_vault() {
+  python3 - <<'PY' || return 1
+import base64, glob, hashlib, importlib.util, json, os, re, secrets, sys, tempfile, time
+bad = []
+# 1. No records key, anywhere it could come back: no Secret by that name, no
+# key file, no secret mounted in the records service or the MCP server.
+for f in sorted(glob.glob("manifests/**/*", recursive=True) + glob.glob("scripts/*")):
+    if os.path.isdir(f) or f == "scripts/validate.sh" or "__pycache__" in f:
+        continue
+    text = open(f, encoding="utf-8", errors="replace").read()
+    for pat in (r"records-api-key\b", r"/var/run/secrets/records\b", r"\bRECORDS_KEY(_FILE)?\b", r"token_urlsafe"):
+        if re.search(pat, text):
+            bad.append("%s matches %s: the static records key is back" % (f, pat))
+for f in ("manifests/records/records.yaml", "manifests/mcp/mcp.yaml"):
+    if re.search(r"^\s*(secret:|secretName:|secretKeyRef:)", open(f).read(), re.M):
+        bad.append("%s mounts or reads a Secret" % f)
+# 2. The records service's limit, and no TTL in Vault above it.
+spec = importlib.util.spec_from_file_location("records_api", "manifests/records/records_api.py")
+rec = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rec)
+if rec.MAX_LIFETIME != 60:
+    bad.append("the records service takes credentials that live %s s; ADR 24 sets 60" % rec.MAX_LIFETIME)
+def seconds(v):
+    m = re.fullmatch(r"(\d+)([smh]?)", str(v))
+    return int(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600}[m.group(2)] if m else 10**9
+setup = json.load(open("manifests/vault/setup.json"))
+k8s, key, role = setup["kubernetes_role"], setup["key"], setup["role"]
+for what, v in (("the credential role's ttl", role["ttl"]), ("the login token's token_ttl", k8s["token_ttl"]),
+                ("the login token's token_max_ttl", k8s["token_max_ttl"])):
+    if seconds(v) > rec.MAX_LIFETIME:
+        bad.append("%s is %s, above the records service's limit of %d s" % (what, v, rec.MAX_LIFETIME))
+# 3. One service account may get a credential: the MCP server's, by a token
+# for Vault's audience, the one its pod projects.
+mcp = open("manifests/mcp/mcp.yaml").read()
+projected = re.findall(r"serviceAccountToken:\n\s*path: token\n\s*audience: (\S+)", mcp)
+if k8s["bound_service_account_names"] != ["mcp-server"] or k8s["bound_service_account_namespaces"] != ["mcp"]:
+    bad.append("Vault's Kubernetes role takes %s in %s, not mcp-server in mcp alone"
+               % (k8s["bound_service_account_names"], k8s["bound_service_account_namespaces"]))
+if k8s.get("audience") != "vault.boundary.heyvaldemar.com" or projected != [k8s.get("audience")]:
+    bad.append("Vault's role audience (%s) is not Vault's own, or not the one the MCP server's token is for (%s)" % (k8s.get("audience"), projected))
+if k8s["token_policies"] != ["records-caller"] or not k8s.get("token_no_default_policy"):
+    bad.append("the MCP server's Vault token carries %s, not records-caller alone" % k8s["token_policies"])
+hcl = re.sub(r"#.*", "", open("manifests/vault/records-caller.hcl").read())
+if re.findall(r'path\s+"([^"]+)"\s*\{\s*capabilities\s*=\s*\[([^\]]*)\]\s*\}', hcl) != [("identity/oidc/token/records-api", '"read"')]:
+    bad.append("records-caller grants more than reading identity/oidc/token/records-api")
+if key["allowed_client_ids"] != ["records-api"] or role["client_id"] != "records-api" or key["algorithm"] != "RS256" \
+        or "records:delete" in role["scope"].split():
+    bad.append("the records key signs for %s, the role is for %s with %s, scope %r" % (key["allowed_client_ids"], role["client_id"], key["algorithm"], role["scope"]))
+# 4. Only the MCP server reaches Vault.
+docs = open("manifests/network-policies.yaml").read().split("\n---\n")
+vault_np = [d for d in docs if re.search(r"^\s*namespace: vault$", d, re.M)]
+deny = [d for d in vault_np if "name: default-deny" in d and "podSelector: {}" in d and "policyTypes: [Ingress, Egress]" in d]
+ingress = [d.partition("ingress:")[2] for d in vault_np if "ingress:" in d]
+if not deny or len(ingress) != 1 or ingress[0].count("- from:") != 1 or re.findall(r"port: (\d+)", ingress[0]) != ["8200"] \
+        or re.search(r"ipBlock|Selector: \{\}", ingress[0]) or not re.search(
+            r"kubernetes.io/metadata.name: mcp\n\s+podSelector:\n\s+matchLabels:\n\s+app.kubernetes.io/name: mcp-server\n", ingress[0]):
+    bad.append("manifests/network-policies.yaml: Vault is not denied by default and reached by the MCP server alone, on 8200")
+# 5. Not dev mode: the server's own configuration, integrated storage, TLS.
+vy, hc = open("manifests/vault/vault.yaml").read(), open("manifests/vault/vault.hcl").read()
+if "command: [vault, server, -config=/vault/config/vault.hcl]" not in vy or "-dev" in vy or 'storage "raft"' not in hc \
+        or "tls_cert_file" not in hc or "tls_disable" in hc:
+    bad.append("Vault does not run its own configuration with integrated storage and TLS, or runs in dev mode")
+# 6. The records service's check, against tokens signed here by a key made
+# for this check: the valid one is taken (the control), every other refused.
+def prime(bits):
+    while True:
+        n = secrets.randbits(bits) | (1 << (bits - 1)) | 1
+        if any(n % p == 0 for p in (3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)):
+            continue
+        d, r = n - 1, 0
+        while d % 2 == 0:
+            d, r = d // 2, r + 1
+        for _ in range(32):
+            x = pow(secrets.randbelow(n - 3) + 2, d, n)
+            if x in (1, n - 1):
+                continue
+            for _ in range(r - 1):
+                x = pow(x, 2, n)
+                if x == n - 1:
+                    break
+            else:
+                break
+        else:
+            return n
+e = 65537
+while True:
+    p, q = prime(1024), prime(1024)
+    phi = (p - 1) * (q - 1)
+    if p != q and phi % e and (p * q).bit_length() == 2048:
+        break
+n, d = p * q, pow(e, -1, phi)
+b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+num = lambda i: b64(i.to_bytes((i.bit_length() + 7) // 8, "big"))
+keys = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+json.dump({"keys": [{"kty": "RSA", "alg": "RS256", "use": "sig", "kid": "k1", "n": num(n), "e": num(e)}]}, keys)
+keys.close()
+rec.KEYS_FILE = keys.name
+def sign(signed):
+    k = 256
+    t = rec.SHA256_INFO + hashlib.sha256(signed).digest()
+    em = int.from_bytes(b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t, "big")
+    return pow(em, d, n).to_bytes(k, "big")
+now = int(time.time())
+def jwt(header=None, **over):
+    c = {"iss": rec.ISSUER, "aud": "records-api", "iat": now, "exp": now + 60, "scope": "records:read outbox:send", "sub": "s"}
+    c.update(over)
+    c = {k: v for k, v in c.items() if v is not None}
+    h = b64(json.dumps(header or {"alg": "RS256", "kid": "k1"}).encode()) + "." + b64(json.dumps(c).encode())
+    return h + "." + b64(sign(h.encode()))
+valid = jwt()
+h, body, s = valid.split(".")
+other = json.loads(base64.urlsafe_b64decode(body + "=="))
+other["scope"] = "records:read outbox:send records:delete"
+import hmac as _hmac
+hs_head = b64(json.dumps({"alg": "HS256", "kid": "k1"}).encode()) + "." + body
+cases = [
+    ("a valid credential (the control)", valid, "records:read", "ok"),
+    ("an expired credential", jwt(iat=now - 61, exp=now - 1), "records:read", 401),
+    ("a credential for another audience", jwt(aud="reports-api"), "records:read", 401),
+    ("a credential for two audiences", jwt(aud=["records-api", "reports-api"]), "records:read", 401),
+    ("a credential from another issuer", jwt(iss="https://kubernetes.default.svc.cluster.local"), "records:read", 401),
+    ("a credential that lives an hour", jwt(exp=now + 3600), "records:read", 401),
+    ("a credential issued in the future", jwt(iat=now + 60, exp=now + 120), "records:read", 401),
+    ("a credential with no expiry", jwt(exp=None), "records:read", 401),
+    ("a credential by a key Vault does not publish", jwt(header={"alg": "RS256", "kid": "k2"}), "records:read", 401),
+    ("alg none", b64(json.dumps({"alg": "none", "kid": "k1"}).encode()) + "." + body + ".", "records:read", 401),
+    ("HS256 keyed with the public key", hs_head + "." + b64(_hmac.new(num(n).encode(), hs_head.encode(), hashlib.sha256).digest()), "records:read", 401),
+    ("a payload changed after signing", h + "." + b64(json.dumps(other).encode()) + "." + s, "records:read", 401),
+    ("a signature cut short", h + "." + body + "." + b64(base64.urlsafe_b64decode(s + "==")[:-1]), "records:read", 401),
+    ("a valid credential for a delete, a scope no role issues", valid, "records:delete", 403),
+    ("a scope that only starts with the one needed", jwt(scope="records:readall"), "records:read", 403),
+]
+for what, tok, need, want in cases:
+    got = rec.verify(tok, need)
+    status = "ok" if isinstance(got, dict) else got[0]
+    if status != want:
+        bad.append("records_api.verify: %s gave %s, expected %s" % (what, status, want))
+os.unlink(keys.name)
+print("\n".join(bad) or "no records key anywhere; no Vault TTL above the records service's 60 s; one service account, mcp/mcp-server, by Vault's audience, may get a credential, to read one path; only the MCP server reaches Vault; Vault runs its own configuration with Raft and TLS; and the records service takes the valid credential and refuses %d others" % (len(cases) - 1))
 sys.exit(1 if bad else 0)
 PY
 }
@@ -628,7 +781,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp evals policies gateway docs frontier aws gke aks mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gke aks mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"
