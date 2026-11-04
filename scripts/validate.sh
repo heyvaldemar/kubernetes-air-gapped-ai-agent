@@ -531,6 +531,11 @@ if "kubectl apply -f aws/storage-class.yaml" not in wf:
 release = wf.partition("- name: Vault's volume, released before the destroy")[2].partition("- name:")[0]
 if "if: always()" not in release or "./scripts/vault.sh release" not in release or "./scripts/aws.sh volumes 0" not in release:
     bad.append("Vault's claim released before the destroy, whatever happened, and no volume left")
+# The release comes after the last step that may reach Vault: it is the up
+# job's last step.
+up = wf.partition("\n  up:\n")[2].partition("\n  down:\n")[0]
+if "- name:" in up.partition("- name: Vault's volume, released before the destroy")[2]:
+    bad.append("the release the up job's last step, after everything that reaches Vault")
 if wf.partition("  down:")[2].count("./scripts/aws.sh volumes 0") != 1:
     bad.append("no volume left after the destroy")
 if bad:
@@ -578,6 +583,9 @@ release = wf.partition("- name: Vault's volume, released before the destroy")[2]
 bad = []
 if "if: always()" not in release or "./scripts/vault.sh release" not in release or "./scripts/gke.sh volumes 0" not in release:
     bad.append("Vault's claim released before the destroy, whatever happened, and no disk left")
+up = wf.partition("\n  up:\n")[2].partition("\n  down:\n")[0]
+if "- name:" in up.partition("- name: Vault's volume, released before the destroy")[2]:
+    bad.append("the release the up job's last step, after everything that reaches Vault")
 if wf.partition("  down:")[2].count("./scripts/gke.sh volumes 0") != 1:
     bad.append("no disk left after the destroy")
 if "./scripts/gke.sh volumes sweep" not in open(".github/workflows/gke-sweep.yml").read():
