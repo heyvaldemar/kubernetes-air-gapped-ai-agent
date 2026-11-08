@@ -2,7 +2,7 @@
 # by tag and digest. scripts/airgap.sh seed copies each, with whatever
 # signatures and attestations refer to it, into the registry inside the
 # boundary, under its original host and path, before the boundary closes.
-docker.io/library/busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+docker.io/library/busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
 # llama.cpp's server, CPU build b11429 (v0.6.0)
 ghcr.io/ggml-org/llama.cpp:server-b11429@sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1
 # Kyverno 1.19.2, as admission/kyverno-images.yaml pins it
@@ -15,7 +15,7 @@ reg.kyverno.io/kyverno/kyvernopre:v1.19.2@sha256:27f3cc52e628559b56d08363b853168
 reg.kyverno.io/kyverno/reports-controller:v1.19.2@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3
 # The agent's side: the MCP server, the records service and the agent run on
 # python:3.13-alpine with nothing installed; the report service is podinfo
-docker.io/library/python:3.13-alpine@sha256:bf12ecc0bea3f171d55145dd02c78b5eeb09f30ee2ac9cc2b4c9e4e8f5e30741
+docker.io/library/python:3.13-alpine@sha256:1e1f6334529d1fb26a2ef619d7cffb30a7c7d7cc1cc7338ebee283a58d1aeaca
 ghcr.io/stefanprodan/podinfo:6.15.0@sha256:ec73780a8425f59ea49f5bc8cdff0d598805a224fbaa1f86c67a244f250fa9da
 # The inference gateway (gateway/gateway.lock): agentgateway's controller and proxy.
 cr.agentgateway.dev/controller:v1.6.0@sha256:d84259a7e2d87f8f39bae385d4b032d823c0a4450aecb32e0e31e2258449645b

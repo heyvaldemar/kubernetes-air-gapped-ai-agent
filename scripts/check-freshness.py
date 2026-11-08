@@ -202,7 +202,10 @@ def compare(what, ref):
 def check_images():
     refs = set()
     for path in tracked():
-        if path == "ci-images.pins":
+        # ci-images.pins has its own check; a .cast file is a recording of a
+        # past run (docs/demo/), which quotes the digests that run pulled and
+        # pins nothing.
+        if path == "ci-images.pins" or path.endswith(".cast"):
             continue
         try:
             text = open(os.path.join(ROOT, path), encoding="utf-8").read()
