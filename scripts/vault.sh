@@ -44,7 +44,7 @@ tls() {
   kubectl -n vault create secret generic vault-tls --from-file=tls.crt="$STATE/tls.crt" \
     --from-file=tls.key="$STATE/tls.key" --from-file=ca.crt="$STATE/ca.crt" --dry-run=client -o json | kubectl apply -f - >/dev/null
   kubectl -n mcp create configmap vault-ca --from-file=ca.crt="$STATE/ca.crt" --dry-run=client -o json | kubectl apply -f - >/dev/null
-  say "Vault's certificate, from a CA made for this run; the CA trusted by the MCP server alone"
+  say "Vault's certificate, from a CA made for this run; the MCP server is the only client given the CA"
 }
 
 case "${1:-}" in
