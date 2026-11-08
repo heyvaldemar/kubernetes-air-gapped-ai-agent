@@ -21,7 +21,10 @@ while read -r name version plat url member sum; do
     continue
   fi
   file="$BIN/.downloads/$(basename "$url")"
-  curl -fsSL --retry 3 -o "$file" "$url"
+  # GitHub's release downloads answered 504 for minutes on 2026-11-08
+  # (GKE runs 42464823790, 42464979053, 42466101688): curl's default
+  # backoff, 1, 2 and 4 s, gave up in seven seconds.
+  curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 --retry-connrefused -o "$file" "$url"
   got="$(sha256 "$file")"
   if [ "$got" != "$sum" ]; then
     echo "$name $version: sha256 $got, pinned $sum. Not installing." >&2
