@@ -25,13 +25,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap/vault"
 say() { printf '== %s\n' "$*"; }
 # Each class on stdin (a StorageClass or a list of them), its provisioner,
-# and the annotations that mark it the default, or none.
+# and its default-class annotations with their values, or none.
 DEFAULTS='
 import json, sys
 doc = json.load(sys.stdin)
 for c in doc.get("items", [doc]):
     marks = ", ".join("%s=%s" % kv for kv in sorted((c["metadata"].get("annotations") or {}).items()) if "default-class" in kv[0])
-    print("%s (%s), marked the default by: %s" % (c["metadata"]["name"], c["provisioner"], marks or "no annotation"))'
+    print("%s (%s), default-class annotations: %s" % (c["metadata"]["name"], c["provisioner"], marks or "none"))'
 
 tls() {
   mkdir -p "$STATE"
@@ -61,9 +61,11 @@ case "${1:-}" in
     # default, aws/storage-class.yaml on EKS, GKE's own. Ask the claim which,
     # not the classes' annotations: GKE runs 42458041663 and 42484106156 found
     # no class with either default annotation when this looked, and then
-    # provisioned the claim with pd.csi.storage.gke.io. Kubernetes also gives
-    # a claim made with no class the default that comes after it. With no
-    # class after two minutes the pod would wait for ever; say so then.
+    # provisioned the claim with pd.csi.storage.gke.io; run 42486527431
+    # printed the class it gave, standard-rwo, with is-default-class "false".
+    # Kubernetes also gives a claim made with no class the default that comes
+    # after it. With no class after two minutes the pod would wait for ever;
+    # say so then.
     sc=""
     for _ in $(seq 1 60); do
       sc="$(kubectl -n vault get pvc data-vault-0 -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
