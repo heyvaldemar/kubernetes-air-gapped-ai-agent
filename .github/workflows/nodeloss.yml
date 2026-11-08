@@ -27,6 +27,14 @@ jobs:
       - name: Install the pinned tools
         run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
 
+      # A node started again starts all its pods at once. With the 128
+      # inotify instances ubuntu-26.04 left the host, kube-proxy on it failed
+      # to start 4 to 9 times ("fsnotify watcher init: too many open files"),
+      # and what needs a Service on that node was not ready for minutes
+      # (ADR 20, run 42502094507).
+      - name: The host's inotify limits, as kind needs them
+        run: ./scripts/kind-host.sh
+
       - name: Create the cluster, two workers in two zones
         run: kind create cluster --config kind/ha.yaml --wait 180s
 

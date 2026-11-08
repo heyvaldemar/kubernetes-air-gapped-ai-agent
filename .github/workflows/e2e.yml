@@ -82,6 +82,9 @@ jobs:
       - name: Install the pinned tools
         run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
 
+      - name: The host's inotify limits, as kind needs them
+        run: ./scripts/kind-host.sh
+
       - name: Create the cluster
         run: kind create cluster --config kind/cluster.yaml --wait 120s
 
@@ -204,6 +207,9 @@ jobs:
 
       - name: Install the pinned tools
         run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
+
+      - name: The host's inotify limits, as kind needs them
+        run: ./scripts/kind-host.sh
 
       - name: Create the cluster
         run: kind create cluster --config kind/cluster.yaml --wait 120s

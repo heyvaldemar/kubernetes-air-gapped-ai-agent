@@ -17,7 +17,8 @@
 #      instance the node group launches in its place. Then the boundary,
 #      tried from a pod on that node with the node's own resolver: a node
 #      that comes back must come back closed. And the replicas spread over
-#      both nodes again
+#      both nodes again, and on kind the node's own networking (kube-proxy,
+#      kindnet) started once and up since
 #   3. a worker drained, the way maintenance and upgrades take a node: under
 #      the same traffic and the same admission probes, every request must be
 #      answered and admission must never stop, which is what the budgets and
@@ -196,6 +197,16 @@ for p in json.load(sys.stdin)["items"]:
   if [ -n "$name" ] && [ "$healthy" -ge 2 ] && [ "$allowed" = 1 ]; then pass "$3: disruption budget $name lets one of $healthy go at a time"
   else fail "$3: no disruption budget lets exactly one go (${b:-none})"; fi
 }
+# node_restarts <node>: each kube-system pod a DaemonSet runs on the node (on
+# kind kube-proxy and kindnet, on EKS kube-proxy and aws-node: the node's own
+# networking) and its containers' restarts, "<pod> <restarts>" a line.
+node_restarts() {
+  kubectl -n kube-system get pods --field-selector "spec.nodeName=$1" -o json | python3 -c '
+import json, sys
+for p in json.load(sys.stdin)["items"]:
+    if any(o.get("kind") == "DaemonSet" for o in p["metadata"].get("ownerReferences") or []):
+        print(p["metadata"]["name"], sum(c.get("restartCount", 0) for c in p.get("status", {}).get("containerStatuses") or []))'
+}
 ready_status() { kubectl get node "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null; }
 seconds_until() {  # seconds_until <limit> <command...>
   local t0=$SECONDS limit="$1"; shift
@@ -278,6 +289,7 @@ budget gateway "$PROXY" "the gateway's proxy"
 budget agentgateway-system "$CONTROLLER" "the gateway's controller"
 budget kyverno "$KYVERNO" "Kyverno's admission controller"
 measure "CoreDNS runs on: $(on_nodes kube-system k8s-app=kube-dns | paste -sd, -)"
+restarts_before="$(node_restarts "$victim")"
 
 kubectl -n agents delete pod nodeloss-client --ignore-not-found --wait=true >/dev/null 2>&1
 kubectl apply -f - >/dev/null <<EOF
@@ -349,6 +361,25 @@ respread inference "$LLAMA" "the model server, again"
 respread gateway "$PROXY" "the gateway's proxy, again"
 respread agentgateway-system "$CONTROLLER" "the gateway's controller, again"
 respread kyverno "$KYVERNO" "Kyverno's admission controller, again"
+# The node's own networking, started once and up since. A kind node started
+# again restarts each of its containers once; a second start is a crash.
+# Before scripts/kind-host.sh, kube-proxy on the node that came back failed
+# to start several times in each ubuntu-26.04 run whose cluster was looked
+# at ("too many open files"), and nothing on that node that needed a Service
+# was ready until it ran. The replicas above were spread again in time in
+# some of those runs: they saw it only some of the time, this every time.
+# On AWS the node is a new instance; no AWS run has had this check yet.
+if [ -n "$newnode" ] && [ "$MODE" = kind ]; then
+  crashed=""
+  while read -r pod n; do
+    [ -n "$pod" ] || continue
+    b="$(awk -v p="$pod" '$1 == p {print $2}' <<<"$restarts_before")"
+    [ $((n - ${b:-0})) -le 1 ] \
+      || crashed+="$pod restarted $((n - ${b:-0})) times since the loss, the last stop: $(kubectl -n kube-system logs "$pod" --previous --tail=1 2>&1 | tail -c 160); "
+  done < <(node_restarts "$newnode")
+  if [ -z "$crashed" ]; then pass "the node that came back started its own networking once, and it stayed up ($(node_restarts "$newnode" | cut -d' ' -f1 | paste -sd, -))"
+  else fail "the node that came back: $crashed"; fi
+fi
 
 step "3. a worker drained, the way maintenance takes it"
 if [ -n "$newnode" ]; then

@@ -25,6 +25,7 @@ check:
 	python3 tests/static/plant_violations.py
 
 up:
+	./scripts/kind-host.sh
 	kind get clusters 2>/dev/null | grep -qx $(CLUSTER) || kind create cluster --config kind/cluster.yaml --wait 120s
 	./scripts/airgap.sh registry
 	./scripts/airgap.sh seed
