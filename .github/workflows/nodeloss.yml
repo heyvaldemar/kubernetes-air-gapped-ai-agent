@@ -31,9 +31,6 @@ jobs:
       # limits ubuntu-26.04 left the host, kube-proxy on it failed to start
       # 4 to 9 times ("fsnotify watcher init: too many open files"), and
       # what needs a Service on that node was not ready for minutes (ADR 20).
-      - name: The host's inotify limits, as kind needs them
-        run: ./scripts/kind-host.sh
-
       - name: Create the cluster, two workers in two zones
         run: kind create cluster --config kind/ha.yaml --wait 180s
 
