@@ -42,7 +42,10 @@ tag_of() { local ref; ref="$(lock image "$1" 4)"; echo "${ref#*:}"; }
 case "${1:-}" in
   fetch)
     mkdir -p "$DIR"
-    curl -fsSL -o "$(crds_file)" "$(lock crds gateway-api 5)"
+    # Retried as scripts/install-tools.sh retries: this download answered 504
+    # after two minutes, once, and stopped two jobs of e2e 42475813032.
+    curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 --retry-connrefused \
+      -o "$(crds_file)" "$(lock crds gateway-api 5)"
     [ "$(sha256 "$(crds_file)")" = "$(lock crds gateway-api 4)" ] || { echo "the Gateway API CRDs are not the file gateway.lock pins" >&2; exit 1; }
     for chart in agentgateway-crds agentgateway; do
       helm pull "$(lock chart "$chart" 5)" --version "$(lock chart "$chart" 3)" -d "$DIR" >/dev/null 2>&1
