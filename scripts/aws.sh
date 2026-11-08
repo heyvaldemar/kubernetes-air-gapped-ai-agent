@@ -130,6 +130,10 @@ PY
         *:subnet/*) aws ec2 describe-subnets --subnet-ids "${1##*/}" >/dev/null 2>&1 ;;
         *:route-table/*) aws ec2 describe-route-tables --route-table-ids "${1##*/}" >/dev/null 2>&1 ;;
         *:launch-template/*) aws ec2 describe-launch-templates --launch-template-ids "${1##*/}" >/dev/null 2>&1 ;;
+        # Vault's volume (ADR 24). Run 42454075898 listed it at 07:13, eight
+        # minutes after scripts/vault.sh release saw it go and EC2 had no
+        # volume left under the run's tag.
+        *:volume/*) aws ec2 describe-volumes --volume-ids "${1##*/}" >/dev/null 2>&1 ;;
         # The registry inside, and Kyverno's Pod Identity association, which
         # goes with its cluster.
         *:repository/*) aws ecr describe-repositories --repository-names "${1#*:repository/}" >/dev/null 2>&1 ;;
