@@ -24,6 +24,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap/vault"
 say() { printf '== %s\n' "$*"; }
+# Each class on stdin (a StorageClass or a list of them), its provisioner,
+# and the annotations that mark it the default, or none.
+DEFAULTS='
+import json, sys
+doc = json.load(sys.stdin)
+for c in doc.get("items", [doc]):
+    marks = ", ".join("%s=%s" % kv for kv in sorted((c["metadata"].get("annotations") or {}).items()) if "default-class" in kv[0])
+    print("%s (%s), marked the default by: %s" % (c["metadata"]["name"], c["provisioner"], marks or "no annotation"))'
 
 tls() {
   mkdir -p "$STATE"
@@ -49,19 +57,25 @@ tls() {
 
 case "${1:-}" in
   install)
-    # Vault's volume comes from the cluster's default StorageClass: kind's,
-    # GKE's, or aws/storage-class.yaml on EKS. With none, the pod would wait
-    # for ever; say so now. Either annotation makes a class the default, as
-    # Kubernetes' DefaultStorageClass admission reads them: GKE's class
-    # carries the beta one (run 42458041663 found no default by the other,
-    # and the claim was then provisioned by pd.csi.storage.gke.io).
-    sc="$(kubectl get storageclass -o json | python3 -c '
-import json, sys
-keys = ("storageclass.kubernetes.io/is-default-class", "storageclass.beta.kubernetes.io/is-default-class")
-print(" ".join("%s (%s)" % (c["metadata"]["name"], c["provisioner"]) for c in json.load(sys.stdin)["items"]
-               if any((c["metadata"].get("annotations") or {}).get(k) == "true" for k in keys)))')"
-    [ -n "$sc" ] || { echo "vault: the cluster has no default StorageClass, so Vault's volume would never be made (ADR 24)" >&2; exit 1; }
-    say "Vault's volume from the default StorageClass: ${sc% }"
+    # Vault's claim names no class: the cluster gives it one, kind's
+    # default, aws/storage-class.yaml on EKS, GKE's own. Ask the claim which,
+    # not the classes' annotations: GKE runs 42458041663 and 42484106156 found
+    # no class with either default annotation when this looked, and then
+    # provisioned the claim with pd.csi.storage.gke.io. Kubernetes also gives
+    # a claim made with no class the default that comes after it. With no
+    # class after two minutes the pod would wait for ever; say so then.
+    sc=""
+    for _ in $(seq 1 60); do
+      sc="$(kubectl -n vault get pvc data-vault-0 -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
+      [ -n "$sc" ] && break
+      sleep 2
+    done
+    if [ -z "$sc" ]; then
+      kubectl get storageclass -o json | python3 -c "$DEFAULTS" >&2 || true
+      echo "vault: Vault's claim has no StorageClass after 120 s, so its volume would never be made (ADR 24)" >&2
+      exit 1
+    fi
+    say "Vault's volume from StorageClass $(kubectl get storageclass "$sc" -o json | python3 -c "$DEFAULTS")"
     tls
     python3 "$ROOT/scripts/vault_api.py" install
     say "Vault's claim: $(kubectl -n vault get pvc data-vault-0 -o jsonpath='{.spec.storageClassName}, {.status.capacity.storage}, volume {.spec.volumeName}')"
