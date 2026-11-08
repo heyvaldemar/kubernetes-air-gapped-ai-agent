@@ -51,8 +51,15 @@ case "${1:-}" in
   install)
     # Vault's volume comes from the cluster's default StorageClass: kind's,
     # GKE's, or aws/storage-class.yaml on EKS. With none, the pod would wait
-    # for ever; say so now.
-    sc="$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name} ({.provisioner}) {end}')"
+    # for ever; say so now. Either annotation makes a class the default, as
+    # Kubernetes' DefaultStorageClass admission reads them: GKE's class
+    # carries the beta one (run 42458041663 found no default by the other,
+    # and the claim was then provisioned by pd.csi.storage.gke.io).
+    sc="$(kubectl get storageclass -o json | python3 -c '
+import json, sys
+keys = ("storageclass.kubernetes.io/is-default-class", "storageclass.beta.kubernetes.io/is-default-class")
+print(" ".join("%s (%s)" % (c["metadata"]["name"], c["provisioner"]) for c in json.load(sys.stdin)["items"]
+               if any((c["metadata"].get("annotations") or {}).get(k) == "true" for k in keys)))')"
     [ -n "$sc" ] || { echo "vault: the cluster has no default StorageClass, so Vault's volume would never be made (ADR 24)" >&2; exit 1; }
     say "Vault's volume from the default StorageClass: ${sc% }"
     tls

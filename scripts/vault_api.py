@@ -82,7 +82,7 @@ def forward(port=PORT):
 _ctx = None
 
 
-def call(method, path, body=None, token=None, port=PORT, timeout=10):
+def call(method, path, body=None, token=None, port=PORT, timeout=30):
     """(status, JSON) from Vault's API. Error bodies are kept to Vault's own
     messages, which name no token."""
     global _ctx
@@ -200,7 +200,10 @@ def install():
             raise SystemExit("vault: no answer from vault-0 after 60 s")
         fresh = not h["initialized"]
         if fresh:
-            init = must(call("PUT", "sys/init", {"secret_shares": SHARES, "secret_threshold": THRESHOLD}), "init")
+            # Init writes the keyring to a volume attached seconds before:
+            # AWS run 42458107487 waited 10 s for its answer and gave up, and
+            # an init answered to nobody leaves shares no one holds.
+            init = must(call("PUT", "sys/init", {"secret_shares": SHARES, "secret_threshold": THRESHOLD}, timeout=120), "init")
             # The shares and the root token reach the disk before anything
             # else is done with them: a run that stops here can unseal again.
             write_secret("init.json", json.dumps({"keys_base64": init["keys_base64"], "root_token": init["root_token"]}))
