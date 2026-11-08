@@ -92,14 +92,22 @@ case "${1:-}" in
     # verify-models, so it goes on once that webhook is there. If it never
     # appears under that name, the guard would refuse every model for good:
     # stop here and say so.
+    #
+    # The names are read whole, then matched: Ubuntu 26.04's tr (uutils)
+    # writes as it reads, so `| tr | grep -qx` failed under pipefail when
+    # grep matched before tr's last write, with the webhook there
+    # (e2e 42447680406, every job on 26.04).
     hook=ivpol.validate.kyverno.svc-fail-finegrained-verify-models
+    registered() {
+      local names
+      names=" $(kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg -o jsonpath='{.webhooks[*].name}' 2>/dev/null || true) "
+      [[ "$names" == *" $hook "* ]]
+    }
     for _ in $(seq 1 60); do
-      kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg -o jsonpath='{.webhooks[*].name}' 2>/dev/null \
-        | tr ' ' '\n' | grep -qx "$hook" && break
+      registered && break
       sleep 2
     done
-    kubectl get validatingwebhookconfiguration kyverno-resource-validating-webhook-cfg -o jsonpath='{.webhooks[*].name}' 2>/dev/null \
-      | tr ' ' '\n' | grep -qx "$hook" \
+    registered \
       || { echo "Kyverno never registered $hook in kyverno-resource-validating-webhook-cfg; the guard would refuse every model" >&2; exit 1; }
     kubectl apply -f "$ROOT/admission/kyverno-guard.yaml" >/dev/null
     say "carried-images ($(wc -w <"$STATE/carried-digests.txt" | tr -d ' ') digests), model-volumes and verify-models applied, the last with the operator's key; models-need-kyverno on $hook"
