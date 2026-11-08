@@ -93,6 +93,23 @@ jobs:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/nodeloss.sh
 
+      - name: Diagnose kube-proxy on the node that came back
+        if: always()
+        run: |
+          uname -r; docker version --format '{{.Server.Version}}' || true
+          kubectl -n kube-system get pods -o wide || true
+          for p in $(kubectl -n kube-system get pods -l k8s-app=kube-proxy -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.nodeName}{"\n"}{end}' | awk '$2=="air-gapped-worker2"{print $1}'); do
+            echo "== $p previous"; kubectl -n kube-system logs "$p" --previous --tail=80 || true
+            echo "== $p now"; kubectl -n kube-system logs "$p" --tail=40 || true
+            kubectl -n kube-system get pod "$p" -o jsonpath='{.status.containerStatuses[0].lastState}{"\n"}' || true
+          done
+          for n in air-gapped-worker air-gapped-worker2; do
+            echo "== $n"
+            docker exec "$n" sh -c 'iptables -V; ls -l /etc/alternatives/iptables /usr/sbin/iptables; cat /proc/net/ip_tables_names 2>&1; echo legacy nat:; iptables-legacy -t nat -S 2>&1 | wc -l; echo nft nat:; iptables-nft -t nat -S 2>&1 | wc -l; iptables-legacy -t nat -S 2>&1 | head -20' || true
+            docker exec "$n" journalctl -u boundary-close --no-pager -o short-monotonic | tail -20 || true
+            docker exec "$n" sh -c 'journalctl -u kubelet --no-pager | grep -iE "kube-proxy|iptables|nft" | tail -20' || true
+          done
+
       - name: What the cluster looked like
         if: failure()
         run: |

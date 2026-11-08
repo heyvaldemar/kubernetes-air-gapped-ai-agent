@@ -172,7 +172,10 @@ on_nodes() {
 spread() {  # spread <ns> <selector> <what>
   local nodes; nodes="$(on_nodes "$1" "$2" | paste -sd, -)"
   if [ "$(tr ',' '\n' <<<"$nodes" | grep -c .)" -ge 2 ]; then pass "$3: ready on two nodes ($nodes)"
-  else fail "$3: ready on '${nodes:-no node}' only"; fi
+  else fail "$3: ready on '${nodes:-no node}' only"
+    kubectl -n "$1" get pods -l "$2" -o wide; kubectl -n kube-system get pods -l k8s-app=kube-proxy -o wide
+    for p in $(kubectl -n "$1" get pods -l "$2" -o jsonpath='{.items[*].metadata.name}'); do kubectl -n "$1" describe pod "$p" | sed -n '/^Conditions:/,/^Volumes:/p;/^Events:/,$p' | tail -25; kubectl -n "$1" logs "$p" --tail=15 2>&1 | tail -15; done
+  fi
 }
 # respread <ns> <selector> <what>: when both replicas share a node, the
 # newer one goes and comes back where there is room, on the other node.
