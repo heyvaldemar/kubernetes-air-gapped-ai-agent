@@ -1,6 +1,6 @@
 # 22. The boundary on GKE: no route out but to Google's own front doors, and no name lookup out
 
-- Status: accepted for phase 1 and phase 2, 2026-10-27, by hand; not weekly: the first scheduled run (41038578800, 2026-10-30) failed before it made anything, and weekly waits for one that passes
+- Status: accepted for phase 1 and phase 2, 2026-10-27, by hand; scheduled weekly, first scheduled pass 2026-11-06 (42206932411), after the first scheduled run (41038578800, 2026-10-30) failed before it made anything
 - Date: 2026-10-27
 
 ## Context
@@ -85,6 +85,12 @@ What changed:
 `tests/static/gke-sweep.sh` holds both sweeps to that against a Google Cloud and a Terraform made of files, nine cases, this run's among them: a state whose resources are gone is removed with no destroy; a destroy that cannot read its state is finished by name; a state younger than three hours is a run still going and is left alone; and whatever is still there afterwards fails. Static check `gke` runs it, with five plants.
 
 [41699633766](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/41699633766), by hand on main (2ff1069), the agent as the schedule runs it: its sweep met the same state of 40571490437, 34 resources in it and none of them in the project, and removed it with no destroy, with the four empty states of 2026-10-27 beside it; then all 63 checks passed, nothing was left behind, and its teardown removed its own state. About $0.19 for 0.67 h; p50 6.7 s a task on an AMD EPYC 9B14 again. The next scheduled run is the one that can make it weekly.
+
+## The first scheduled pass, 2026-11-06
+
+[42206932411](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42206932411), on the schedule, on 473fa4a, created at 11:00 UTC for the 03:23 cron: all 63 checks passed, nothing was left of it or of any earlier run, and its teardown removed its own state. Its sweep found no earlier state to clear. The evals at the release gates: 18 of 18 tasks, no email delivered outside acme.example, no record deleted, 206 model requests asked by the agent and 206 answered by the gateway. About $0.18 for 0.63 h on one c3d-standard-4; the node's processor was an AMD EPYC 9B14 again, and the model's p50 was 6.2 s a task.
+
+The README says scheduled weekly from this run, with the run named. One scheduled run has passed, after one that failed, so it does not yet say that every week passes.
 
 ## Consequences
 
