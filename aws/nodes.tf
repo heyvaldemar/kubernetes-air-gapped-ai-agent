@@ -106,7 +106,7 @@ resource "aws_eks_node_group" "gpu" {
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = aws_subnet.private[*].id
   ami_type        = "AL2023_x86_64_NVIDIA"
-  instance_types  = [var.gpu_instance_type]
+  instance_types  = var.gpu_instance_types
   capacity_type   = "ON_DEMAND"
 
   labels = {

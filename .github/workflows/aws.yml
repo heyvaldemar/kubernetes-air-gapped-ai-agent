@@ -15,8 +15,10 @@ name: The boundary on AWS
 # the repository variable AWS_AGENT_ENABLED is true.
 #
 # With the agent, a GPU beside the CPU (ADR 19): one g6.xlarge in the same
-# private subnets, the same signed model served by the CUDA build of the same
-# llama.cpp release, both measured with the agent's own calls. WITH_GPU says
+# private subnets, or a g5.xlarge when EC2 has no g6.xlarge for it, named as
+# the fallback wherever the run names the card, the same signed model served
+# by the CUDA build of the same llama.cpp release, both measured with the
+# agent's own calls. WITH_GPU says
 # whether a run adds it: by hand when the dispatch says so, and on the
 # schedule once AWS_GPU_ENABLED is true.
 #
@@ -55,6 +57,12 @@ on:
         type: choice
         options: ["false", "true"]
         default: "false"
+      gpu_types:
+        description: "the GPU node's types, in the order EC2 is asked: the L4, then the A10G when there is no L4; the A10G first only to prove the fallback (ADR 19)"
+        required: false
+        type: choice
+        options: ["g6.xlarge g5.xlarge", "g5.xlarge g6.xlarge"]
+        default: "g6.xlarge g5.xlarge"
       ha:
         description: "true runs two CPU nodes, two of each service, and loses one of them under traffic (ADR 20, about $0.30 more); not with gpu"
         required: false
@@ -106,6 +114,7 @@ jobs:
       started: ${{ steps.start.outputs.at }}
       gpu_started: ${{ steps.gpu_clock.outputs.at }}
       gpu_stopped: ${{ steps.gpu_stop.outputs.at }}
+      gpu_type: ${{ steps.gpu_type.outputs.type }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -179,6 +188,7 @@ jobs:
           BOUNDARY: ${{ vars.IAM_PERMISSIONS_BOUNDARY }}
           BUCKET: ${{ vars.TF_STATE_BUCKET }}
           DNS_FIREWALL: ${{ inputs.dns_firewall != 'false' }}
+          GPU_TYPES: ${{ inputs.gpu_types || 'g6.xlarge g5.xlarge' }}
         run: |
           ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
           node=m7i.large; [ "$AGENT" = true ] && node=m7i.xlarge
@@ -192,11 +202,12 @@ jobs:
               "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
               "node_instance_type": sys.argv[2],
               "nodes": 2 if os.environ["WITH_HA"] == "true" else 1,
+              "gpu_instance_types": os.environ["GPU_TYPES"].split(),
               "images": json.loads(sys.argv[3]),
           }, indent=1))
           PY
           aws s3 cp run.tfvars.json "s3://$BUCKET/airgap-runs/$RUN_ID.tfvars.json"
-          echo "agent: $AGENT, gpu: $WITH_GPU, ha: $WITH_HA, dns_firewall: $DNS_FIREWALL, node: $node x $(jq .nodes run.tfvars.json), repositories: $(jq '.images | length' run.tfvars.json)"
+          echo "agent: $AGENT, gpu: $WITH_GPU ($GPU_TYPES), ha: $WITH_HA, dns_firewall: $DNS_FIREWALL, node: $node x $(jq .nodes run.tfvars.json), repositories: $(jq '.images | length' run.tfvars.json)"
 
       - name: Terraform init, one state per run
         env:
@@ -332,15 +343,27 @@ jobs:
           echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
           terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true
 
+      # The type EC2 gave the node, read from the node: every number after
+      # this names its card, and the cost table its price.
+      - name: The GPU node's type
+        if: env.WITH_GPU == 'true'
+        id: gpu_type
+        run: |
+          kubectl wait nodes -l boundary.heyvaldemar.com/accelerator=nvidia --for=condition=Ready --timeout=900s
+          t="$(kubectl get nodes -l boundary.heyvaldemar.com/accelerator=nvidia -o jsonpath='{.items[0].metadata.labels.node\.kubernetes\.io/instance-type}')"
+          usd="$(./scripts/gpu.sh price "$t")"
+          [ -n "$usd" ] || { echo "the GPU node is a '${t:-node of no type}', which this run does not price" >&2; exit 1; }
+          echo "type=$t" >> "$GITHUB_OUTPUT"
+          { echo "GPU_TYPE=$t"; echo "SERVER_NODE=$t"; echo "SERVER_USD_PER_HOUR=$usd"; } >> "$GITHUB_ENV"
+          echo "the GPU node is a $t, of the types asked in this order: $(jq -r '.gpu_instance_types | join(", ")' run.tfvars.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: A GPU beside the CPU, the same signed model, measured
         if: env.WITH_GPU == 'true'
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CAPACITY_DIR: ${{ runner.temp }}/capacity
           NODE_TYPE: m7i.xlarge
-          GPU_TYPE: g6.xlarge
         run: |
-          kubectl wait nodes -l boundary.heyvaldemar.com/accelerator=nvidia --for=condition=Ready --timeout=900s
           ./scripts/gpu.sh install
           ./scripts/gpu.sh serve
           ./scripts/gpu.sh check
@@ -354,11 +377,8 @@ jobs:
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CAPACITY_DIR: ${{ runner.temp }}/capacity
-          GPU_TYPE: g6.xlarge
           EVALS_OUT: ${{ runner.temp }}/granite-4.1-8b
           EVALS_RESULTS: ${{ runner.temp }}/granite-4.1-8b/evals-results.json
-          SERVER_NODE: g6.xlarge
-          SERVER_USD_PER_HOUR: "0.8048"
         run: |
           ./scripts/gpu.sh larger
           ./scripts/gateway.sh route granite-4.1-8b=llama-gpu-8b
@@ -500,5 +520,7 @@ jobs:
           NODES: ${{ steps.state.outputs.nodes }}
           GPU_STARTED: ${{ needs.up.outputs.gpu_started }}
           GPU_STOPPED: ${{ needs.up.outputs.gpu_stopped }}
-          GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && 'g6.xlarge' || '' }}
+          # The type the node was, or the first one asked when the run
+          # stopped before it read the node.
+          GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && (needs.up.outputs.gpu_type || 'g6.xlarge') || '' }}
         run: ./scripts/aws.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true

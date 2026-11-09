@@ -264,8 +264,8 @@ run "the_gpu_node" {
   }
 
   assert {
-    condition     = aws_eks_node_group.gpu[0].ami_type == "AL2023_x86_64_NVIDIA" && aws_eks_node_group.gpu[0].instance_types == tolist(["g6.xlarge"]) && aws_eks_node_group.gpu[0].scaling_config[0].max_size == 1
-    error_message = "one g6.xlarge on EKS's NVIDIA image"
+    condition     = aws_eks_node_group.gpu[0].ami_type == "AL2023_x86_64_NVIDIA" && aws_eks_node_group.gpu[0].instance_types == tolist(["g6.xlarge", "g5.xlarge"]) && aws_eks_node_group.gpu[0].scaling_config[0].max_size == 1
+    error_message = "one g6.xlarge on EKS's NVIDIA image, or a g5.xlarge when EC2 has no g6.xlarge"
   }
   assert {
     condition     = anytrue([for t in aws_eks_node_group.gpu[0].taint : t.key == "nvidia.com/gpu" && t.effect == "NO_SCHEDULE"])
@@ -281,11 +281,22 @@ run "a_gpu_beyond_the_quota_is_refused" {
   command = plan
 
   variables {
-    gpu               = true
-    gpu_instance_type = "p5.48xlarge"
+    gpu                = true
+    gpu_instance_types = ["g6.xlarge", "p5.48xlarge"]
   }
 
-  expect_failures = [var.gpu_instance_type]
+  expect_failures = [var.gpu_instance_types]
+}
+
+run "no_gpu_type_at_all_is_refused" {
+  command = plan
+
+  variables {
+    gpu                = true
+    gpu_instance_types = []
+  }
+
+  expect_failures = [var.gpu_instance_types]
 }
 
 # ADR 20: two CPU nodes only for the node-loss drill, and never more.

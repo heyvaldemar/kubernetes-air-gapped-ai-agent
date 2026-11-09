@@ -175,8 +175,8 @@ PY
     ;;
   cost)
     # List prices, us-east-1, per hour, read from the AWS price list on
-    # 2026-10-21, the g6 nodes on 2026-10-22 from instances.vantage.sh, which
-    # republishes it: the EKS control plane, the nodes on demand, and an
+    # 2026-10-21, the g6 nodes on 2026-10-22 and the g5.xlarge on 2026-11-09
+    # from instances.vantage.sh, which republishes it: the EKS control plane, the nodes on demand, and an
     # interface endpoint per zone (six endpoints, two zones). The DNS
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
@@ -186,7 +186,7 @@ import sys
 now = int(sys.argv[2])
 hours = (now - int(sys.argv[1])) / 3600
 node, gpu, gpu_started, gpu_stopped, nodes = sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6], int(sys.argv[7] or 1)
-per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776}
+per_node = {"m7i.large": 0.1008, "m7i.xlarge": 0.2016, "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g5.xlarge": 1.006}
 # (what, per hour, hours). Two nodes (ADR 20) are priced as two for the
 # whole run; the one the drill loses is replaced within minutes, and both
 # bill meanwhile.

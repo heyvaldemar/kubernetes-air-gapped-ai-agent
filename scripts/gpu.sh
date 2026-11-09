@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gpu.sh <install|serve|check|measure|larger|reset> - a GPU beside the CPU (ADR 19), on the
+# gpu.sh <install|serve|check|measure|larger|reset|card|price> - a GPU beside the CPU (ADR 19), on the
 # AWS run's cluster once the CPU side is up: the same signed model, by the
 # same digest, served by the CUDA build of the same llama.cpp release.
 #
@@ -32,6 +32,10 @@
 #            restarted, so a second model's evals start where a fresh
 #            cluster's do: the records the service ships with, an empty
 #            outbox, an empty audit log, the gateway's counters at zero
+#   card <instance type> <GPU name>  what the run calls the card the node
+#            carries, or a refusal when the GPU nvidia-smi names is not the
+#            one that type carries (no cluster; check aws runs it)
+#   price <instance type>  its on-demand list price an hour, or nothing
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -43,7 +47,23 @@ GPU_NODE_LABEL=boundary.heyvaldemar.com/accelerator=nvidia
 LARGER=granite-4.1-8b
 # On-demand list prices, us-east-1, per hour, as scripts/aws.sh cost reads them.
 CPU_NODE="${NODE_TYPE:-m7i.xlarge}" GPU_NODE="${GPU_TYPE:-g6.xlarge}"
-price() { case "$1" in m7i.large) echo 0.1008 ;; m7i.xlarge) echo 0.2016 ;; g6.xlarge) echo 0.8048 ;; g6.2xlarge) echo 0.9776 ;; esac; }
+price() { case "$1" in m7i.large) echo 0.1008 ;; m7i.xlarge) echo 0.2016 ;; g6.xlarge) echo 0.8048 ;; g6.2xlarge) echo 0.9776 ;; g5.xlarge) echo 1.006 ;; esac; }
+# card <instance type> <the GPU nvidia-smi names>: what the run's results
+# call the card, or a refusal when the GPU is not the one that type carries.
+# The A10G is the fallback, on a node EC2 made when it had no L4 for the
+# node group (ADR 19, 2026-11-09); its numbers are named as the A10G's and
+# never put in a row with the L4's.
+card() {
+  case "$1:$2" in
+    "g6.xlarge:NVIDIA L4" | "g6.2xlarge:NVIDIA L4") echo "NVIDIA L4 ($1)" ;;
+    "g5.xlarge:NVIDIA A10G") echo "NVIDIA A10G (g5.xlarge), the fallback when EC2 has no L4" ;;
+    *) echo "the GPU node is a ${1:-node of no type} and its GPU says '${2:-nothing}': not a card this run knows" >&2; return 1 ;;
+  esac
+}
+# The measurement's labels name the card before the server exists, by the
+# GPU the node's type carries; check holds the GPU itself to that name.
+gpu_name="NVIDIA L4"; [ "${GPU_NODE%%.*}" != g5 ] || gpu_name="NVIDIA A10G"
+CARD="$(card "$GPU_NODE" "$gpu_name" 2>/dev/null || echo "$GPU_NODE")"
 say() { printf '== %s\n' "$*"; }
 results=(); measured=(); failed=0
 pass() { results+=("PASS  $1"); printf '  PASS  %s\n' "$1"; }
@@ -148,6 +168,15 @@ case "${1:-}" in
     # its memory; a server that fell back to the CPU leaves it near empty.
     mem="$(kubectl -n inference exec deploy/llama-gpu -- nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)"
     used="$(cut -d, -f2 <<<"$mem" | tr -d ' ')"
+    # The card, asked of the node's type and of the GPU itself: an A10G is
+    # named the fallback, and a GPU that is not the one its type carries
+    # fails the run.
+    itype="$(kubectl get nodes -l "$GPU_NODE_LABEL" -o jsonpath='{.items[0].metadata.labels.node\.kubernetes\.io/instance-type}' 2>/dev/null)"
+    if named="$(card "$itype" "$(cut -d, -f1 <<<"$mem" | sed 's/^ *//; s/ *$//')")" && [ "$itype" = "$GPU_NODE" ]; then
+      pass "the GPU node is a $itype and its GPU an $named"
+    else
+      fail "the GPU node's card: a ${itype:-node of no type}, measured as $GPU_NODE, its GPU '$(cut -d, -f1 <<<"$mem")'"
+    fi
     if [ -n "$used" ] && [ "$used" -ge 1024 ] 2>/dev/null; then
       pass "the model is on the GPU: the $(cut -d, -f1 <<<"$mem" | sed 's/^ *//') holds ${used} MiB of its$(cut -d, -f3 <<<"$mem") MiB (nvidia-smi, in the server's container)"
     else
@@ -175,6 +204,12 @@ EOF
     record
     exit "$failed"
     ;;
+  card)
+    card "${2:-}" "${3:-}"
+    ;;
+  price)
+    price "${2:-}"
+    ;;
   measure)
     dir="${CAPACITY_DIR:-$STATE/capacity}"
     mkdir -p "$dir/port-forward"
@@ -191,7 +226,7 @@ EOF
       gpu) ;;
       *) echo "usage: gpu.sh measure <cpu|gpu>" >&2; exit 2 ;;
     esac
-    in_cluster llama-gpu "$dir/gpu.json" "$MODEL" 8 0 "GPU, $GPU_NODE (L4)" \
+    in_cluster llama-gpu "$dir/gpu.json" "$MODEL" 8 0 "GPU, $CARD" \
       || { fail "the GPU server could not be measured from inside the cluster"; close_door; record; exit 1; }
     close_door; door_closed
     # The same server through a port-forward from the runner, as runs
@@ -200,7 +235,7 @@ EOF
     kubectl -n inference port-forward svc/llama-gpu 18081:8080 >/dev/null 2>&1 & pf=$!
     trap 'kill "$pf" 2>/dev/null; close_door' EXIT
     for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:18081/health" && break; sleep 1; done
-    MODEL="$MODEL" SLOTS=8 THREADS=0 ACCELERATOR="GPU, $GPU_NODE (L4), through a port-forward" MIN_SECONDS="${MIN_SECONDS:-30}" \
+    MODEL="$MODEL" SLOTS=8 THREADS=0 ACCELERATOR="GPU, $CARD, through a port-forward" MIN_SECONDS="${MIN_SECONDS:-30}" \
       python3 "$ROOT/scripts/capacity.py" run "http://127.0.0.1:18081" "$dir/port-forward/gpu.json" 1,2,4,8
     kill "$pf" 2>/dev/null
     rtt="$(api_rtt)"
@@ -265,7 +300,7 @@ PY
     else
       fail "$LARGER is not on the GPU: nvidia-smi in the server's container answered '${mem:-nothing}'"
     fi
-    if in_cluster llama-gpu-8b "$dir/gpu-8b.json" "$LARGER" 8 0 "GPU, $GPU_NODE (L4)"; then
+    if in_cluster llama-gpu-8b "$dir/gpu-8b.json" "$LARGER" 8 0 "GPU, $CARD"; then
       while IFS= read -r line; do
         case "$line" in PASS*) pass "${line#PASS  }" ;; FAIL*) fail "${line#FAIL  }" ;; M*) measure_line "${line#M  }" ;; esac
       done < <(python3 - "$dir/gpu-8b.json" "$(price "$GPU_NODE")" "$LARGER" <<'PY'
@@ -299,5 +334,5 @@ PY
     kubectl -n gateway rollout status deploy --timeout=180s >/dev/null
     say "the records service, the MCP server and the gateway's proxy restarted"
     ;;
-  *) echo "usage: gpu.sh <install|serve|check|measure|larger|reset>" >&2; exit 2 ;;
+  *) echo "usage: gpu.sh <install|serve|check|measure|larger|reset|card|price>" >&2; exit 2 ;;
 esac

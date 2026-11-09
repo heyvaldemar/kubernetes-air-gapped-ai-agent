@@ -541,6 +541,20 @@ if wf.partition("  down:")[2].count("./scripts/aws.sh volumes 0") != 1:
 if bad:
     print("Vault's volume on AWS: not " + "; not ".join(bad)); sys.exit(1)
 PY
+  # The GPU node's card (ADR 19, 2026-11-09): each type the node group may
+  # be given, named by the GPU it carries, the A10G as the fallback, and a
+  # GPU that is not the one its type carries refused.
+  local t n want got
+  while IFS='|' read -r t n want; do
+    got="$(./scripts/gpu.sh card "$t" "$n" 2>/dev/null)" || got=REFUSED
+    [ "$got" = "$want" ] || { echo "gpu.sh card $t '$n' says '$got', not '$want'"; ok=1; }
+  done <<'CARDS'
+g6.xlarge|NVIDIA L4|NVIDIA L4 (g6.xlarge)
+g5.xlarge|NVIDIA A10G|NVIDIA A10G (g5.xlarge), the fallback when EC2 has no L4
+g6.xlarge|NVIDIA A10G|REFUSED
+g5.xlarge|NVIDIA L4|REFUSED
+g5.xlarge||REFUSED
+CARDS
   if ! command -v terraform >/dev/null; then echo "check aws needs terraform"; return 1; fi
   if ! out="$(cd aws && terraform init -backend=false -input=false -lockfile=readonly >/dev/null 2>&1 && terraform test -no-color 2>&1)"; then
     echo "aws/'s tests failed: $(grep -E 'Error|error_message|Failure' <<<"$out" | head -5 | tr '\n' ' ')"; ok=1

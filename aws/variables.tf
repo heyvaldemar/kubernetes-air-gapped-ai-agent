@@ -117,13 +117,20 @@ variable "gpu" {
   default     = false
 }
 
-variable "gpu_instance_type" {
-  description = "The GPU node's instance type: one NVIDIA L4."
-  type        = string
-  default     = "g6.xlarge"
+variable "gpu_instance_types" {
+  description = <<-EOT
+    The GPU node's instance types, in the order EC2 is asked for them: one
+    NVIDIA L4 (g6.xlarge), and one NVIDIA A10G (g5.xlarge) when EC2 has no
+    L4 for it (ADR 19, 2026-11-09). EKS fills an On-Demand node group by
+    the order of its types. Runs 42005832115 and 42036957092 found no
+    g6.xlarge in us-east-1a and then us-east-1b, the run's two zones, and
+    made no GPU node.
+  EOT
+  type        = list(string)
+  default     = ["g6.xlarge", "g5.xlarge"]
 
   validation {
-    condition     = contains(["g6.xlarge", "g6.2xlarge"], var.gpu_instance_type)
-    error_message = "gpu_instance_type is g6.xlarge or g6.2xlarge: one L4, inside the 8 vCPUs the account's quota allows, and priced in scripts/aws.sh cost."
+    condition     = length(var.gpu_instance_types) > 0 && alltrue([for t in var.gpu_instance_types : contains(["g6.xlarge", "g6.2xlarge", "g5.xlarge"], t)])
+    error_message = "gpu_instance_types holds g6.xlarge, g6.2xlarge or g5.xlarge: one GPU each, inside the 8 vCPUs the account's quota allows, and priced in scripts/aws.sh cost."
   }
 }

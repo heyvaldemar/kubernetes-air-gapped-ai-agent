@@ -78,6 +78,14 @@ The two runs did not measure the same GPU. With one caller it served 224 calls a
 
 The larger model was fooled by the same planted report as the small one, every time, and its gates held because the boundary held, as they did for the small one. It was better at what is the model's own job: declining what the agent may not do, not inventing data, staying inside the rights of the person it acts for. It costs two and a half times as much a task on a node that costs four times as much an hour, and answered in half the time.
 
+## When EC2 has no L4, 2026-11-09
+
+The scheduled run of 2026-11-05, [42005832115](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42005832115), and the dispatch after it, [42036957092](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42036957092), made no GPU node: EC2 answered `InsufficientInstanceCapacity` for g6.xlarge in us-east-1a, then in us-east-1b, the run's two zones, and EKS gave the node group up after about half an hour each time (`CREATE_FAILED`, `AsgInstanceLaunchFailures`). Everything before the GPU had passed. The run's zones are the first two the region lists (`aws/network.tf`); a third would add six interface endpoints to every run, GPU or not.
+
+The node group now asks for two types, in order (`gpu_instance_types` in `aws/variables.tf`): g6.xlarge, one NVIDIA L4, and g5.xlarge, one NVIDIA A10G, with the same 24 GB of GPU memory, four vCPUs and 16 GiB, at $1.006 an hour against $0.8048 (instances.vantage.sh, 2026-11-09). EKS fills an On-Demand node group by the order of its types, so the A10G is made only when EC2 has no L4 for it. The run reads the type from the node it got, names the card wherever it names a number, `NVIDIA L4 (g6.xlarge)` or `NVIDIA A10G (g5.xlarge), the fallback when EC2 has no L4`, prices that type in the cost table, and fails when the GPU nvidia-smi names is not the one its type carries (`scripts/gpu.sh card`, held by check `aws` and three plants). An A10G's numbers are never put in a row with the L4's, and the README's GPU numbers stay the L4's. A dispatch can ask for the A10G first, `gpu_types: g5.xlarge g6.xlarge`, to prove the fallback; the schedule asks for the L4 first.
+
+The scheduled run before, [40845619217](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40845619217) on 2026-10-29, failed earlier, in the bundle: the 5 GB `granite-4.1-8b` layer broke off with an HTTP/2 `INTERNAL_ERROR` from the staging registry. `scripts/bundle.sh` has tried each copy up to three times since 90a8941, and the three GPU runs since needed no second try.
+
 ## Consequences
 
 - A g6.xlarge at $0.8048 an hour for the part of the run it exists: the second apply, the device plugin, the server, the checks and the measurement, then the destroy. Weekly, within the $15 a month the maintainer set for GPU work.
