@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-09
+
 ### Added
 
 - The records credential from Vault Community 2.2.1 (ADR 24, from the spike on `spike/vault-community`, on main since 3b97864): the static records key is gone. The MCP server logs in to Vault's Kubernetes auth with a projected token for Vault's audience (`vault.boundary.heyvaldemar.com`), gets a Vault token that lives 60 s and serves once, and reads a JWT signed RS256 by Vault for the audience `records-api`, scope `records:read outbox:send`, valid 60 s, until 15 s before it expires. `records_api.py` checks it with the standard library against Vault's public key set, which `scripts/vault.sh keys` writes into its ConfigMap: signature, issuer, audience, expiry, issue time, a lifetime of at most 60 s and the scope. No role issues `records:delete`. Vault runs on integrated storage, with TLS from a CA made per run, and is not in dev mode. `scripts/vault.sh install` initialises it with five Shamir shares, unseals it with three, configures it from `manifests/vault/`, makes an operator token for the drills and revokes the root token. Only the MCP server reaches Vault. `scripts/evals.sh` reads what the records service did from its log, not with a credential. Static check `vault` with 16 plants; `tests/e2e/vault.sh` in the gateway job; the plant `tests/e2e/plants/vault-not-carried.yaml`; `scripts/release-numbers.py <run> vault`. Branch run [41889356475](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/41889356475): 14 of 14 jobs, 35 of 35 checks in `tests/e2e/vault.sh`; the credential lives 60 s where the key had no expiry; Vault refused a new one 0.1 s after the cut-off, a copy got its first 401 after 59.6 to 60.1 s; the tool side's install went from 15 s to 44 s (median of 14 jobs) and the bundle from 3.6 GB to 4.2 GB. On the clouds, the next entry.
@@ -240,7 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.5.0...v1.6.0
