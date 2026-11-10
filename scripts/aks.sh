@@ -82,8 +82,9 @@ drop() {
   fi
 }
 
-# month_costs: this month's cost of every run, as JSON {run: {meter: cost}},
-# from Cost Management, by the runs' resource groups. On no answer it
+# month_costs: this month's cost of every run, as JSON {"currency": ...,
+# "runs": {run: {meter: cost}}}, from Cost Management, by the runs' resource
+# groups, in the account's billing currency. On no answer it
 # prints why and fails; it asks again while Cost Management says 429.
 month_costs() {
   local body out attempt
@@ -95,14 +96,15 @@ month_costs() {
 import json, re, sys
 d = json.loads(sys.argv[1])["properties"]
 cols = [c["name"] for c in d["columns"]]
-runs = {}
+runs, currency = {}, ""
 for row in d["rows"]:
     r = dict(zip(cols, row))
+    currency = r.get("Currency") or currency
     m = re.match(r"airgap-(\d+)(-nodes)?$", str(r.get("ResourceGroupName", "")), re.I)
     if m:
         runs.setdefault(m.group(1), {}).setdefault(r["MeterCategory"], 0.0)
         runs[m.group(1)][r["MeterCategory"]] += r["Cost"]
-print(json.dumps(runs))
+print(json.dumps({"currency": currency, "runs": runs}))
 ' "$out"
       return 0
     fi
@@ -273,10 +275,12 @@ PY
     if ! out="$(month_costs)"; then printf '%s\n' "$out"; exit 0; fi
     python3 -c '
 import json, sys
-runs = json.loads(sys.argv[1])
+d = json.loads(sys.argv[1])
+runs = d["runs"]
 if not runs:
     print("no run has a cost recorded yet")
     sys.exit(0)
+print("Amounts in %s, the account'"'"'s billing currency.\n" % (d["currency"] or "the billing currency"))
 print("| Run | What | Cost |\n|---|---|---|")
 for run in sorted(runs):
     for what, cost in sorted(runs[run].items()):
@@ -321,6 +325,11 @@ if float(p["amount"]) > float(sys.argv[4]) or not on:
     else
       echo "the spending limit is $limit and there is no budget $CEILING: no run without the ceiling" >&2; exit 1
     fi
+    # Every budget in the subscription, the portal's own among them: named,
+    # never changed from here.
+    az rest --method get -o tsv --only-show-errors \
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Consumption/budgets?api-version=2024-08-01" \
+      --query "value[].[name, properties.amount, properties.timeGrain]" | sed 's/^/  every budget: /'
     ;;
   ceiling)
     # With the creation identity: make the ceiling budget if it is missing,
@@ -362,7 +371,7 @@ print(json.dumps({"properties": {"category": "Cost", "amount": amount, "timeGrai
     if ! out="$(month_costs)"; then printf '%s; going on, with list prices as the only count\n' "$out"; exit 0; fi
     python3 -c '
 import json, sys
-spent = sum(sum(r.values()) for r in json.loads(sys.argv[1]).values())
+spent = sum(sum(r.values()) for r in json.loads(sys.argv[1])["runs"].values())
 cap, one = float(sys.argv[2]), float(sys.argv[3])
 print("this month the runs have cost $%.2f in Cost Management; with one more, about $%.2f, of the $%.2f a month allowed" % (spent, spent + one, cap))
 if spent + one > cap:
