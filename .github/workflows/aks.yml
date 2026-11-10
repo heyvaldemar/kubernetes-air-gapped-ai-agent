@@ -40,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type SPEND to create billed Azure resources (about $1.80 a run, most of it the registry's day)"
+        description: "Type SPEND to create billed Azure resources (about $0.07 a run at list prices; Cost Management counted $0.04)"
         required: true
         type: string
       dns_firewall:

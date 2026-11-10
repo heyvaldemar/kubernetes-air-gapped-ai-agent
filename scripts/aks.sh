@@ -37,10 +37,11 @@ shopt -s inherit_errexit
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_CONTAINER=airgap-runs
 # The maintainer's limits (2026-10-29 and 2026-10-30): the subscription's
-# budget, and what the runs may cost in a month; one run at list prices.
+# budget, and what the runs may cost in a month; one run with room to spare
+# (about $0.07 at list prices, $0.04 in Cost Management for run 41626192017).
 BUDGET=flagship-monthly
 CAP=10
-ONE_RUN=1.75
+ONE_RUN=0.25
 # The credential store bundle.sh and the checks read, as on kind.
 export DOCKER_CONFIG="$ROOT/.cache/airgap/docker"
 say() { printf '== %s\n' "$*"; }
@@ -228,11 +229,11 @@ case "${1:-}" in
   cost)
     # List prices, eastus, per hour, read from the Azure Retail Prices API on
     # 2026-10-29. AKS's Free tier control plane has a meter of its own since
-    # 2026-10-01 (FreeTierInfrastructureCost). A Premium registry is priced
-    # per day, and counted here as one whole day, however short the run;
-    # Cost Management, below, says whether Azure counts it so. The private
-    # zone and the resolver policy's three domains are priced per month,
-    # counted by the hour. DNS queries and the bytes through the private
+    # 2026-10-01 (FreeTierInfrastructureCost). A Premium registry's price is
+    # per day, and Azure bills the hours it lives: Cost Management counted
+    # $0.016 for the registry of run 41626192017 and $0.04 for the whole run.
+    # So it is counted here by the hour, as the private zone and the resolver
+    # policy's three domains, priced per month, are. DNS queries and the bytes through the private
     # endpoint round to nothing for one run.
     : "${STARTED:?}"
     python3 - "$STARTED" "$(date +%s)" "${NODE_SIZE:-Standard_D2as_v7}" <<'PY'
@@ -245,12 +246,12 @@ rows = [("AKS Free tier control plane", 0.05, hours),
         ("its 64 GB Premium SSD (P6) OS disk", 9.86 / 730, hours),
         ("the registry's private endpoint", 0.01, hours),
         ("the private zone privatelink.azurecr.io", 0.50 / 730, hours),
-        ("the resolver policy's three domains", 3 * 0.50 / 730, hours)]
+        ("the resolver policy's three domains", 3 * 0.50 / 730, hours),
+        ("the Premium registry, $1.6666 a day", 1.6666 / 24, hours)]
 print("| What | Per hour | This run |\n|---|---|---|")
 for what, rate, h in rows:
     print("| %s | $%.4f | $%.2f |" % (what, rate, rate * h))
-print("| a Premium registry, priced per day | $1.6666 a day | $1.67 |")
-total = sum(r * h for _, r, h in rows) + 1.6666
+total = sum(r * h for _, r, h in rows)
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, total))
 PY
     printf '\nCost Management, this month, by run:\n\n'

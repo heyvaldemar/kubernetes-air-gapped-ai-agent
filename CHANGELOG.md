@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The AKS run's cost table counts the Premium registry by the hour: Cost Management counted the first scheduled run, 41626192017, at $0.04 in all, $0.016 of it the registry, where the table had counted the registry's whole day and $1.72 a run (ADR 23). The guard keeps $0.25 of room for a run under the $10 a month, not $1.75. The second scheduled run, 42809539539 on 2026-11-10, passed 21 of 21 and left nothing.
 - The README's two AWS rows said "weekly since 22 October 2026", and the two scheduled runs after that one failed (40845619217 on 2026-10-29, 42005832115 on 2026-11-05). They say now: scheduled weekly since 22 October, the last scheduled pass on 22 October (39744285464), the two failures and why, and the last pass by hand from main, 42460476500 on 2026-11-08.
 
 ## [1.9.0] - 2026-11-09
