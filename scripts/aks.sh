@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|guard>
+# aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard>
 # - the parts of the AKS run (ADR 23) that are not Terraform.
 # .github/workflows/aks.yml and aks-sweep.yml call them, logged in with az as
 # the run's identity; each reads the environment the workflow sets:
@@ -27,9 +27,12 @@
 #              Cost Management has measured for the runs before it
 #   spend      what Cost Management has counted for each run this month
 #   budget     the subscription's budget is there, $10 a month at most, with
-#              its alerts on
-#   guard      before a run applies: the budget, and room under the $10 a
-#              month the maintainer allowed the runs for one more
+#              its alerts on; and on Pay-As-You-Go, the $20 ceiling budget too
+#   ceiling    with the creation identity: make the $20 ceiling budget if it
+#              is missing
+#   guard      before a run applies: the ceiling made if missing, the budgets,
+#              and room under the $10 a month the maintainer allowed the runs
+#              for one more
 set -euo pipefail
 # An az that fails inside $(...) must stop the script, not read as "nothing
 # there".
@@ -42,6 +45,11 @@ STATE_CONTAINER=airgap-runs
 BUDGET=flagship-monthly
 CAP=10
 ONE_RUN=0.25
+# On Pay-As-You-Go, which has no spending limit, a second budget is the
+# ceiling the maintainer named for the subscription on 2026-11-10: $20 a
+# month, with alerts at $10, $15 and $20 spent and at $20 forecast.
+CEILING=flagship-ceiling
+CEILING_AMOUNT=20
 # The credential store bundle.sh and the checks read, as on kind.
 export DOCKER_CONFIG="$ROOT/.cache/airgap/docker"
 say() { printf '== %s\n' "$*"; }
@@ -294,12 +302,62 @@ print("budget %s: $%s a %s, $%s spent so far, %d alerts on: %s" % (sys.argv[2], 
 if float(p["amount"]) > float(sys.argv[3]) or not on:
     sys.exit("the budget is not the $%s a month with alerts the maintainer approved" % sys.argv[3])
 ' "$b" "$BUDGET" "$CAP"
+    # The trial stops spending at its limit; Pay-As-You-Go has none, and
+    # then no run goes on without the ceiling.
+    limit="$(az rest --method get -o tsv --only-show-errors --query subscriptionPolicies.spendingLimit \
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID?api-version=2022-12-01")"
+    if c="$(az rest --method get -o json --only-show-errors \
+        --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Consumption/budgets/$CEILING?api-version=2024-08-01" 2>/dev/null)"; then
+      python3 -c '
+import json, sys
+p = json.loads(sys.argv[1])["properties"]
+on = sorted(n["threshold"] * p["amount"] / 100 for n in p.get("notifications", {}).values() if n.get("enabled") and n.get("thresholdType", "Actual") == "Actual")
+print("budget %s: $%s a month, alerts at $%s spent; the spending limit is %s" % (sys.argv[2], p["amount"], ", $".join("%g" % x for x in on), sys.argv[3]))
+if float(p["amount"]) > float(sys.argv[4]) or not on:
+    sys.exit("the ceiling is not the $%s a month with alerts the maintainer named" % sys.argv[4])
+' "$c" "$CEILING" "$limit" "$CEILING_AMOUNT"
+    elif [ "$limit" = On ]; then
+      echo "no budget $CEILING yet; the spending limit is On, so the trial's limit is the ceiling"
+    else
+      echo "the spending limit is $limit and there is no budget $CEILING: no run without the ceiling" >&2; exit 1
+    fi
+    ;;
+  ceiling)
+    # With the creation identity: make the ceiling budget if it is missing,
+    # never change one that is there. Its alerts go where the first
+    # budget's do, read from it here and written into Azure alone, never
+    # into this repository or a log.
+    : "${AZURE_SUBSCRIPTION_ID:?}"
+    base="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Consumption/budgets"
+    if az rest --method get -o none --only-show-errors --url "$base/$CEILING?api-version=2024-08-01" 2>/dev/null; then
+      say "budget $CEILING is there"; exit 0
+    fi
+    body="$(mktemp)"
+    az rest --method get -o json --only-show-errors --url "$base/$BUDGET?api-version=2024-08-01" | python3 -c '
+import json, sys, datetime
+first = json.load(sys.stdin)["properties"]
+emails = sorted({e for n in first.get("notifications", {}).values() for e in n.get("contactEmails", [])})
+amount = int(sys.argv[1])
+def alert(pct, kind):
+    return {"enabled": True, "operator": "GreaterThanOrEqualTo", "threshold": pct, "thresholdType": kind,
+            "contactEmails": emails, "contactRoles": ["Owner"]}
+start = datetime.date.today().replace(day=1).isoformat() + "T00:00:00Z"
+print(json.dumps({"properties": {"category": "Cost", "amount": amount, "timeGrain": "Monthly",
+      "timePeriod": {"startDate": start},
+      "notifications": {"actual-10": alert(50, "Actual"), "actual-15": alert(75, "Actual"),
+                        "actual-20": alert(100, "Actual"), "forecast-20": alert(100, "Forecasted")}}}))
+' "$CEILING_AMOUNT" >"$body"
+    # From a file, so no address is ever on a command line.
+    az rest --method put -o none --only-show-errors --url "$base/$CEILING?api-version=2024-08-01" --body "@$body"
+    rm -f "$body"
+    say "budget $CEILING made: \$$CEILING_AMOUNT a month, alerts at \$10, \$15 and \$20 spent and \$20 forecast"
     ;;
   guard)
     # Before anything is billed: the budget is there, and this month's runs
     # have left room for one more under the $10 a month the maintainer
     # allowed for them (2026-10-30). A budget only alerts; this refuses.
     : "${AZURE_SUBSCRIPTION_ID:?}"
+    "$0" ceiling
     "$0" budget
     if ! out="$(month_costs)"; then printf '%s; going on, with list prices as the only count\n' "$out"; exit 0; fi
     python3 -c '
@@ -311,5 +369,5 @@ if spent + one > cap:
     sys.exit("one more run would pass the $%.2f a month the maintainer allowed: none until next month, unless he raises it" % cap)
 ' "$out" "$CAP" "$ONE_RUN"
     ;;
-  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|guard>" >&2; exit 2 ;;
+  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard>" >&2; exit 2 ;;
 esac
