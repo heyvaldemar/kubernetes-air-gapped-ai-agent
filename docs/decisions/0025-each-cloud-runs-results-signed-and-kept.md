@@ -1,6 +1,6 @@
 # 25. Each cloud run's results, signed by the repository that ran it, on a branch that does not expire
 
-- Status: proposed, 2026-11-11, on branch `keep-cloud-results`. The workflow runs on main only, so it has not run yet; the script it calls has read three real runs and passes 30 cases against a GitHub made of files
+- Status: accepted, 2026-11-11. On main since 680d0f7; run 43117917434 kept the first record, and all 43 records the branch held that day verify from a clean clone of it
 - Date: 2026-11-11
 
 ## Context
@@ -44,11 +44,25 @@ sha256sum e2e-results-aws.zip   # the value record.json gives as artifact.sha256
 - `tests/static/cloud-results.py`, 30 cases against a GitHub made of files: a run on a branch, a fork's, another repository's, another workflow's, one a pull request started and one still going are not kept; nor is a file that is not the one GitHub reports, one larger than 5 MB, one of two artifacts of the same name, one that holds something shaped like a credential (each shape is tried), one that holds a file that is not `.json` or `.jsonl` or is not text, one that is no archive, or one that unpacks to more than 50 MB; nor a run whose id is written in another script's digits; a failed run, a run that uploaded nothing and an expired artifact each leave the record they should; a record the branch holds is not replaced.
 - Static check `results` holds the workflow to the points above, and 34 plants in `tests/static/plants.tsv` break it and the script one way each. All 34 are caught.
 
-The signature and the branch are not measured: the workflow can only run on main.
+## On main, 2026-11-11
+
+The first run, [43117917434](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43117917434), was started by hand with the id of the scheduled AKS run 42809539539. Both jobs passed, and the branch `cloud-results` began at 9b17bc8, a commit with no parent in main.
+
+Checked from a clean clone of that branch, made with no credential:
+
+- `cosign verify-blob` with the exact identity above says "Verified OK";
+- the record with one byte added is refused, and so is the same record under the identity of `aks.yml`;
+- the file's sha256 is the one the record names, `95f61d15...4826`, which is the digest GitHub reports for the artifact;
+- an anonymous request for the record through raw.githubusercontent.com is answered.
+
+Then every other finished cloud run on main, oldest first, one dispatch each: 42 runs of the workflow, the last [43121549369](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43121549369), all green. At 446ebe0 the branch holds 43 records. Of the scheduled runs, four passed (one on AWS, one on GKE, two on AKS) and three failed (two on AWS, one on GKE); of the runs by hand, 16 passed and 20 failed. Thirty records have the file the run uploaded, and 13 say the run uploaded nothing. All 43 signatures verify from a clean clone, each file has the sha256 its record names, and everything in the records' directories is 782,631 bytes, most of it the 43 Sigstore bundles.
+
+The trigger fired once that day, and the run it started was red. The AWS run [43101489006](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43101489006), by hand on main, finished after the merge; run [43118867857](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43118867857) of this workflow started by itself for it and kept nothing: "the artifact holds _temp/ec2/activities.part, which is neither .json nor .jsonl". Since 1798284 `scripts/aws.sh` writes that scratch file beside `activities.json` and the run uploads the whole directory. The file is JSON text and holds nothing shaped like a credential, so the rule did what it is for and refused a kind of file nobody had looked at. The fix was made where the file came from: since 710c025 the scratch file is written outside the directory the run uploads, and a case of `tests/static/aws-gpu-capacity.sh` fails if anything under `ec2/` is not `.json`. Run 43101489006 itself has no record on the branch, since an artifact cannot be changed after its run.
 
 ## Consequences
 
 - A cloud run's results outlive GitHub's 90 days, and a reader needs no account and no trust in a copy: the signature is the repository's that ran the cloud.
+- A run whose artifact holds a file that is not `.json` or `.jsonl` is not kept, and this workflow's run for it is red, as on its first day. That is the cost of searching before keeping: a new kind of file in an artifact needs a decision here first.
 - It keeps the runs that are still there. The results of runs whose artifacts had already expired are gone, and no record is invented for them.
 - A cloud workflow renamed stops being followed. Static check `results` compares the names, and a plant renames one.
 - The record is signed after the run, by another workflow, from GitHub's record of it. A cloud job signing its own results would tie the file to the job that made it. That is a change to three workflows that create billed resources, and it is not made here.
