@@ -1,0 +1,53 @@
+{
+ "artifact": {
+  "created_at": "2026-11-03T11:27:27Z",
+  "expires_at": "2027-02-01T11:16:39Z",
+  "file": "e2e-results-aks.zip",
+  "id": 13226642523,
+  "name": "e2e-results-aks",
+  "sha256": "d06d9995caa696645759db0b861ac76b34892268666c89c32684aa7cb88c275b",
+  "size_in_bytes": 735
+ },
+ "cloud": "aks",
+ "jobs": [
+  {
+   "completed_at": "2026-11-03T11:27:30Z",
+   "conclusion": "success",
+   "name": "Apply, load, check",
+   "started_at": "2026-11-03T11:16:43Z"
+  },
+  {
+   "completed_at": "2026-11-03T11:16:39Z",
+   "conclusion": "skipped",
+   "name": "A branch gets no credential",
+   "started_at": "2026-11-03T11:16:39Z"
+  },
+  {
+   "completed_at": "2026-11-03T11:38:08Z",
+   "conclusion": "success",
+   "name": "Delete, look for residue, report the cost",
+   "started_at": "2026-11-03T11:27:34Z"
+  }
+ ],
+ "kept_by": ".github/workflows/cloud-results.yml",
+ "repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+ "run": {
+  "conclusion": "success",
+  "created_at": "2026-11-03T11:16:39Z",
+  "event": "schedule",
+  "head_branch": "main",
+  "head_repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+  "head_sha": "27ba3c85c3f1c6e8853ef909fd5ee4da75b4b7f8",
+  "html_url": "https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/41626192017",
+  "id": 41626192017,
+  "name": "The boundary on AKS",
+  "path": ".github/workflows/aks.yml",
+  "repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+  "run_attempt": 1,
+  "run_number": 6,
+  "run_started_at": "2026-11-03T11:16:39Z",
+  "status": "completed",
+  "updated_at": "2026-11-03T11:38:08Z"
+ },
+ "schema": 1
+}
