@@ -107,6 +107,16 @@
 #                 every dependency naming one that exists; and an SPDX
 #                 expression is concluded to the ids the site allows, or
 #                 refused, as nine cases say it must be
+#   results       each cloud run's results, kept (ADR 25): cloud-results.yml
+#                 follows exactly the three cloud workflows by the names they
+#                 have, on main, holds a run to this repository's own code
+#                 and to the schedule or a dispatch by hand, signs in one job
+#                 and writes the branch in another, runs in no environment,
+#                 reads no stored secret and logs in to no cloud; and
+#                 scripts/cloud-results.py passes tests/static/cloud-results.py
+#                 against a GitHub made of files (a run on a branch, a fork's
+#                 run, another workflow's, one a pull request started, a file
+#                 that is not the one GitHub reports, a record already kept)
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -904,8 +914,62 @@ PY
   return "$ok"
 }
 
+check_results() {
+  local ok=0 out
+  python3 - <<'PY' || ok=1
+import re, sys
+wf = open(".github/workflows/cloud-results.yml").read()
+script = open("scripts/cloud-results.py").read()
+bad = []
+names = [re.search(r"^name: (.+)$", open(".github/workflows/%s.yml" % c).read(), re.M).group(1) for c in ("aws", "gke", "aks")]
+m = re.search(r"^  workflow_run:\n    workflows: \[(.+)\]\n    types: \[completed\]\n    branches: \[main\]$", wf, re.M)
+if not m:
+    bad.append("triggered by finished runs on main")
+elif sorted(re.findall(r'"([^"]+)"', m.group(1))) != sorted(names):
+    bad.append("following exactly the three cloud workflows, by the names they have (%s)" % ", ".join(names))
+if re.search(r"^  (push|pull_request|pull_request_target|schedule|release):", wf, re.M):
+    bad.append("started only by a finished cloud run or by hand")
+guard = ("github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' ||\n"
+         "      (github.event.workflow_run.head_branch == 'main' &&\n"
+         "      github.event.workflow_run.head_repository.full_name == github.repository &&\n"
+         "      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch')))\n")
+if guard not in wf:
+    bad.append("held to main, to this repository's own code, and to the schedule or a dispatch by hand")
+if not re.search(r"^permissions:\n  contents: read\n", wf, re.M):
+    bad.append("read-only for every job that does not say otherwise")
+sign = wf.partition("\n  sign:\n")[2].partition("\n  keep:\n")[0]
+keep = wf.partition("\n  keep:\n")[2]
+for grant, job, what in (("id-token: write", sign, "signing in the sign job alone"),
+                         ("actions: read", sign, "reading runs in the sign job alone"),
+                         ("contents: write", keep, "writing the branch in the keep job alone")):
+    if wf.count(grant) != 1 or grant not in job:
+        bad.append(what)
+if re.search(r"^\s+environment:", wf, re.M) or "secrets." in wf:
+    bad.append("outside every environment, reading no stored secret")
+if re.search(r"configure-aws-credentials|google-github-actions|azure/login|setup-terraform|terraform |gcloud |aws-actions|\baz ", wf):
+    bad.append("with no cloud login and no cloud tool")
+if not re.search(r"^concurrency:\n  group: cloud-results\n  cancel-in-progress: false$", wf, re.M):
+    bad.append("one run at a time, none cancelled")
+if wf.count("persist-credentials: false") != wf.count("uses: actions/checkout@"):
+    bad.append("checking out without leaving the token behind")
+if any(not re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", u) for u in re.findall(r"uses: (\S+)", wf)):
+    bad.append("with every action pinned by commit")
+if '.github/workflows/cloud-results.yml@refs/heads/main" \\' not in wf:
+    bad.append("verifying its own signature as this workflow on main, and no wider")
+if re.search(r"tarfile|unpack_archive|extractall|\.extract\(|subprocess|os\.system|\beval\(|\bexec\(", script):
+    bad.append("reading the artifact in memory only and running nothing (scripts/cloud-results.py)")
+if bad:
+    print("cloud-results.yml: not " + "; not ".join(bad)); sys.exit(1)
+PY
+  if ! out="$(python3 tests/static/cloud-results.py 2>&1)"; then
+    echo "scripts/cloud-results.py's cases failed: $(grep '^FAIL' <<<"$out" | head -3 | tr '\n' ' ')$(grep -q '^FAIL' <<<"$out" || tail -n 2 <<<"$out" | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "a finished cloud run's results are kept only from main, this repository's own code and the three cloud workflows, by a workflow with no cloud credential that signs in one job and writes the branch in another, and $(grep -c '^PASS' <<<"$out") cases of what is kept and what is not hold"
+  return "$ok"
+}
+
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom results)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

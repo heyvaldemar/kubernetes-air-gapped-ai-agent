@@ -28,3 +28,4 @@ Each record states the context, the decision, what it costs, what was considered
 | 22 | [The boundary on GKE: no route out but to Google's own front doors, and no name lookup out](0022-the-boundary-on-gke.md) | accepted |
 | 23 | [The boundary on AKS: a network isolated cluster, no name lookup out, and one delete](0023-the-boundary-on-aks.md) | accepted for phase 1 |
 | 24 | [A one-minute records credential from Vault, in place of the records key](0024-a-one-minute-records-credential-from-vault.md) | accepted on kind; the cloud legs wait |
+| 25 | [Each cloud run's results, signed by the repository that ran it, on a branch that does not expire](0025-each-cloud-runs-results-signed-and-kept.md) | proposed; the workflow runs on main only and has not run |

@@ -246,6 +246,7 @@ The [threat model](docs/threat-model.md) lists every threat with its control and
 | 22 | [The boundary on GKE: no route out but to Google's own front doors, and no name lookup out](docs/decisions/0022-the-boundary-on-gke.md) |
 | 23 | [The boundary on AKS: a network isolated cluster, no name lookup out, and one delete](docs/decisions/0023-the-boundary-on-aks.md) |
 | 24 | [A one-minute records credential from Vault, in place of the records key](docs/decisions/0024-a-one-minute-records-credential-from-vault.md) |
+| 25 | [Each cloud run's results, signed by the repository that ran it, on a branch that does not expire](docs/decisions/0025-each-cloud-runs-results-signed-and-kept.md) |
 
 ## Related
 
