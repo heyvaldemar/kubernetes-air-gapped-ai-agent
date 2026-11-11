@@ -22,6 +22,12 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The checks that run Terraform's tests. Once validate.sh has run, each
+# cloud directory holds its providers under .terraform, 770 MB for aws/
+# alone; a plant for any other check is copied without them. With them in
+# every copy, the static job took 15 min 52 s for main's 142 plants (run
+# 42918384643) and 20 min 33 s of its 25 for 159 (branch run 43094612785).
+TERRAFORM_CHECKS = {"aws", "gke", "aks"}
 
 
 def main():
@@ -35,8 +41,9 @@ def main():
     for fname, old, new, check, what in plants:
         work = tempfile.mkdtemp(prefix="plant-")
         try:
+            skip = [".git", "out"] + ([] if check in TERRAFORM_CHECKS else [".terraform"])
             shutil.copytree(ROOT, work, dirs_exist_ok=True, symlinks=True,
-                            ignore=shutil.ignore_patterns(".git", "out"))
+                            ignore=shutil.ignore_patterns(*skip))
             path = os.path.join(work, fname)
             text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
             if old not in text:

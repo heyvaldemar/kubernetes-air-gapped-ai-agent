@@ -15,7 +15,20 @@ mock_provider "aws" {
     defaults = { issuer_arn = "arn:aws:iam::123456789012:role/platform-validation-create" }
   }
   mock_data "aws_availability_zones" {
-    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"] }
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1e", "us-east-1f"] }
+  }
+  # Where EC2 offers the GPU node's types: not in us-east-1e.
+  mock_data "aws_ec2_instance_type_offerings" {
+    defaults = { locations = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1f"] }
+  }
+  # For the one run that applies: the provider checks that a role's ARN and
+  # a launch template's id are what they say before a cluster or a node
+  # group takes them.
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/reference-platform-mocked" }
+  }
+  mock_resource "aws_launch_template" {
+    defaults = { id = "lt-0123456789abcdef0", latest_version = 1 }
   }
 }
 
@@ -254,6 +267,10 @@ run "no_gpu_unless_asked" {
     condition     = length(aws_eks_node_group.gpu) == 0 && length(aws_launch_template.gpu) == 0
     error_message = "a run without gpu makes no GPU node"
   }
+  assert {
+    condition     = length(aws_subnet.gpu) == 0 && length(output.gpu_zones) == 0
+    error_message = "a run without gpu makes no GPU subnet"
+  }
 }
 
 run "the_gpu_node" {
@@ -274,6 +291,75 @@ run "the_gpu_node" {
   assert {
     condition     = aws_launch_template.gpu[0].metadata_options[0].http_tokens == "required" && aws_launch_template.gpu[0].metadata_options[0].http_put_response_hop_limit == 1
     error_message = "IMDSv2 only, one hop, on the GPU node too"
+  }
+}
+
+# 2026-11-11: the GPU node in whichever zone has a GPU, and the GPU subnets
+# as closed as the two the boundary is checked in.
+run "the_gpu_node_in_every_zone_that_offers_it" {
+  command = plan
+
+  variables {
+    gpu = true
+  }
+
+  assert {
+    condition     = join(" ", [for s in aws_subnet.gpu : s.availability_zone]) == "us-east-1c us-east-1d us-east-1f"
+    error_message = "a GPU subnet in every other zone that offers each of the node's types, and none where they are not offered (us-east-1e)"
+  }
+  assert {
+    condition     = join(" ", output.gpu_zones) == "us-east-1a us-east-1b us-east-1c us-east-1d us-east-1f"
+    error_message = "the GPU node group asks in the run's two zones and in every other that offers its types"
+  }
+  assert {
+    condition     = alltrue([for s in aws_subnet.gpu : s.map_public_ip_on_launch == false]) && length(aws_route_table_association.gpu) == length(aws_subnet.gpu)
+    error_message = "no GPU subnet gives anything a public address, and each is on a route table"
+  }
+  assert {
+    condition     = length(setintersection([for s in aws_subnet.gpu : s.cidr_block], [for s in aws_subnet.private : s.cidr_block])) == 0 && alltrue([for s in aws_subnet.gpu : cidrhost(s.cidr_block, 0) != cidrhost("10.42.0.0/16", 0) && startswith(s.cidr_block, "10.42.")])
+    error_message = "the GPU subnets are inside the VPC's range, which the endpoints answer, and overlap neither private subnet"
+  }
+}
+
+# A zone that offers one of the node's types and not the other gets no
+# GPU subnet: the node group asks for both types in every subnet it has.
+run "a_gpu_zone_offers_every_type_the_node_may_be" {
+  command = plan
+
+  variables {
+    gpu = true
+  }
+
+  override_data {
+    target = data.aws_ec2_instance_type_offerings.gpu["g5.xlarge"]
+    values = { locations = ["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1e", "us-east-1f"] }
+  }
+
+  assert {
+    condition     = join(" ", [for s in aws_subnet.gpu : s.availability_zone]) == "us-east-1c us-east-1f"
+    error_message = "with the A10G offered in a, b, c, e and f and the L4 in a, b, c, d and f, the GPU subnets are in c and f: not in d or e, which offer one type alone"
+  }
+}
+
+# The node group itself spans them: only an apply knows a subnet's id.
+run "the_gpu_node_group_spans_every_gpu_zone" {
+  command = apply
+
+  variables {
+    gpu = true
+  }
+
+  assert {
+    condition     = length(aws_eks_node_group.gpu[0].subnet_ids) == 5 && length(setsubtract(toset(aws_subnet.gpu[*].id), aws_eks_node_group.gpu[0].subnet_ids)) == 0
+    error_message = "the GPU node group asks in all five subnets, the two private ones and the three GPU ones"
+  }
+  assert {
+    condition     = toset(aws_route_table_association.gpu[*].route_table_id) == toset([aws_route_table.private[0].id])
+    error_message = "the GPU subnets are on the first private subnet's route table: the VPC's own range and S3's prefix list, nothing else"
+  }
+  assert {
+    condition     = toset(aws_vpc_endpoint.s3.route_table_ids) == toset(aws_route_table.private[*].id)
+    error_message = "S3's gateway endpoint is on the private route tables, the one the GPU subnets use among them"
   }
 }
 

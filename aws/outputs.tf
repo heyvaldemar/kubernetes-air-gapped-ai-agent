@@ -23,3 +23,8 @@ output "vpc_id" {
 output "dns_firewall" {
   value = var.dns_firewall
 }
+
+output "gpu_zones" {
+  description = "The zones the GPU node group asks EC2 in, when the run has one: the two private subnets' and every other that offers its types."
+  value       = var.gpu ? concat(local.azs, local.gpu_azs) : []
+}

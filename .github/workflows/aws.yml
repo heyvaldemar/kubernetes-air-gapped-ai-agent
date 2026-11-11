@@ -20,7 +20,11 @@ name: The boundary on AWS
 # by the CUDA build of the same llama.cpp release, both measured with the
 # agent's own calls. WITH_GPU says
 # whether a run adds it: by hand when the dispatch says so, and on the
-# schedule once AWS_GPU_ENABLED is true.
+# schedule once AWS_GPU_ENABLED is true. The node group asks in every zone
+# of the region that offers its types. When EC2 has no GPU in any of them
+# the run says so, "GPU: no capacity", measures nothing on a GPU and keeps
+# every check it made before; on the schedule, the second run in a row
+# that is given none fails (ADR 19, 2026-11-11).
 #
 # In the validation account aws-eks-reference-platform set up (its ADR 10),
 # through its creation role, which trusts this repository's aws-validation
@@ -98,6 +102,9 @@ env:
   MODEL: granite-4.0-1b
   TASK_FLOOR: "on"
   OFFER_PATTERNS: "on"
+  # How many scheduled runs in a row may be given no GPU by EC2 before the
+  # run fails for it: the second one does (ADR 19, 2026-11-11).
+  GPU_MISSES_IN_A_ROW: "2"
 
 jobs:
   up:
@@ -105,16 +112,23 @@ jobs:
     if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AWS_VALIDATION_ENABLED == 'true'))
     runs-on: ubuntu-latest
     environment: aws-validation
-    timeout-minutes: 130
+    # Run 42656218231 took 112 minutes with a GPU node EC2 gave at once. A
+    # node group waits about half an hour for one before EKS gives it up,
+    # and a GPU that comes at the end of that wait is still measured.
+    timeout-minutes: 170
     permissions:
       contents: read
       # The OIDC token the creation role trusts, for this environment only.
       id-token: write
+      # What the scheduled runs before this one did, when EC2 gives this
+      # one no GPU (scripts/aws.sh missed).
+      actions: read
     outputs:
       started: ${{ steps.start.outputs.at }}
       gpu_started: ${{ steps.gpu_clock.outputs.at }}
       gpu_stopped: ${{ steps.gpu_stop.outputs.at }}
       gpu_type: ${{ steps.gpu_type.outputs.type }}
+      gpu_node: ${{ steps.gpu_clock.outputs.node }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -179,6 +193,13 @@ jobs:
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
         run: ./scripts/aws.sh sweep
+
+      # From CloudTrail, before anything is billed: every launch EC2 refused
+      # in the account since the scheduled run before, by day, zone and
+      # type. For the record, never a gate.
+      - name: What EC2 refused to launch since the last run
+        if: env.WITH_GPU == 'true'
+        run: ./scripts/aws.sh refused
 
       # The run's variables go to the state bucket beside its state, so the
       # teardown job, and a later run's sweep, destroy exactly what this
@@ -336,29 +357,63 @@ jobs:
           NODE_TYPE: m7i.xlarge
         run: ./scripts/gpu.sh measure cpu
 
+      # The role's session lasts two hours, and run 42656218231 was 94
+      # minutes into it when it ended, with a GPU node EC2 gave at once. A
+      # GPU that comes after half an hour of waiting would outlast it, with
+      # the third apply and Vault's release still to do: a new session for
+      # the GPU's part, from GitHub's OIDC token as the first and under the
+      # same name, so Terraform sees the caller it saw before.
+      - name: Assume the creation role again, for the GPU's part
+        if: env.WITH_GPU == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_CREATE_ROLE_ARN }}
+          role-session-name: airgap-${{ github.run_id }}
+          role-duration-seconds: 7200
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # One failure of this apply is not the run's: EC2 with no GPU to give
+      # (ADR 19, 2026-11-11). aws.sh capacity passes only when EKS gave the
+      # node group up for InsufficientInstanceCapacity and nothing else and
+      # every launch its Auto Scaling group was refused was refused for
+      # that; then the run has no GPU node, and says so below. Anything
+      # else fails here, as before.
       - name: The GPU node, for the minutes it is measured
         if: env.WITH_GPU == 'true'
         id: gpu_clock
+        env:
+          EC2_DIR: ${{ runner.temp }}/ec2
         run: |
           echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
-          terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true
+          if terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true; then
+            echo "node=made" >> "$GITHUB_OUTPUT"
+          else
+            ./scripts/aws.sh capacity
+            echo "node=none" >> "$GITHUB_OUTPUT"
+          fi
 
       # The type EC2 gave the node, read from the node: every number after
-      # this names its card, and the cost table its price.
+      # this names its card, and the cost table its price. And the zone it
+      # came from, with the launches EC2 refused before it, for the record.
       - name: The GPU node's type
-        if: env.WITH_GPU == 'true'
+        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'made'
         id: gpu_type
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EC2_DIR: ${{ runner.temp }}/ec2
         run: |
           kubectl wait nodes -l boundary.heyvaldemar.com/accelerator=nvidia --for=condition=Ready --timeout=900s
           t="$(kubectl get nodes -l boundary.heyvaldemar.com/accelerator=nvidia -o jsonpath='{.items[0].metadata.labels.node\.kubernetes\.io/instance-type}')"
+          zone="$(kubectl get nodes -l boundary.heyvaldemar.com/accelerator=nvidia -o jsonpath='{.items[0].metadata.labels.topology\.kubernetes\.io/zone}')"
           usd="$(./scripts/gpu.sh price "$t")"
           [ -n "$usd" ] || { echo "the GPU node is a '${t:-node of no type}', which this run does not price" >&2; exit 1; }
           echo "type=$t" >> "$GITHUB_OUTPUT"
           { echo "GPU_TYPE=$t"; echo "SERVER_NODE=$t"; echo "SERVER_USD_PER_HOUR=$usd"; } >> "$GITHUB_ENV"
           echo "the GPU node is a $t, of the types asked in this order: $(jq -r '.gpu_instance_types | join(", ")' run.tfvars.json)" | tee -a "$GITHUB_STEP_SUMMARY"
+          ./scripts/aws.sh launches "$t" "$zone" || echo "the GPU node group's launch attempts could not be read: the node is a $t in ${zone:-a zone the node does not name}"
 
       - name: A GPU beside the CPU, the same signed model, measured
-        if: env.WITH_GPU == 'true'
+        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'made'
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CAPACITY_DIR: ${{ runner.temp }}/capacity
@@ -373,7 +428,7 @@ jobs:
       # evals on it with everything the evals read started afresh. Measured,
       # not shipped: no task floor, every other gate.
       - name: A larger model on the same GPU, through the evals
-        if: env.WITH_GPU == 'true'
+        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'made'
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
           CAPACITY_DIR: ${{ runner.temp }}/capacity
@@ -385,9 +440,27 @@ jobs:
           ./scripts/gpu.sh reset
           MODEL=granite-4.1-8b TASK_FLOOR=off ./scripts/evals.sh
 
+      # EC2 had no GPU to give (ADR 19, 2026-11-11): said in the run's
+      # summary, as a warning on its page and in the results, with every
+      # refused launch by zone and type. Everything before this stands on
+      # its own checks; nothing on a GPU was measured. On the schedule the
+      # run fails here when the scheduled run before it that asked for a
+      # GPU was given none either: one week is EC2's weather, two leave
+      # the GPU numbers unmeasured.
+      - name: No GPU, EC2 had none to give
+        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EC2_DIR: ${{ runner.temp }}/ec2
+        run: ./scripts/aws.sh missed
+
       - name: What the GPU side looked like
         if: failure() && steps.gpu_clock.outputs.at != ''
+        env:
+          EC2_DIR: ${{ runner.temp }}/ec2
         run: |
+          ./scripts/aws.sh launches || true
           kubectl get nodes -L boundary.heyvaldemar.com/accelerator || true
           kubectl -n gpu-system logs ds/nvidia-device-plugin --tail=30 || true
           kubectl -n inference describe pod -l server=llama-gpu | tail -30 || true
@@ -428,6 +501,7 @@ jobs:
             .cache/airgap/evals.jsonl
             .cache/airgap/mcp-audit.jsonl
             ${{ runner.temp }}/capacity
+            ${{ runner.temp }}/ec2
           if-no-files-found: ignore
           retention-days: 90
 
@@ -521,6 +595,8 @@ jobs:
           GPU_STARTED: ${{ needs.up.outputs.gpu_started }}
           GPU_STOPPED: ${{ needs.up.outputs.gpu_stopped }}
           # The type the node was, or the first one asked when the run
-          # stopped before it read the node.
-          GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && (needs.up.outputs.gpu_type || 'g6.xlarge') || '' }}
+          # stopped before it read the node; none when EC2 gave the run no
+          # GPU node, which the table then says.
+          GPU_TYPE: ${{ needs.up.outputs.gpu_started != '' && needs.up.outputs.gpu_node != 'none' && (needs.up.outputs.gpu_type || 'g6.xlarge') || '' }}
+          GPU_NODE: ${{ needs.up.outputs.gpu_node }}
         run: ./scripts/aws.sh cost | tee -a "$GITHUB_STEP_SUMMARY" || true

@@ -56,8 +56,20 @@
 #                 its Terraform tests pass against a mocked provider (no route
 #                 out, endpoints from the VPC only, a resolver that refuses
 #                 names outside AWS and fails closed, the API from the
-#                 operator's /32, every role under the boundary); and the
-#                 workflow runs on main only and reads no stored secret
+#                 operator's /32, every role under the boundary, the GPU
+#                 node in every zone that offers each of its types and in
+#                 no subnet with a public address); and the workflow runs
+#                 on main only and reads no stored secret
+#   gpu           the AWS run EC2 gives no GPU (ADR 19, 2026-11-11): the
+#                 GPU step survives only the failure scripts/aws.sh capacity
+#                 passes; the miss is said and counted by a step GitHub's
+#                 API finds by name; the GPU steps run only on a node that
+#                 was made; the second scheduled miss in a row fails; no
+#                 step's failure is passed over; and scripts/aws.sh's part
+#                 passes tests/static/aws-gpu-capacity.sh against an AWS
+#                 and a GitHub made of files (capacity alone is a miss, any
+#                 other failure the run's; the count of misses in a row;
+#                 a GitHub that does not answer)
 #   gke           the GKE run (ADR 22): gke/ declares no router, NAT,
 #                 external address, peering or VPN, and two routes, to
 #                 restricted.googleapis.com and private.googleapis.com; its
@@ -563,6 +575,55 @@ CARDS
   return "$ok"
 }
 
+check_gpu() {
+  local ok=0 out
+  # The run EC2 gives no GPU (ADR 19, 2026-11-11): the one failure the GPU
+  # step survives is the one scripts/aws.sh capacity passes; the miss is
+  # said and counted by a step GitHub's API finds by name; the second
+  # scheduled miss in a row fails; and no step's failure is passed over.
+  python3 - <<'PY' || ok=1
+import importlib.util, re, sys
+spec = importlib.util.spec_from_file_location("ec2_capacity", "scripts/ec2-capacity.py")
+ec2 = importlib.util.module_from_spec(spec); spec.loader.exec_module(ec2)
+wf = open(".github/workflows/aws.yml").read()
+up = wf.partition("\n  up:\n")[2].partition("\n  down:\n")[0]
+def step(name):
+    return up.partition("      - name: %s\n" % name)[2].partition("\n      - name:")[0] + "\n"
+bad = []
+if "    name: %s\n" % ec2.JOB not in up or any(up.count("      - name: %s\n" % n) != 1 for n in (ec2.ASKED, ec2.MISSED)):
+    bad.append("the job and the two steps under the names scripts/ec2-capacity.py reads from GitHub's API")
+asked, missed = step(ec2.ASKED), step(ec2.MISSED)
+survives = """          if terraform -chdir=aws apply -input=false -auto-approve -var-file="$PWD/run.tfvars.json" -var gpu=true; then
+            echo "node=made" >> "$GITHUB_OUTPUT"
+          else
+            ./scripts/aws.sh capacity
+            echo "node=none" >> "$GITHUB_OUTPUT"
+          fi
+"""
+if survives not in asked or wf.count("node=none") != 1:
+    bad.append("a GPU step that survives only the failure aws.sh capacity passes")
+if "        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'none'\n" not in missed or "        run: ./scripts/aws.sh missed\n" not in missed:
+    bad.append("the miss said and counted by aws.sh missed, on a miss alone")
+for name in ("The GPU node's type", "A GPU beside the CPU, the same signed model, measured", "A larger model on the same GPU, through the evals"):
+    if "        if: env.WITH_GPU == 'true' && steps.gpu_clock.outputs.node == 'made'\n" not in step(name):
+        bad.append("'%s' only on a GPU node that was made" % name)
+limit = re.search(r'(?m)^  GPU_MISSES_IN_A_ROW: "(\d+)"$', wf)
+if not limit or limit.group(1) != "2":
+    bad.append("the second scheduled miss in a row failing the run")
+if "continue-on-error" in wf:
+    bad.append("every step's failure the run's own")
+if "needs.up.outputs.gpu_node != 'none' &&" not in wf.partition("\n  down:\n")[2]:
+    bad.append("a cost table with no GPU node when EC2 gave none")
+if bad:
+    print("the AWS run with no GPU to be had: not " + "; not ".join(bad)); sys.exit(1)
+PY
+  if ! out="$(bash tests/static/aws-gpu-capacity.sh 2>&1)"; then
+    echo "the GPU capacity tests failed: $(grep '^FAIL' <<<"$out" | head -3 | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "a run EC2 gives no GPU goes on only when capacity was the one reason, says so, and fails on the second scheduled miss in a row"
+  return "$ok"
+}
+
 check_gke() {
   local ok=0 out dir routes
   if grep -nE 'resource "google_compute_(router|router_nat|address|global_address|network_peering|vpn_gateway|ha_vpn_gateway|vpn_tunnel|external_vpn_gateway|interconnect_attachment|instance)"' gke/*.tf; then
@@ -844,7 +905,7 @@ PY
 }
 
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gke aks mlbom)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"

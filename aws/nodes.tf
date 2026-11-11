@@ -68,11 +68,13 @@ resource "aws_eks_node_group" "this" {
 }
 
 # The GPU node (ADR 19), when the run asks for one: EKS's AL2023 image with
-# NVIDIA's driver and container toolkit, one L4, the same IMDSv2 rule, and a
-# taint, so only what asks for a GPU lands on it. A larger root volume: the
-# CUDA build of llama-server is 2.5 GB compressed. The NVIDIA device plugin
-# that offers the GPU to the scheduler arrives in the bundle like everything
-# else (manifests/gpu/device-plugin.yaml).
+# NVIDIA's driver and container toolkit, one L4, or one A10G when EC2 has no
+# L4, the same IMDSv2 rule, and a taint, so only what asks for a GPU lands
+# on it. In whichever zone has one: the run's two private subnets and the
+# GPU subnets in every other zone that offers its types (network.tf). A
+# larger root volume: the CUDA build of llama-server is 2.5 GB compressed.
+# The NVIDIA device plugin that offers the GPU to the scheduler arrives in
+# the bundle like everything else (manifests/gpu/device-plugin.yaml).
 resource "aws_launch_template" "gpu" {
   count       = var.gpu ? 1 : 0
   name_prefix = "${var.cluster_name}-gpu-"
@@ -104,7 +106,7 @@ resource "aws_eks_node_group" "gpu" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "${var.cluster_name}-gpu"
   node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = aws_subnet.private[*].id
+  subnet_ids      = concat(aws_subnet.private[*].id, aws_subnet.gpu[*].id)
   ami_type        = "AL2023_x86_64_NVIDIA"
   instance_types  = var.gpu_instance_types
   capacity_type   = "ON_DEMAND"
@@ -130,11 +132,14 @@ resource "aws_eks_node_group" "gpu" {
     version = aws_launch_template.gpu[0].latest_version
   }
 
+  # The GPU subnets' route table too: a node in a subnet not yet on it has
+  # no route to S3, where ECR keeps the layers it pulls.
   depends_on = [
     aws_eks_addon.before_nodes,
     aws_iam_role_policy_attachment.node,
     aws_vpc_endpoint.interface,
     aws_vpc_endpoint.s3,
     aws_route53_resolver_firewall_rule.allow_aws,
+    aws_route_table_association.gpu,
   ]
 }

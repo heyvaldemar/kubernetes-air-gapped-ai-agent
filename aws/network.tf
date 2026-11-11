@@ -56,6 +56,46 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private[count.index].id
 }
 
+# The GPU node's other zones (ADR 19, 2026-11-11), made with the GPU node
+# and gone with it: one more private subnet in every other zone of the
+# region that offers each type the node may be, so the node group can take
+# a GPU wherever EC2 has one. Runs 42005832115 and 42036957092 were refused
+# g6.xlarge in us-east-1a and us-east-1b, the run's two zones, for half an
+# hour each. A subnet costs nothing. These hold no endpoint: the six
+# interface endpoints stay in the first two zones and answer the whole VPC,
+# and the route table is the first private subnet's own, the VPC's range and
+# the S3 prefix list, so a GPU subnet has no more of a way out than that one.
+data "aws_ec2_instance_type_offerings" "gpu" {
+  for_each      = var.gpu ? toset(var.gpu_instance_types) : toset([])
+  location_type = "availability-zone"
+  filter {
+    name   = "instance-type"
+    values = [each.value]
+  }
+}
+
+locals {
+  gpu_azs = var.gpu ? sort(tolist(setsubtract(
+    setintersection(toset(data.aws_availability_zones.available.names), [for o in data.aws_ec2_instance_type_offerings.gpu : toset(o.locations)]...),
+    toset(local.azs),
+  ))) : []
+}
+
+resource "aws_subnet" "gpu" {
+  count                   = length(local.gpu_azs)
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 4, 8 + count.index)
+  availability_zone       = local.gpu_azs[count.index]
+  map_public_ip_on_launch = false
+  tags                    = { Name = "${var.cluster_name}-gpu-${local.gpu_azs[count.index]}" }
+}
+
+resource "aws_route_table_association" "gpu" {
+  count          = length(local.gpu_azs)
+  subnet_id      = aws_subnet.gpu[count.index].id
+  route_table_id = aws_route_table.private[0].id
+}
+
 # ECR keeps image layers in S3, so the nodes reach S3 too: through a gateway
 # endpoint, a prefix list in the route tables, at no cost.
 resource "aws_vpc_endpoint" "s3" {

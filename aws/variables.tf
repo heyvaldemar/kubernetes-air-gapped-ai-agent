@@ -124,7 +124,8 @@ variable "gpu_instance_types" {
     L4 for it (ADR 19, 2026-11-09). EKS fills an On-Demand node group by
     the order of its types. Runs 42005832115 and 42036957092 found no
     g6.xlarge in us-east-1a and then us-east-1b, the run's two zones, and
-    made no GPU node.
+    made no GPU node. The node group asks in every zone of the region that
+    offers every type here (network.tf, 2026-11-11).
   EOT
   type        = list(string)
   default     = ["g6.xlarge", "g5.xlarge"]

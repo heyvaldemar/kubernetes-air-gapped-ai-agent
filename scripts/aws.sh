@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aws.sh <repositories|login|images|sweep|volumes|residue|cost> - the parts of the AWS
+# aws.sh <repositories|login|images|sweep|volumes|residue|cost|refused|launches|capacity|missed> - the parts of the AWS
 # run (ADR 18) that are not Terraform. .github/workflows/aws.yml calls them;
 # each reads the environment the workflow sets: AWS_REGION, TF_STATE_BUCKET,
 # CLUSTER (the run's cluster name), and REGISTRY, the account's ECR.
@@ -23,12 +23,34 @@
 #            found by the run's tag: id, state, type, size, encrypted. With
 #            N, there must be exactly N, each gp3 and encrypted: 1 once
 #            Vault is up, 0 once its claim is released and after the destroy
+#   refused [hours]  every launch EC2 refused in the account in the last
+#            hours (192, a week and the day a schedule may slip), by day,
+#            zone, type and reason, from CloudTrail: for the record, never a
+#            gate (ADR 19, 2026-11-11)
+#   launches [type zone]  the GPU node group as EKS sees it, and its Auto
+#            Scaling group's launch attempts by zone and type, kept under
+#            $EC2_DIR; with the type and zone of the node the run
+#            got, the line the results keep for it
+#   capacity  after an apply that made no GPU node: passes only when the
+#            node group failed for want of capacity and nothing else (EKS
+#            gave it up for InsufficientInstanceCapacity alone, and every
+#            launch its Auto Scaling group tried was refused, for that).
+#            Anything else stays the run's failure
+#   missed   the miss said in the summary, on the run's page and in the
+#            results; and on the schedule, the run fails when it is the
+#            second in a row to be given none ($GPU_MISSES_IN_A_ROW): only
+#            a scheduled run that was given a GPU node clears the count
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX=airgap-runs
 # The credential store bundle.sh and the checks read, as on kind.
 export DOCKER_CONFIG="$ROOT/.cache/airgap/docker"
 say() { printf '== %s\n' "$*"; }
+# What EC2 gave the GPU node group and what it refused (ADR 19): AWS's and
+# GitHub's answers as files here, read by scripts/ec2-capacity.py. A
+# directory of its own, never under $CAPACITY_DIR: scripts/capacity.py
+# reads every JSON file under that one as a measurement.
+EC2="${EC2_DIR:-$ROOT/.cache/airgap/ec2}"
 
 case "${1:-}" in
   repositories)
@@ -181,7 +203,7 @@ PY
     # Firewall's $0.60 a million queries, ECR's storage for an hour and the
     # bytes into AWS, which are free, round to nothing for one run.
     : "${STARTED:?}"
-    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" "${GPU_STOPPED:-}" "${NODES:-1}" <<'PY'
+    python3 - "$STARTED" "$(date +%s)" "${NODE_TYPE:-m7i.large}" "${GPU_TYPE:-}" "${GPU_STARTED:-}" "${GPU_STOPPED:-}" "${NODES:-1}" "${GPU_NODE:-}" <<'PY'
 import sys
 now = int(sys.argv[2])
 hours = (now - int(sys.argv[1])) / 3600
@@ -202,7 +224,79 @@ print("| What | Per hour | This run |\n|---|---|---|")
 for what, rate, h in rows:
     print("| %s | $%.4f | $%.2f |" % (what, rate, rate * h))
 print("| **Total, %.2f h** | | **about $%.2f** |" % (hours, sum(r * h for _, r, h in rows)))
+if sys.argv[8] == "none":
+    # ADR 19, 2026-11-11: the node group waited on EC2 and was given nothing.
+    print("\nGPU: no capacity. EC2 gave the run no GPU node, so the table has none.")
 PY
     ;;
-  *) echo "usage: aws.sh <repositories|login|images|sweep|volumes|residue|cost>" >&2; exit 2 ;;
+  refused)
+    hours="${2:-192}"
+    work="$(mktemp -d)"
+    since="$(python3 -c 'import sys, time; print(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3600 * int(sys.argv[1]))))' "$hours")"
+    # An Auto Scaling group launches with RunInstances, or with CreateFleet
+    # when it has more than one type to ask for.
+    # A call CloudTrail does not answer leaves a file that is not JSON,
+    # which ec2-capacity.py counts as unread.
+    for event in RunInstances CreateFleet; do
+      AWS_RETRY_MODE=adaptive AWS_MAX_ATTEMPTS=10 aws cloudtrail lookup-events --cli-connect-timeout 10 --cli-read-timeout 30 \
+        --lookup-attributes "AttributeKey=EventName,AttributeValue=$event" --start-time "$since" --max-items 3000 \
+        --query 'Events[].CloudTrailEvent' --output json >"$work/$event.json" 2>/dev/null || echo unread >"$work/$event.json"
+    done
+    python3 "$ROOT/scripts/ec2-capacity.py" refused "$hours" "$work/RunInstances.json" "$work/CreateFleet.json" || say "CloudTrail's answer could not be read"
+    ;;
+  launches)
+    : "${CLUSTER:?}"
+    mkdir -p "$EC2"
+    # Each file is written anew: a call AWS refuses leaves it empty, never
+    # an earlier call's answer.
+    : >"$EC2/subnets.json"; echo '[]' >"$EC2/activities.json"
+    # Only what ec2-capacity.py reads: the answers go into the run's
+    # artifact, and their ARNs are left out of it.
+    aws eks describe-nodegroup --cluster-name "$CLUSTER" --nodegroup-name "$CLUSTER-gpu" --output json \
+      --query '{nodegroup: nodegroup.{nodegroupName: nodegroupName, status: status, instanceTypes: instanceTypes, subnets: subnets, resources: resources, health: health}}' >"$EC2/nodegroup.json"
+    # shellcheck disable=SC2046  # one argument per subnet
+    aws ec2 describe-subnets --subnet-ids $(python3 -c 'import json, sys; print(" ".join(json.load(open(sys.argv[1]))["nodegroup"]["subnets"]))' "$EC2/nodegroup.json") \
+      --query 'Subnets[].{SubnetId: SubnetId, AvailabilityZone: AvailabilityZone}' --output json >"$EC2/subnets.json"
+    for asg in $(python3 -c 'import json, sys; print(" ".join(g["name"] for g in (json.load(open(sys.argv[1]))["nodegroup"].get("resources") or {}).get("autoScalingGroups") or []))' "$EC2/nodegroup.json"); do
+      aws autoscaling describe-scaling-activities --auto-scaling-group-name "$asg" --output json \
+        --query 'Activities[].{Description: Description, StartTime: StartTime, StatusCode: StatusCode, StatusMessage: StatusMessage, Details: Details}' >"$EC2/activities.part"
+      python3 -c 'import json, sys; a, b = (json.load(open(p)) or [] for p in sys.argv[1:3]); json.dump(a + b, open(sys.argv[1], "w"), indent=1)' "$EC2/activities.json" "$EC2/activities.part"
+    done
+    python3 "$ROOT/scripts/ec2-capacity.py" launches "$EC2" "${2:-}" "${3:-}"
+    ;;
+  capacity)
+    : "${CLUSTER:?}"
+    # Emptied first: only this call's verdict is ever read as a miss.
+    mkdir -p "$EC2"; : >"$EC2/no-capacity.json"
+    "$0" launches || { echo "the GPU node group could not be read from AWS: the apply's failure stays the run's" >&2; exit 1; }
+    python3 "$ROOT/scripts/ec2-capacity.py" judge "$EC2"
+    ;;
+  missed)
+    [ -s "$EC2/no-capacity.json" ] || { echo "no record of a capacity miss at $EC2/no-capacity.json: this follows aws.sh capacity" >&2; exit 1; }
+    python3 "$ROOT/scripts/ec2-capacity.py" said "$EC2"
+    if [ "${GITHUB_EVENT_NAME:-}" != schedule ]; then
+      say "a run by hand: the miss is said, and the count of scheduled runs in a row is left as it was"
+      exit 0
+    fi
+    : "${GITHUB_REPOSITORY:?}" "${GITHUB_RUN_NUMBER:?}"
+    # The rule is a gate: when GitHub does not say what the runs before
+    # this one did, the run fails rather than pass unread.
+    runs="$(mktemp -d "$EC2/runs.XXXXXX")"
+    api() {
+      for _ in 1 2 3; do
+        gh api "$1" >"$2" 2>/dev/null && return 0
+        sleep "${GH_RETRY_SECONDS:-10}"
+      done
+      echo "GitHub did not answer for $1: the rule on scheduled runs in a row cannot be held, and the run fails" >&2
+      return 1
+    }
+    api "repos/$GITHUB_REPOSITORY/actions/workflows/aws.yml/runs?event=schedule&branch=main&status=completed&per_page=30" "$runs/runs.json" || exit 1
+    # The six scheduled runs before this one: six weeks back.
+    ids="$(python3 "$ROOT/scripts/ec2-capacity.py" earlier "$runs/runs.json" "$GITHUB_RUN_NUMBER" 6)" || exit 1
+    for id in $ids; do
+      api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=50" "$runs/jobs-$id.json" || exit 1
+    done
+    python3 "$ROOT/scripts/ec2-capacity.py" streak "$runs" "$GITHUB_RUN_NUMBER" "${GPU_MISSES_IN_A_ROW:-2}" 6
+    ;;
+  *) echo "usage: aws.sh <repositories|login|images|sweep|volumes|residue|cost|refused|launches|capacity|missed>" >&2; exit 2 ;;
 esac
