@@ -34,6 +34,10 @@ An artifact that holds one is not kept, and the message names the kind and
 the file inside, never the value. The 30 artifacts GitHub held on 2026-11-11
 held none.
 
+A search of text sees nothing inside a compressed or binary file, so an
+archive is kept only when every file in it is .json or .jsonl and decodes
+as UTF-8, which is what every cloud run has uploaded so far.
+
 `add` never replaces a record the branch already holds.
 
 GITHUB_REPOSITORY names the repository and GITHUB_TOKEN reads it; the token
@@ -59,6 +63,7 @@ EVENTS = ("schedule", "workflow_dispatch")
 CLOUDS = {".github/workflows/aws.yml": "aws", ".github/workflows/gke.yml": "gke", ".github/workflows/aks.yml": "aks"}
 MAX_ARTIFACT = 5 * 1024 * 1024
 MAX_UNPACKED = 50 * 1024 * 1024
+TEXT = (".json", ".jsonl")
 # What a credential looks like, by kind. A run's results have never held one;
 # a failed step's output could.
 CREDENTIALS = {
@@ -69,6 +74,11 @@ CREDENTIALS = {
     "a Google access token": rb"ya29\.[A-Za-z0-9_-]{20,}",
     "a signed address": rb"[?&](sig|X-Amz-Signature|X-Goog-Signature)=[A-Za-z0-9%/+]{16,}",
     "a bearer token": rb"[Bb]earer\s+[A-Za-z0-9._~+/-]{20,}",
+    "an Anthropic API key": rb"sk-ant-[A-Za-z0-9_-]{20,}",
+    "an AWS session token": rb"\b(IQoJ|FwoG)[A-Za-z0-9+/=]{100,}",
+    "a Hugging Face token": rb"\bhf_[A-Za-z0-9]{30,}",
+    "a kubeconfig credential": rb"client-key-data[\"']?\s*:\s*[\"']?[A-Za-z0-9+/=]{20,}|\btoken[\"']?\s*:\s*[\"']?[A-Za-z0-9._~+/=-]{40,}",
+    "a login and password in an address": rb"://[^/\s:@\"']+:[^/\s@\"']+@",
 }
 RUN_FIELDS = ("id", "name", "path", "event", "status", "conclusion", "head_branch", "head_sha", "run_attempt",
               "run_number", "created_at", "run_started_at", "updated_at", "html_url")
@@ -144,7 +154,16 @@ def credential_in(body):
     if sum(i.file_size for i in archive.infolist()) > MAX_UNPACKED:
         raise Refused(f"the artifact unpacks to more than the {MAX_UNPACKED} bytes this reads")
     for member in archive.namelist():
+        if member.endswith("/"):
+            continue
+        if not member.endswith(TEXT):
+            raise Refused(f"the artifact holds {member}, which is neither .json nor .jsonl: a search of text "
+                          "cannot see inside it")
         data = archive.read(member)
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused(f"the artifact's {member} is not UTF-8 text: a search of text cannot read it")
         for kind, pattern in CREDENTIALS.items():
             if re.search(pattern, data):
                 return kind, member
@@ -153,7 +172,8 @@ def credential_in(body):
 
 def record(run_id, out):
     repo = os.environ["GITHUB_REPOSITORY"]
-    if not run_id.isdigit():
+    # ASCII digits and nothing else: str.isdigit() also takes the digits of other scripts.
+    if not re.fullmatch(r"[0-9]{1,20}", run_id):
         raise Refused(f"{run_id!r} is not a run's id")
     run = get(f"/repos/{repo}/actions/runs/{run_id}")
     reasons = why_not(repo, run)

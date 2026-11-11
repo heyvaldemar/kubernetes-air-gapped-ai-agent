@@ -23,8 +23,14 @@ and what it wrote. Run by static check "results".
   M  results that have expired: a record that says so, and no file
   N  two artifacts of the name: not kept
   O  an id that is not a number: not kept, and GitHub is not asked
+  O2 an id in the digits of another script: not kept, and GitHub is not asked
   Q  results that hold something shaped like a credential: not kept, and
      the value is not printed
+  Q2 the same for each other shape: an Anthropic API key, an AWS session
+     token, a Hugging Face token, a kubeconfig's key and its token, a login
+     and password in an address
+  T  an archive holding a file that is neither .json nor .jsonl: not kept
+  U  an archive holding a .json that is not UTF-8 text: not kept
   R  an artifact that is not an archive: not kept
   S  an archive that unpacks to more than 50 MB: not kept
   P  add: a record the branch holds is never replaced, a new one is added,
@@ -179,6 +185,35 @@ def main():
         code, said = run(os.path.join(tmp, "nothing-here"), "record", "101; echo", os.path.join(tmp, "out-O"))
         check(code == 1 and "is not a run's id" in said and not os.path.exists(os.path.join(tmp, "out-O")),
               "O  an id that is not a number is not kept, and GitHub is not asked")
+
+        code, said = run(os.path.join(tmp, "nothing-here"), "record", "\uff11\uff12\uff13", os.path.join(tmp, "out-O2"))
+        check(code == 1 and "is not a run's id" in said and not os.path.exists(os.path.join(tmp, "out-O2")),
+              "O2 an id in the digits of another script is not kept, and GitHub is not asked")
+
+        # Made here, piece by piece: none of these is a credential, and none sits whole in this file.
+        shapes = {
+            "an Anthropic API key": "sk-" + "ant-" + "api03-" + "x" * 40,
+            "an AWS session token": "IQo" + "Jb3JpZ2luX2Vj" + "A" * 120,
+            "a Hugging Face token": "hf" + "_" + "a" * 34,
+            "a kubeconfig credential": "client-key" + "-data: " + "LS0tLS1CRUdJTg" + "A" * 40,
+            "a kubeconfig credential ": "user:\n    tok" + "en: " + "k" * 48,
+            "a login and password in an address": "https://loader" + ":" + "s3cr3t-w0rd" + "@registry.example/v2/",
+        }
+        for n, (kind, value) in enumerate(shapes.items()):
+            held = archive({"e2e-results.json": "{}", "_temp/evals.jsonl": json.dumps({"out": "failed: " + value})})
+            code, said, doc, files = record(tmp, f"Q2-{n}", run_id=120 + n, artifacts=[artifact(30 + n, held)],
+                                            zips={30 + n: held})
+            check(code == 1 and f"holds what looks like {kind.strip()}, in _temp/evals.jsonl" in said and not files
+                  and value not in said and value[-20:] not in said,
+                  f"Q2 results that hold {kind.strip()} are not kept, and the value is not printed"
+                  + ("" if code == 1 else f" (exit {code})"))
+
+        other = archive({"e2e-results.json": "{}", "node.log.gz": "not text"})
+        refused(tmp, "T", "an archive holding a file that is neither .json nor .jsonl", "is neither .json nor .jsonl",
+                run_id=130, artifacts=[artifact(40, other)], zips={40: other})
+        binary = archive({"e2e-results.json": b"\xff\xfe\x00{}"})
+        refused(tmp, "U", "an archive holding a .json that is not UTF-8 text", "is not UTF-8 text", run_id=131,
+                artifacts=[artifact(41, binary)], zips={41: binary})
 
         token = "eyJhbGciOiJSUzI1NiIsImtpZCI6Ing.eyJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdCJ9.c2lnbmF0dXJlLW9mLWEtdG9rZW4"
         leaked = archive({"e2e-results.json": "{}", "_temp/mcp-audit.jsonl": '{"error": "401 for Bearer %s"}' % token})
