@@ -1,4 +1,4 @@
 # Charts installed inside the boundary, fetched before it closes and checked
 # against the sha256 of the archive.
 # name  version  repository  sha256
-kyverno 3.10.0-rc.3 https://kyverno.github.io/kyverno/ 401b305113fbee5d537d2a1234f7e506479cc9c2d9cacb87afbdd7135016c64c
+kyverno 3.10.0-rc.5 https://kyverno.github.io/kyverno/ 3638a56936365ff5cff2eb6bd17bf6a48017fb1961e7ba768b42e38996f0ee7e
