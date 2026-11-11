@@ -220,6 +220,17 @@
   "run": 40995734934
  },
  {
+  "artifact_sha256": "b4f7d16a2ca88221f79ee6e52fb37c41aac9b911a1a14ede72638560aab0c43b",
+  "attempt": 1,
+  "cloud": "aks",
+  "commit": "e8fac536d296b7f427efdf374d78a6a3745acaa9",
+  "conclusion": "failure",
+  "created_at": "2026-10-30T04:12:50Z",
+  "event": "workflow_dispatch",
+  "path": "aks/41001631612-1",
+  "run": 41001631612
+ },
+ {
   "artifact_sha256": "95f61d15bf2d8f519e5528989f1e3fd6ba37b5d8dc22d2c3c942c834c6334826",
   "attempt": 1,
   "cloud": "aks",
