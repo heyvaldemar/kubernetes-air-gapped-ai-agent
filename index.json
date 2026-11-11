@@ -319,6 +319,17 @@
   "run": 42036957092
  },
  {
+  "artifact_sha256": "3b531633dc710600e05c33dc373d2b65a5f514ec623abf7f002fd66b4900eb21",
+  "attempt": 1,
+  "cloud": "gke",
+  "commit": "473fa4a5e9761f49c6557b9292ccecc7d0aa5d48",
+  "conclusion": "success",
+  "created_at": "2026-11-06T11:00:23Z",
+  "event": "schedule",
+  "path": "gke/42206932411-1",
+  "run": 42206932411
+ },
+ {
   "artifact_sha256": "95f61d15bf2d8f519e5528989f1e3fd6ba37b5d8dc22d2c3c942c834c6334826",
   "attempt": 1,
   "cloud": "aks",
