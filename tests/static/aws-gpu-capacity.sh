@@ -37,6 +37,9 @@
 #   O  what launches keeps is not among the measurements: scripts/
 #      capacity.py reads every JSON file under $CAPACITY_DIR as one, and
 #      its table still prints after launches has run
+#   T  everything kept for the run's artifact is .json, after a miss on
+#      the schedule too: the cloud-results archive (ADR 25) refuses an
+#      artifact with any other file in it, as it did run 43101489006's
 #   P  the scheduled run before failed as the second in a row: this one
 #      is the third, and fails
 #   Q  GitHub lists a scheduled run before and does not say what it did:
@@ -279,6 +282,12 @@ if [ "$(rc)" != 0 ] && said "is PreInService, not refused: an instance may exist
   pass "S: a launch that was not refused, among capacity refusals, is an instance that may exist: not a miss"
 else fail "S: capacity passed with a launch that was not refused (rc $(rc)): $(why)"; fi
 
+missed_world T; scheduled 100 38 success skipped; aws_sh schedule missed
+other="$(find "$W/ec2" -type f ! -name '*.json' | sed "s#^$W/##" | tr '\n' ' ')"
+if [ "$(rc)" = 0 ] && [ -z "$other" ] && [ -s "$W/ec2/runs/runs.json" ] && [ -s "$W/ec2/runs/jobs-100.json" ] && [ -s "$W/ec2/activities.json" ]; then
+  pass "T: everything kept for the run's artifact is .json, GitHub's answers among it"
+else fail "T: a file that is not .json is kept for the artifact, or an answer is missing (rc $(rc)): ${other:-none}"; fi
+
 world L; aws_sh schedule missed
 if [ "$(rc)" != 0 ] && said "no record of a capacity miss"; then
   pass "L: missed with no record of a miss fails"
@@ -287,7 +296,7 @@ else fail "L: missed passed with nothing to say (rc $(rc)): $(why)"; fi
 world M; nodegroup ACTIVE
 refused_in 53 us-east-1a g6.xlarge; refused_in 54 us-east-1b g6.xlarge; activity 55 us-east-1c Successful
 aws_sh workflow_dispatch launches g6.xlarge us-east-1c
-if [ "$(rc)" = 0 ] && said "us-east-1a   g6.xlarge   refused, InsufficientInstanceCapacity x1" && said "launched x1" \
+if [ "$(rc)" = 0 ] && said "us-east-1a   g6.xlarge   refused, InsufficientInstanceCapacity x1" && said "us-east-1c   g6.xlarge   launched x1" \
   && [ "$(measured)" = "1 GPU node: g6.xlarge in us-east-1c (after 2 launch(es) EC2 refused: us-east-1a g6.xlarge x1, us-east-1b g6.xlarge x1)" ]; then
   pass "M: the node EC2 gave is named by type and zone in the results, with the launches refused before it"
 else fail "M: launches did not name the node and what was refused before it (rc $(rc), results '$(measured)'): $(why)"; fi
@@ -300,6 +309,7 @@ event = lambda minute, **more: json.dumps(dict({"eventTime": "2026-11-05T10:%s:0
                                                 "userIdentity": {"invokedBy": "autoscaling.amazonaws.com"}}, **more))
 json.dump([event("53", errorCode="Server.InsufficientInstanceCapacity", errorMessage=message),
            event("58", errorCode="Server.InsufficientInstanceCapacity", errorMessage=message),
+           event("52", errorCode="Client.DryRunOperation", errorMessage="Request would have succeeded, but DryRun flag is set."),
            event("59", responseElements={"instancesSet": {"items": [{"instanceId": "i-0123456789abcdef0"}]}})],
           open(os.path.join(W, "RunInstances.json"), "w"))
 json.dump([json.dumps({"eventTime": "2026-11-09T17:20:00Z", "eventName": "CreateFleet", "responseElements": {"CreateFleetResponse": {"errorSet": {"item": [
@@ -308,10 +318,11 @@ json.dump([json.dumps({"eventTime": "2026-11-09T17:20:00Z", "eventName": "Create
 PY
 aws_sh workflow_dispatch refused 192; listed="$(rc)"
 if [ "$listed" = 0 ] && said "2026-11-05  us-east-1a   g6.xlarge   InsufficientInstanceCapacity" && said "x2   10:53 to 10:58 UTC" \
-  && said "2026-11-09  us-east-1d   g5.xlarge   InsufficientInstanceCapacity" && said "of 4 launch call(s)"; then
+  && said "2026-11-09  us-east-1d   g5.xlarge   InsufficientInstanceCapacity" && said "of 5 launch call(s)" \
+  && said "none of them a refusal for capacity: DryRunOperation x1" && ! said "2026-11-05  ?"; then
   world N-unread; aws_sh workflow_dispatch refused 192
   if [ "$(rc)" = 0 ] && said "CloudTrail could not be read"; then
-    pass "N: what EC2 refused is listed by day, zone and type, from RunInstances and CreateFleet; a CloudTrail that cannot be read is said, never a failure"
+    pass "N: what EC2 refused for capacity is listed by day, zone and type, from RunInstances and CreateFleet, a dry run apart from it; a CloudTrail that cannot be read is said, never a failure"
   else fail "N: an unreadable CloudTrail was not said, or failed the step (rc $(rc)): $(why)"; fi
 else fail "N: refused did not list CloudTrail's refusals (rc $listed): $(why)"; fi
 

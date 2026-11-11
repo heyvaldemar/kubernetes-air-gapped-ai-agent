@@ -153,6 +153,9 @@ def cmd_launches(d, got_type=None, got_zone=None):
         print("== %d launch attempt(s) by its Auto Scaling group, %s to %s UTC:" % (
             len(launches), clock(launches[0]["at"]), clock(launches[-1]["at"])))
         for (zone, itype, outcome), n in pools:
+            # A launch that worked does not name its type; the node does.
+            if itype == "?" and outcome == "launched" and zone == got_zone and got_type:
+                itype = got_type
             print("   %-12s %-11s %s x%d" % (zone, itype, outcome, n))
     else:
         print("== its Auto Scaling group has no launch attempt on record")
@@ -318,11 +321,21 @@ def cmd_refused(hours, *paths):
     if unread == len(paths):
         print("== CloudTrail could not be read: nothing to say about what EC2 refused")
         return 0
-    print("== launches EC2 refused in the account in the last %s h, of %d launch call(s) CloudTrail holds (for the record):" % (hours, events))
-    for (day, zone, itype, code), (n, first, last) in sorted(rows.items()):
+    capacity = {k: v for k, v in rows.items() if "Insufficient" in k[3]}
+    print("== launches EC2 refused for want of capacity in the account in the last %s h, of %d launch call(s) CloudTrail holds "
+          "(for the record):" % (hours, events))
+    for (day, zone, itype, code), (n, first, last) in sorted(capacity.items()):
         print("   %s  %-12s %-11s %-28s x%-3d %s to %s UTC" % (day, zone, itype, code, n, first, last))
-    if not rows:
+    if not capacity:
         print("   none")
+    # Dry runs and the like: calls that were never going to launch.
+    other = collections.Counter()
+    for (day, zone, itype, code), (n, first, last) in rows.items():
+        if "Insufficient" not in code:
+            other[code] += n
+    if other:
+        print("== and answered with another error, none of them a refusal for capacity: %s" % ", ".join(
+            "%s x%d" % (code, n) for code, n in sorted(other.items())))
     return 0
 
 

@@ -49,7 +49,10 @@ say() { printf '== %s\n' "$*"; }
 # What EC2 gave the GPU node group and what it refused (ADR 19): AWS's and
 # GitHub's answers as files here, read by scripts/ec2-capacity.py. A
 # directory of its own, never under $CAPACITY_DIR: scripts/capacity.py
-# reads every JSON file under that one as a measurement.
+# reads every JSON file under that one as a measurement. And nothing in it
+# but .json: it goes into the run's artifact, which the cloud-results
+# archive keeps only when every file is .json or .jsonl (ADR 25; it refused
+# run 43101489006's for a file named activities.part, run 43118867857).
 EC2="${EC2_DIR:-$ROOT/.cache/airgap/ec2}"
 
 case "${1:-}" in
@@ -257,10 +260,11 @@ PY
     # shellcheck disable=SC2046  # one argument per subnet
     aws ec2 describe-subnets --subnet-ids $(python3 -c 'import json, sys; print(" ".join(json.load(open(sys.argv[1]))["nodegroup"]["subnets"]))' "$EC2/nodegroup.json") \
       --query 'Subnets[].{SubnetId: SubnetId, AvailabilityZone: AvailabilityZone}' --output json >"$EC2/subnets.json"
+    part="$(mktemp)"
     for asg in $(python3 -c 'import json, sys; print(" ".join(g["name"] for g in (json.load(open(sys.argv[1]))["nodegroup"].get("resources") or {}).get("autoScalingGroups") or []))' "$EC2/nodegroup.json"); do
       aws autoscaling describe-scaling-activities --auto-scaling-group-name "$asg" --output json \
-        --query 'Activities[].{Description: Description, StartTime: StartTime, StatusCode: StatusCode, StatusMessage: StatusMessage, Details: Details}' >"$EC2/activities.part"
-      python3 -c 'import json, sys; a, b = (json.load(open(p)) or [] for p in sys.argv[1:3]); json.dump(a + b, open(sys.argv[1], "w"), indent=1)' "$EC2/activities.json" "$EC2/activities.part"
+        --query 'Activities[].{Description: Description, StartTime: StartTime, StatusCode: StatusCode, StatusMessage: StatusMessage, Details: Details}' >"$part"
+      python3 -c 'import json, sys; a, b = (json.load(open(p)) or [] for p in sys.argv[1:3]); json.dump(a + b, open(sys.argv[1], "w"), indent=1)' "$EC2/activities.json" "$part"
     done
     python3 "$ROOT/scripts/ec2-capacity.py" launches "$EC2" "${2:-}" "${3:-}"
     ;;
@@ -281,20 +285,25 @@ PY
     : "${GITHUB_REPOSITORY:?}" "${GITHUB_RUN_NUMBER:?}"
     # The rule is a gate: when GitHub does not say what the runs before
     # this one did, the run fails rather than pass unread.
-    runs="$(mktemp -d "$EC2/runs.XXXXXX")"
+    runs="$EC2/runs"; mkdir -p "$runs"
+    # api <path> <the fields kept, as jq> <file>: only what the rule reads
+    # is kept of GitHub's answer, which goes into the run's artifact too.
     api() {
       for _ in 1 2 3; do
-        gh api "$1" >"$2" 2>/dev/null && return 0
+        gh api "$1" --jq "$2" >"$3" 2>/dev/null && return 0
         sleep "${GH_RETRY_SECONDS:-10}"
       done
+      : >"$3"
       echo "GitHub did not answer for $1: the rule on scheduled runs in a row cannot be held, and the run fails" >&2
       return 1
     }
-    api "repos/$GITHUB_REPOSITORY/actions/workflows/aws.yml/runs?event=schedule&branch=main&status=completed&per_page=30" "$runs/runs.json" || exit 1
+    api "repos/$GITHUB_REPOSITORY/actions/workflows/aws.yml/runs?event=schedule&branch=main&status=completed&per_page=30" \
+      '{workflow_runs: [.workflow_runs[] | {id, run_number, event, conclusion, created_at}]}' "$runs/runs.json" || exit 1
     # The six scheduled runs before this one: six weeks back.
     ids="$(python3 "$ROOT/scripts/ec2-capacity.py" earlier "$runs/runs.json" "$GITHUB_RUN_NUMBER" 6)" || exit 1
     for id in $ids; do
-      api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=50" "$runs/jobs-$id.json" || exit 1
+      api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=50" \
+        '{jobs: [.jobs[] | {name, conclusion, steps: [.steps[] | {name, conclusion}]}]}' "$runs/jobs-$id.json" || exit 1
     done
     python3 "$ROOT/scripts/ec2-capacity.py" streak "$runs" "$GITHUB_RUN_NUMBER" "${GPU_MISSES_IN_A_ROW:-2}" 6
     ;;
