@@ -1,0 +1,47 @@
+{
+ "artifact": {
+  "created_at": "2026-11-09T18:26:12Z",
+  "expires_at": "2027-02-07T16:34:57Z",
+  "file": "e2e-results-aws.zip",
+  "id": 13699362542,
+  "name": "e2e-results-aws",
+  "sha256": "433656fd0ed6088534e85d4e132c2cfc60a73282d4b922c60ff21ff116ec42ca",
+  "size_in_bytes": 17517
+ },
+ "cloud": "aws",
+ "jobs": [
+  {
+   "completed_at": "2026-11-09T18:26:55Z",
+   "conclusion": "success",
+   "name": "Apply, load, check",
+   "started_at": "2026-11-09T16:35:02Z"
+  },
+  {
+   "completed_at": "2026-11-09T18:34:51Z",
+   "conclusion": "success",
+   "name": "Destroy, look for residue, report the cost",
+   "started_at": "2026-11-09T18:27:03Z"
+  }
+ ],
+ "kept_by": ".github/workflows/cloud-results.yml",
+ "repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+ "run": {
+  "conclusion": "success",
+  "created_at": "2026-11-09T16:34:55Z",
+  "event": "workflow_dispatch",
+  "head_branch": "main",
+  "head_repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+  "head_sha": "267a035d3f7a23ce11db45678614ef435e09ff07",
+  "html_url": "https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42656218231",
+  "id": 42656218231,
+  "name": "The boundary on AWS",
+  "path": ".github/workflows/aws.yml",
+  "repository": "heyvaldemar/kubernetes-air-gapped-ai-agent",
+  "run_attempt": 1,
+  "run_number": 22,
+  "run_started_at": "2026-11-09T16:34:55Z",
+  "status": "completed",
+  "updated_at": "2026-11-09T18:34:52Z"
+ },
+ "schema": 1
+}
