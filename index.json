@@ -11,6 +11,17 @@
   "run": 39624648738
  },
  {
+  "artifact_sha256": "5c8cf47f1428865530120b649e79266952b7e0aae8af354f38743d25d736db67",
+  "attempt": 1,
+  "cloud": "aws",
+  "commit": "860e2f772f7e982dcd3da675bb25be217a133ba6",
+  "conclusion": "failure",
+  "created_at": "2026-10-21T16:13:18Z",
+  "event": "workflow_dispatch",
+  "path": "aws/39632816543-1",
+  "run": 39632816543
+ },
+ {
   "artifact_sha256": "95f61d15bf2d8f519e5528989f1e3fd6ba37b5d8dc22d2c3c942c834c6334826",
   "attempt": 1,
   "cloud": "aks",
