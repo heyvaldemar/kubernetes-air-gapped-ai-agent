@@ -165,6 +165,17 @@
   "run": 40555921881
  },
  {
+  "artifact_sha256": "4060b6eccfc12f549669b5379357c8760e5d6284a54817b604ed65e24b0f40e9",
+  "attempt": 1,
+  "cloud": "gke",
+  "commit": "9e96c7ef5b89a2e179eb83f73130359e292c40b8",
+  "conclusion": "failure",
+  "created_at": "2026-10-27T18:29:32Z",
+  "event": "workflow_dispatch",
+  "path": "gke/40560466605-1",
+  "run": 40560466605
+ },
+ {
   "artifact_sha256": "95f61d15bf2d8f519e5528989f1e3fd6ba37b5d8dc22d2c3c942c834c6334826",
   "attempt": 1,
   "cloud": "aks",

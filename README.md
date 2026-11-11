@@ -14,6 +14,7 @@ sha256sum e2e-results-*.zip   # the value record.json gives as artifact.sha256
 | Cloud | Run | Started by | Ended | Date | Results kept |
 |---|---|---|---|---|---|
 | aks | [42809539539](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42809539539) | schedule | success | 2026-11-10 | [aks/42809539539-1](aks/42809539539-1), 732 bytes |
+| gke | [40560466605](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40560466605) | workflow_dispatch | failure | 2026-10-27 | [gke/40560466605-1](gke/40560466605-1), 769 bytes |
 | gke | [40555921881](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40555921881) | workflow_dispatch | success | 2026-10-27 | [gke/40555921881-1](gke/40555921881-1), 761 bytes |
 | gke | [40550142699](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40550142699) | workflow_dispatch | failure | 2026-10-27 | the run uploaded no e2e-results-gke |
 | aws | [40168111062](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40168111062) | workflow_dispatch | success | 2026-10-25 | [aws/40168111062-1](aws/40168111062-1), 9915 bytes |
