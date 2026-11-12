@@ -5,14 +5,14 @@
 docker.io/library/busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
 # llama.cpp's server, CPU build b11429 (v0.6.0)
 ghcr.io/ggml-org/llama.cpp:server-b11429@sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1
-# Kyverno 1.20.0-rc.5, as admission/kyverno-images.yaml pins it
-ghcr.io/kyverno/readiness-checker:v1.20.0-rc.5@sha256:0be028b4251713d673c541870c54c5ad38f40e983102b03b9889b5fcd4bc58f3
-reg.kyverno.io/kyverno/background-controller:v1.20.0-rc.5@sha256:c55cdaeac1a5c7b5ca357c50e5f4035a097b09531b1c1f04b460f025e4974a1b
-reg.kyverno.io/kyverno/cleanup-controller:v1.20.0-rc.5@sha256:528f6e10b245cce84fdb6083727be6d95b505f86248449cbcbb2ed7ccf4a2e49
-reg.kyverno.io/kyverno/kyverno-cli:v1.20.0-rc.5@sha256:698ec29568c43b89cd870c1a7ef061b9e22a881e36bc74c365ae3f091ef7af51
-reg.kyverno.io/kyverno/kyverno:v1.20.0-rc.5@sha256:a405b51ce7278eeef1f2d9b07be627e40bbbbe22fac33a502817fe1b0731b400
-reg.kyverno.io/kyverno/kyvernopre:v1.20.0-rc.5@sha256:daaf981dc98dcbb18d2ac146060721f36b60477251ded20cf8b94972f543f538
-reg.kyverno.io/kyverno/reports-controller:v1.20.0-rc.5@sha256:4dcdeb582f05cd7be63b26d3c1dd942208d30b7dfbbd346fa496c8d397d9ff27
+# Kyverno 1.20.0, as admission/kyverno-images.yaml pins it
+ghcr.io/kyverno/readiness-checker:v1.20.0@sha256:6079a30d75fe7ba868a5a7e5dfa71ee92a3a8bae97adcea1c8cfb1009280ee6c
+reg.kyverno.io/kyverno/background-controller:v1.20.0@sha256:c72df38320a48fc9de10f9d23d087a117853bb08207b7f60f6d1e8457fb3ddb7
+reg.kyverno.io/kyverno/cleanup-controller:v1.20.0@sha256:0f9ce0c203561c52499e871a987ff987371f57385fcafe7af1a01dfd6db1feee
+reg.kyverno.io/kyverno/kyverno-cli:v1.20.0@sha256:bd2b8b7c9d550ecf04e0bacaf351adce2f82ce67fd3f291075edcee7f8ab4ab4
+reg.kyverno.io/kyverno/kyverno:v1.20.0@sha256:9de49c5416ea536f00a205527197ac048abdf32c5a75d633cd9afff8928f359d
+reg.kyverno.io/kyverno/kyvernopre:v1.20.0@sha256:339067e083430e0c97007541bef9cfdbac89bee13f7228772c77ae8aead14b8b
+reg.kyverno.io/kyverno/reports-controller:v1.20.0@sha256:f54e3cc106fadb1a615d0ec11c42f741f51d3580a5f70dfbe7bd7ec58864ef03
 # The agent's side: the MCP server, the records service and the agent run on
 # python:3.13-alpine with nothing installed; the report service is podinfo
 docker.io/library/python:3.13-alpine@sha256:1e1f6334529d1fb26a2ef619d7cffb30a7c7d7cc1cc7338ebee283a58d1aeaca
