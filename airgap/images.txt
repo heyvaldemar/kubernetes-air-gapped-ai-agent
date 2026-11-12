@@ -15,7 +15,7 @@ reg.kyverno.io/kyverno/kyvernopre:v1.19.2@sha256:27f3cc52e628559b56d08363b853168
 reg.kyverno.io/kyverno/reports-controller:v1.19.2@sha256:5fb6d3e738050dbce84f60ecabaede7665fbe0578d07c1e8c912443b035e79c3
 # The agent's side: the MCP server, the records service and the agent run on
 # python:3.13-alpine with nothing installed; the report service is podinfo
-docker.io/library/python:3.13-alpine@sha256:1e1f6334529d1fb26a2ef619d7cffb30a7c7d7cc1cc7338ebee283a58d1aeaca
+docker.io/library/python:3.13-alpine@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e
 ghcr.io/stefanprodan/podinfo:6.15.0@sha256:ec73780a8425f59ea49f5bc8cdff0d598805a224fbaa1f86c67a244f250fa9da
 # Vault Community 2.2.1, the issuer of the records credential (ADR 24), BUSL 1.1
 docker.io/hashicorp/vault:2.2.1@sha256:962a92876e168d68eaaa24b0b8b49bbce1cb63024060a67bba95cd158a366fc2
