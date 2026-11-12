@@ -31,6 +31,8 @@ The frontier job (`.github/workflows/frontier.yml`, ADR 14) cannot run on a bran
 
 Everything is pinned and every pin has one home: images by digest in `airgap/images.txt` (the bundle is made from it), models by revision, sha256 and image digest in `models/models.lock`, the gateway in `gateway/gateway.lock`, CI images in `ci-images.pins`, tools in `tools.lock`, the admission chart in `admission/charts.lock`. A new model is `unpinned` until its first build prints a digest, and is pinned once two runners agree on it.
 
+Dependabot reads only the workflows' actions. Everything else is moved by hand, with the new hash checked against the publisher's, and not before a release is three days old. For a tag its publisher rebuilt, the three days run from the hour the registry says the tag was pushed. `scripts/check-freshness.py` reports each pin upstream has moved past and changes nothing, so it is red for those days, and that is the state to show.
+
 ## Numbers
 
 No number in the README or a release is typed by hand. `scripts/release-numbers.py <run id>` prints the table and the facts behind the prose from a run's artifacts, and the README names that run. When results differ between runs, find what changed (the runner, the harness, the model) before calling it noise. Gates are set from measurement and the record says why (ADR 5 is the example); a gate is never loosened to get a green run without that.
