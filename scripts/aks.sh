@@ -26,25 +26,34 @@
 #   cost       what the run cost, from its length and list prices, and what
 #              Cost Management has measured for the runs before it
 #   spend      what Cost Management has counted for each run this month
-#   budget     the subscription's budget is there, $10 a month at most, with
-#              its alerts on; and on Pay-As-You-Go, the $20 ceiling budget too
-#   ceiling    with the creation identity: make the $20 ceiling budget if it
+#   budget     the subscription's budget is there, 10 a month at most, with
+#              its alerts on; and on Pay-As-You-Go, the 20 ceiling budget too
+#   ceiling    with the creation identity: make the 20 ceiling budget if it
 #              is missing
 #   guard      before a run applies: the ceiling made if missing, the budgets,
-#              and room under the $10 a month the maintainer allowed the runs
-#              for one more
+#              and room for one more run under the 20 a month the maintainer
+#              allowed the whole subscription
+#   quota      the region's vCPU quotas, the subscription's total and the
+#              node's family, against what the run's node needs
+#
+# Amounts are in the account's billing currency, Canadian dollars.
 set -euo pipefail
 # An az that fails inside $(...) must stop the script, not read as "nothing
 # there".
 shopt -s inherit_errexit
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_CONTAINER=airgap-runs
-# The maintainer's limits (2026-10-29 and 2026-10-30): the subscription's
-# budget, and what the runs may cost in a month; one run with room to spare
-# (about $0.07 at list prices, $0.04 in Cost Management for run 41626192017).
+# The maintainer's limits. The subscription's first budget, 10 a month with
+# alerts (2026-10-29). What the whole subscription may cost in a month, the
+# runs and the standing parts together: 10 for the runs from 2026-10-30, 20
+# (about US$15) for everything from 2026-11-13. One run, with room to spare: the boundary alone was
+# 0.04 in Cost Management (run 41626192017); with the agent, a 4-vCPU node
+# for about an hour, under 1.
 BUDGET=flagship-monthly
-CAP=10
+BUDGET_AMOUNT=10
+CAP=20
 ONE_RUN=0.25
+[ "${AGENT:-false}" != true ] || ONE_RUN=1
 # On Pay-As-You-Go, which has no spending limit, a second budget is the
 # ceiling the maintainer named for the subscription on 2026-11-10: $20 a
 # month, with alerts at $10, $15 and $20 spent and at $20 forecast.
@@ -83,9 +92,10 @@ drop() {
 }
 
 # month_costs: this month's cost of every run, as JSON {"currency": ...,
-# "runs": {run: {meter: cost}}}, from Cost Management, by the runs' resource
-# groups, in the account's billing currency. On no answer it
-# prints why and fails; it asks again while Cost Management says 429.
+# "runs": {run: {meter: cost}}, "total": ...}, from Cost Management, by the
+# runs' resource groups, and the whole subscription's, standing groups
+# included, in the account's billing currency. On no answer it prints why
+# and fails; it asks again while Cost Management says 429.
 month_costs() {
   local body out attempt
   body='{"type":"ActualCost","timeframe":"MonthToDate","dataset":{"granularity":"None","aggregation":{"cost":{"name":"Cost","function":"Sum"}},"grouping":[{"type":"Dimension","name":"ResourceGroupName"},{"type":"Dimension","name":"MeterCategory"}]}}'
@@ -96,15 +106,16 @@ month_costs() {
 import json, re, sys
 d = json.loads(sys.argv[1])["properties"]
 cols = [c["name"] for c in d["columns"]]
-runs, currency = {}, ""
+runs, currency, total = {}, "", 0.0
 for row in d["rows"]:
     r = dict(zip(cols, row))
     currency = r.get("Currency") or currency
+    total += r["Cost"]
     m = re.match(r"airgap-(\d+)(-nodes)?$", str(r.get("ResourceGroupName", "")), re.I)
     if m:
         runs.setdefault(m.group(1), {}).setdefault(r["MeterCategory"], 0.0)
         runs[m.group(1)][r["MeterCategory"]] += r["Cost"]
-print(json.dumps({"currency": currency, "runs": runs}))
+print(json.dumps({"currency": currency, "runs": runs, "total": total}))
 ' "$out"
       return 0
     fi
@@ -286,11 +297,12 @@ for run in sorted(runs):
     for what, cost in sorted(runs[run].items()):
         print("| %s | %s | $%.4f |" % (run, what, cost))
     print("| %s | **total** | **$%.2f** |" % (run, sum(runs[run].values())))
-print("| **this month** | | **$%.2f** |" % sum(sum(r.values()) for r in runs.values()))
+print("| **the runs, this month** | | **$%.2f** |" % sum(sum(r.values()) for r in runs.values()))
+print("| **the whole subscription, this month** | | **$%.2f** |" % d.get("total", 0))
 ' "$out"
     ;;
   budget)
-    # The subscription's budget, as the maintainer set it on 2026-10-29: $10
+    # The subscription's budget, as the maintainer set it on 2026-10-29: 10
     # a month with its alerts on. Printed without its addresses, which a
     # public log has no need of; missing, larger or silent, it fails.
     : "${AZURE_SUBSCRIPTION_ID:?}"
@@ -305,7 +317,7 @@ print("budget %s: $%s a %s, $%s spent so far, %d alerts on: %s" % (sys.argv[2], 
       ", ".join(sorted("%s %s%%" % (n.get("thresholdType", "Actual").lower(), n["threshold"]) for n in on))))
 if float(p["amount"]) > float(sys.argv[3]) or not on:
     sys.exit("the budget is not the $%s a month with alerts the maintainer approved" % sys.argv[3])
-' "$b" "$BUDGET" "$CAP"
+' "$b" "$BUDGET" "$BUDGET_AMOUNT"
     # The trial stops spending at its limit; Pay-As-You-Go has none, and
     # then no run goes on without the ceiling.
     limit="$(az rest --method get -o tsv --only-show-errors --query subscriptionPolicies.spendingLimit \
@@ -362,21 +374,50 @@ print(json.dumps({"properties": {"category": "Cost", "amount": amount, "timeGrai
     say "budget $CEILING made: \$$CEILING_AMOUNT a month, alerts at \$10, \$15 and \$20 spent and \$20 forecast"
     ;;
   guard)
-    # Before anything is billed: the budget is there, and this month's runs
-    # have left room for one more under the $10 a month the maintainer
-    # allowed for them (2026-10-30). A budget only alerts; this refuses.
+    # Before anything is billed: the budgets are there, and this month has
+    # left room for one more run under the 20 a month the maintainer allowed
+    # the whole subscription (2026-11-13), counted as Cost Management counts
+    # it: every resource group, the standing ones too. A budget only alerts;
+    # this refuses.
     : "${AZURE_SUBSCRIPTION_ID:?}"
     "$0" ceiling
     "$0" budget
     if ! out="$(month_costs)"; then printf '%s; going on, with list prices as the only count\n' "$out"; exit 0; fi
     python3 -c '
 import json, sys
-spent = sum(sum(r.values()) for r in json.loads(sys.argv[1])["runs"].values())
+d = json.loads(sys.argv[1])
+runs = sum(sum(r.values()) for r in d["runs"].values())
+spent, cur = d.get("total", runs), d.get("currency") or "in the billing currency"
 cap, one = float(sys.argv[2]), float(sys.argv[3])
-print("this month the runs have cost $%.2f in Cost Management; with one more, about $%.2f, of the $%.2f a month allowed" % (spent, spent + one, cap))
+print("this month the subscription has cost %.2f %s in Cost Management, %.2f of it the runs; with one more run, about %.2f, of the %.2f a month allowed" % (spent, cur, runs, spent + one, cap))
 if spent + one > cap:
-    sys.exit("one more run would pass the $%.2f a month the maintainer allowed: none until next month, unless he raises it" % cap)
+    sys.exit("one more run would pass the %.2f %s a month the maintainer allowed: none until next month, unless he raises it" % (cap, cur))
 ' "$out" "$CAP" "$ONE_RUN"
     ;;
-  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard>" >&2; exit 2 ;;
+  quota)
+    # The region's vCPU quotas, read before the node is asked for: the
+    # subscription's total in the region and the node's family. The Free
+    # Trial held both to 4 (ADR 23); a node that does not fit fails here, in
+    # a second, not after the network and the registry are made.
+    : "${AZURE_SUBSCRIPTION_ID:?}" "${AZURE_REGION:?}"
+    az rest --method get -o json --only-show-errors \
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Compute/locations/$AZURE_REGION/usages?api-version=2024-07-01" \
+      | python3 -c '
+import json, sys
+size = sys.argv[1]
+family, need = {"Standard_D2as_v7": ("standardDASv7Family", 2), "Standard_D4as_v7": ("standardDASv7Family", 4)}[size]
+use = {u["name"]["value"]: u for u in json.load(sys.stdin)["value"]}
+short = []
+for name in ("cores", family):
+    u = use.get(name)
+    if u is None:
+        sys.exit("the region lists no quota named %s" % name)
+    print("quota %s (%s) in %s: %d of %d vCPUs in use; %s needs %d" % (name, u["name"]["localizedValue"], sys.argv[2], u["currentValue"], u["limit"], size, need))
+    if u["currentValue"] + need > u["limit"]:
+        short.append(name)
+if short:
+    sys.exit("%s does not fit the quota of %s" % (size, ", ".join(short)))
+' "${NODE_SIZE:-Standard_D4as_v7}" "$AZURE_REGION"
+    ;;
+  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard|quota>" >&2; exit 2 ;;
 esac

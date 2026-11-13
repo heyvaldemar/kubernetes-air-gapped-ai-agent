@@ -32,6 +32,7 @@ defaults:
 
 env:
   AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_REGION: ${{ vars.AZURE_REGION }}
 
 jobs:
   sweep:
@@ -67,7 +68,9 @@ jobs:
 
       # Read every day, so a budget that went missing or a month that ran
       # over is in a log before the next run: the run's own guard refuses to
-      # apply past $10 a month.
+      # apply past 20 a month for the whole subscription. And the region's
+      # vCPU quota, against the agent's 4-vCPU node: printed, not held to,
+      # since the run itself refuses a node that does not fit.
       - name: The budget, and what the runs have cost this month
         if: always()
         run: |
@@ -75,4 +78,6 @@ jobs:
             ./scripts/aks.sh budget
             printf '\nCost Management, this month, by run:\n\n'
             ./scripts/aks.sh spend
+            printf '\n'
+            NODE_SIZE=Standard_D4as_v7 ./scripts/aks.sh quota || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
