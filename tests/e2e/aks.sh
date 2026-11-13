@@ -13,6 +13,9 @@
 #   3. the node itself: the same, from the host network
 #   4. AKS's own images came through the registry's cache: the registry holds
 #      them under aks-managed-repository/, read from the connected side
+#   5. with the agent: a pod in the agent's namespace cannot reach the
+#      instance metadata service, which hands out the kubelet's identity;
+#      a pod in a namespace with no NetworkPolicy can
 #
 # Every refusal sits beside a control from the same pod, so a dead network
 # cannot pass for a closed one. Needs REGISTRY, REGISTRY_NAME, INSIDE and
@@ -108,6 +111,46 @@ for pod in probe probe-node; do
   if opens "$pod" "$mcr" 443; then fail "$where opened TCP to mcr.microsoft.com ($mcr:443): AKS's images need not have come through the registry"
   else pass "$where opens no TCP to mcr.microsoft.com ($mcr:443), where AKS's own images are published"; fi
 done
+
+# With the agent: the instance metadata service. AKS leaves 169.254.169.254
+# open to pods, and it hands out the node's managed identity, the kubelet's,
+# which Kyverno reads the registry as (scripts/aks.sh kyverno). The agent's
+# namespace must not reach it; a pod in a namespace with no NetworkPolicy,
+# the control, does.
+if kubectl get namespace agents >/dev/null 2>&1; then
+  step "the instance metadata service"
+  imds='wget -q -T 5 -O- --header Metadata:true "http://169.254.169.254/metadata/instance/compute/vmSize?api-version=2021-02-01&format=text"'
+  got="$(inpod probe "$imds" | head -c 100)"
+  if [[ "$got" == Standard_* ]]; then
+    pass "control: a pod in a namespace with no NetworkPolicy reaches the instance metadata service (it names the node, $got)"
+  else fail "control: a pod with no NetworkPolicy got no answer from the instance metadata service ('${got:-nothing}'), so the refusal below says nothing"; fi
+  sed -e 's/name: probe, namespace: probe/name: imds-probe, namespace: agents/' <<EOF | kubectl apply -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata: {name: probe, namespace: probe}
+spec:
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: c
+      image: $BUSYBOX
+      command: [sleep, "600"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+EOF
+  if kubectl -n agents wait pod/imds-probe --for=condition=Ready --timeout=180s >/dev/null; then
+    inagents() { kubectl -n agents exec imds-probe -- sh -c "$*" 2>&1; }
+    if [ -n "$(inagents "nslookup kubernetes.default.svc.cluster.local" | sed -n 's/^Address:[[:space:]]*//p' | grep -v ':53$')" ]; then
+      pass "control: a pod in the agent's namespace resolves the cluster's own services (its NetworkPolicies let DNS out)"
+    else fail "control: a pod in the agent's namespace resolves nothing, so the refusal below says nothing"; fi
+    got="$(inagents "$imds" | head -c 100)"
+    if [[ "$got" == Standard_* ]] || inagents "nc -w 5 169.254.169.254 80 </dev/null" >/dev/null; then
+      fail "a pod in the agent's namespace reached the instance metadata service, and with it the kubelet's identity"
+    else pass "a pod in the agent's namespace cannot reach the instance metadata service, 169.254.169.254, nor the kubelet's identity it hands out"; fi
+  else
+    fail "the probe in the agent's namespace did not start: $(kubectl -n agents get events --sort-by=.lastTimestamp | tail -3 | tr -s ' ' | cut -c1-300)"
+  fi
+  kubectl -n agents delete pod imds-probe --wait=false >/dev/null 2>&1
+fi
 
 step "AKS's own images"
 cached="$(az acr repository list --name "$REGISTRY_NAME" -o tsv 2>/dev/null | grep -c '^aks-managed-repository/' || true)"

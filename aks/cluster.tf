@@ -81,11 +81,15 @@ resource "azurerm_kubernetes_cluster" "this" {
     dns_service_ip      = cidrhost(var.service_cidr, 10)
   }
 
+  # max_pods as on kind and GKE: AKS holds back 20 MB of memory for each pod a
+  # node allows, and overlay's default of 250 would hold back 4 GiB of the
+  # agent's 16, where 110 holds back 2.2.
   default_node_pool {
     name                    = "nodes"
     node_count              = 1
     vm_size                 = var.node_vm_size
     vnet_subnet_id          = azurerm_subnet.nodes.id
+    max_pods                = 110
     os_sku                  = "Ubuntu"
     os_disk_type            = "Managed"
     os_disk_size_gb         = 64

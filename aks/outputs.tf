@@ -22,6 +22,11 @@ output "inside" {
   value       = azurerm_container_registry.inside.login_server
 }
 
+output "kubelet_client_id" {
+  description = "The kubelet's identity, which Kyverno also reads the registry as (scripts/aks.sh kyverno). An identifier, not a credential."
+  value       = data.azurerm_user_assigned_identity.kubelet.client_id
+}
+
 output "registry_name" {
   value = azurerm_container_registry.inside.name
 }

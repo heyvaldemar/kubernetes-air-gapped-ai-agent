@@ -12,7 +12,9 @@
 # With INSIDE set (scripts/inside.sh, the AWS run), Kyverno's images are named
 # under it, the policies name its models path, and Kyverno reads signatures
 # from ECR with the credential of its own AWS role (aws/admission.tf, through
-# EKS Pod Identity): REGISTRY_CREDENTIALS names the provider, amazon.
+# EKS Pod Identity): REGISTRY_CREDENTIALS names the provider, amazon (google
+# on GKE, azure on AKS). KYVERNO_VALUES names one more values file for the
+# chart, on AKS the identity Kyverno reads the registry as (aks.sh kyverno).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
@@ -60,8 +62,9 @@ case "${1:-}" in
     # chart then spreads them over the nodes and gives them a disruption
     # budget of its own.
     replicas=(); [ -z "${ADMISSION_REPLICAS:-}" ] || replicas=(--set "admissionController.replicas=$ADMISSION_REPLICAS")
+    more=(); [ -z "${KYVERNO_VALUES:-}" ] || more=(-f "$KYVERNO_VALUES")
     helm upgrade --install kyverno "$CHART" --namespace kyverno --create-namespace --wait --timeout 10m \
-      -f "$STATE/kyverno-images.yaml" -f "$ROOT/admission/kyverno-values.yaml" "${trust[@]}" "${replicas[@]}" >/dev/null
+      -f "$STATE/kyverno-images.yaml" -f "$ROOT/admission/kyverno-values.yaml" "${more[@]}" "${trust[@]}" "${replicas[@]}" >/dev/null
     kubectl -n kyverno rollout status deployment/kyverno-admission-controller --timeout=300s >/dev/null
     # Rolled out is not serving: wait until a server-side dry run of the
     # policy goes through the webhook that validates policies.

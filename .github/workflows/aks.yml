@@ -9,9 +9,15 @@ name: The boundary on AKS
 # network's own; and an API that answers the runner's own address only.
 # tests/e2e/aks.sh tries the ways out, each beside a control.
 #
-# Phase 1, the boundary alone. Phase 2, the agent on it, waits: the trial
-# subscription allows four vCPUs in the region, and the maintainer decides
-# whether to upgrade it (ADR 23).
+# Phase 2, the agent on it, as on AWS and GKE: the model built, signed and
+# given its AI-BOM on the connected side, everything the cluster runs carried
+# in one signed file into the run's registry, Kyverno reading signatures
+# there as the kubelet's identity, the one a pod can get with no way out
+# (ADR 23), the model server, the MCP server and the gateway, then the checks
+# the kind e2e runs on what is inside, the evals, Vault and the game day.
+# AGENT says whether a run does it: by hand unless the dispatch says false,
+# and on the schedule once the repository variable AZURE_AGENT_ENABLED is
+# true.
 #
 # In the subscription the maintainer set up: an Entra application federated
 # to this repository's main branch, in the environment azure-validation, by
@@ -41,9 +47,15 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type SPEND to create billed Azure resources (about $0.07 a run at list prices; Cost Management counted $0.04)"
+        description: "Type SPEND to create billed Azure resources (the boundary alone about $0.07 at list prices, CA$0.04 in Cost Management; with the agent about $0.35)"
         required: true
         type: string
+      agent:
+        description: "true runs the agent on the boundary (phase 2); false, the boundary alone"
+        required: false
+        type: choice
+        options: ["true", "false"]
+        default: "true"
       dns_firewall:
         description: "false only to show the DNS check its violation (ADR 23)"
         required: false
@@ -90,7 +102,14 @@ env:
   ARM_CLIENT_ID: ${{ vars.AZURE_CREATE_CLIENT_ID }}
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  NODE_SIZE: Standard_D2as_v7
+  AGENT: ${{ (github.event_name == 'workflow_dispatch' && inputs.agent != 'false') || (github.event_name == 'schedule' && vars.AZURE_AGENT_ENABLED == 'true') }}
+  # The boundary alone, two vCPUs; with the agent, four vCPUs and 16 GiB, the
+  # node GKE's run has.
+  NODE_SIZE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.agent != 'false') || (github.event_name == 'schedule' && vars.AZURE_AGENT_ENABLED == 'true')) && 'Standard_D4as_v7' || 'Standard_D2as_v7' }}
+  # The model a release ships with, held to the same gates as in the kind e2e.
+  MODEL: granite-4.0-1b
+  TASK_FLOOR: "on"
+  OFFER_PATTERNS: "on"
 
 jobs:
   refused:
@@ -153,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     # The federation names this environment in the subject it admits.
     environment: azure-validation
-    timeout-minutes: 60
+    timeout-minutes: 130
     permissions:
       contents: read
       # The OIDC token the federation exchanges, for this environment on main.
@@ -194,6 +213,38 @@ jobs:
       - name: The region's vCPU quota holds the node
         run: ./scripts/aks.sh quota
 
+      # The vendor's side, before anything is billed, as on AWS and GKE: a
+      # staging registry on the runner, the model built reproducibly, signed
+      # and attested, the plants, the charts, and all of it in one signed
+      # file. The staging registry is gone before the file crosses.
+      - name: Everything the cluster runs, in one signed file
+        if: env.AGENT == 'true'
+        run: |
+          df -h / | tail -1
+          NETWORK=bridge ./scripts/airgap.sh registry
+          GPU=0 ./scripts/airgap.sh seed
+          ./scripts/model.sh build
+          ./scripts/model.sh sign
+          # The document search's embedding model (ADR 21).
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh build
+          MODEL=nomic-embed-text-v1.5 ./scripts/model.sh sign
+          ./scripts/model.sh plants
+          ./scripts/admission.sh fetch
+          ./scripts/gateway.sh fetch
+          ./scripts/bundle.sh create
+          ./scripts/airgap.sh open
+          df -h / | tail -1
+
+      # The bundle takes twenty minutes, and az's next token, the state
+      # account's, is asked for after it.
+      - name: The creation identity again, after the bundle
+        if: env.AGENT == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       # The run's variables go to the state account beside its state, for
       # the record of what this job applied.
       - name: The run's variables
@@ -214,7 +265,7 @@ jobs:
           PY
           az storage blob upload --auth-mode login --account-name "$AZURE_STATE_ACCOUNT" --container-name airgap-runs \
             --name "$RUN_ID/run.tfvars.json" --file run.tfvars.json --overwrite -o none
-          echo "dns_firewall: $DNS_FIREWALL, node: $NODE_SIZE"
+          echo "agent: $AGENT, dns_firewall: $DNS_FIREWALL, node: $NODE_SIZE"
 
       - name: Terraform init, one state per run
         run: |
@@ -242,13 +293,23 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # With the agent, the file that crossed is checked and loaded into the
+      # run's registry, which holds nothing of it until then; without it,
+      # busybox alone, by digest.
       - name: Across the gap, into the registry inside
         run: |
-          for o in registry registry_name inside registry_cidr; do
+          for o in registry registry_name inside registry_cidr kubelet_client_id; do
             echo "$(tr '[:lower:]' '[:upper:]' <<<"$o")=$(terraform -chdir=aks output -raw "$o")" >> "$GITHUB_ENV"
           done
-          REGISTRY="$(terraform -chdir=aks output -raw registry)" REGISTRY_NAME="$(terraform -chdir=aks output -raw registry_name)" \
-          INSIDE="$(terraform -chdir=aks output -raw inside)" ./scripts/aks.sh images
+          REGISTRY="$(terraform -chdir=aks output -raw registry)"; export REGISTRY
+          REGISTRY_NAME="$(terraform -chdir=aks output -raw registry_name)"; export REGISTRY_NAME
+          INSIDE="$(terraform -chdir=aks output -raw inside)"; export INSIDE
+          if [ "$AGENT" = true ]; then
+            ./scripts/aks.sh login
+            ./scripts/bundle.sh load
+          else
+            ./scripts/aks.sh images
+          fi
 
       - name: The cluster, from the operator's address
         run: |
@@ -261,10 +322,71 @@ jobs:
           # registry inside for instead.
           kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,IMAGES:.spec.containers[*].image'
 
+      # Kyverno reads signatures from the registry as the kubelet's identity,
+      # through the instance metadata service: a pod's own Entra identity
+      # (workload identity) asks login.microsoftonline.com, which is outside.
+      # The agent's namespaces cannot reach the metadata service; the
+      # boundary's checks below try it (ADR 23).
+      - name: Kyverno and the model policies, from the registry inside
+        if: env.AGENT == 'true'
+        env:
+          REGISTRY_CREDENTIALS: azure
+        run: |
+          KYVERNO_VALUES="$(./scripts/aks.sh kyverno)" ./scripts/admission.sh install
+          ./scripts/admission.sh policy
+
+      - name: The model server, the tool side and the gateway, from the registry inside
+        if: env.AGENT == 'true'
+        run: |
+          ./scripts/serve.sh
+          ./scripts/tools.sh
+          ./scripts/gateway.sh install
+
+      - name: What is inside, and that nothing else runs
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          CHECKS: inside
+        run: ./tests/e2e/run.sh
+
+      # The checks below read the registry with az, which needs a token from
+      # a login younger than GitHub's.
+      - name: The creation identity again, for the registry
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CREATE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: The boundary, tried from inside
         env:
           E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
         run: ./tests/e2e/aks.sh
+
+      - name: Run the agent through the evals
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          EVALS_RESULTS: ${{ runner.temp }}/evals-results.json
+        run: ./scripts/evals.sh
+
+      # The records credential from Vault (ADR 24), as on kind: who may get
+      # one, what the records service refuses, and three cut-offs. Its volume
+      # is an Azure disk in AKS's node group, which goes with the cluster.
+      - name: The records credential from Vault, and its revocation
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+        run: ./tests/e2e/vault.sh
+
+      # It takes parts of the cluster down and puts them back.
+      - name: Game day, parts of the boundary taken down while it serves
+        if: env.AGENT == 'true'
+        env:
+          E2E_RESULTS: ${{ runner.temp }}/e2e-results.json
+          SERVED_DEPLOYMENT: llama
+          SERVED_MODEL: ${{ env.MODEL }}
+        run: ./tests/e2e/gameday.sh
 
       - name: What the cluster looked like
         if: failure()
@@ -273,13 +395,22 @@ jobs:
           kubectl get nodes -o wide || true
           kubectl get pods -A -o wide || true
           kubectl get events -A --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kyverno logs deploy/kyverno-admission-controller --tail=60 || true
+          kubectl -n inference describe pod -l app=llama | tail -30 || true
+          kubectl -n agents logs job/evals --tail=20 || true
+          kubectl -n mcp logs deploy/mcp-server --tail=20 || true
+          kubectl -n agentgateway-system logs deploy/agentgateway --tail=40 || true
 
       - name: Keep the checks
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-results-aks
-          path: ${{ runner.temp }}/e2e-results.json
+          path: |
+            ${{ runner.temp }}/e2e-results.json
+            ${{ runner.temp }}/evals-results.json
+            .cache/airgap/evals.jsonl
+            .cache/airgap/mcp-audit.jsonl
           if-no-files-found: ignore
           retention-days: 90
 

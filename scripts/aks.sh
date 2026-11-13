@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard>
+# aks.sh <login|kyverno|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard|quota>
 # - the parts of the AKS run (ADR 23) that are not Terraform.
 # .github/workflows/aks.yml and aks-sweep.yml call them, logged in with az as
 # the run's identity; each reads the environment the workflow sets:
@@ -9,6 +9,8 @@
 #
 #   login      the registry's credential for this run, into the DOCKER_CONFIG
 #              the bundle and the checks read, on oras's stdin; never printed
+#   kyverno    with the agent: the chart values that give Kyverno the
+#              kubelet's identity to read the registry with; prints their path
 #   images     the boundary alone: copy busybox into this run's registry by
 #              the digest airgap/images.txt pins, from the connected side,
 #              before anything inside can ask for it
@@ -52,8 +54,10 @@ STATE_CONTAINER=airgap-runs
 BUDGET=flagship-monthly
 BUDGET_AMOUNT=10
 CAP=20
+# Counted from either of what makes a run dearer, the agent or the larger
+# node, so the two cannot disagree in the run's favour.
 ONE_RUN=0.25
-[ "${AGENT:-false}" != true ] || ONE_RUN=1
+if [ "${AGENT:-false}" = true ] || [ "${NODE_SIZE:-Standard_D2as_v7}" != Standard_D2as_v7 ]; then ONE_RUN=1; fi
 # On Pay-As-You-Go, which has no spending limit, a second budget is the
 # ceiling the maintainer named for the subscription on 2026-11-10: $20 a
 # month, with alerts at $10, $15 and $20 spent and at $20 forecast.
@@ -139,6 +143,25 @@ case "${1:-}" in
     oras login --username 00000000-0000-0000-0000-000000000000 --password-stdin "$REGISTRY" <<<"$token" >/dev/null
     unset token
     say "logged in to $REGISTRY for this run"
+    ;;
+  kyverno)
+    # Phase 2: the identity Kyverno's admission controller reads signatures
+    # and AI-BOMs from the registry with, as chart values; prints the file's
+    # path for admission.sh (KYVERNO_VALUES). A pod's own Entra identity
+    # (workload identity) would ask login.microsoftonline.com for its token,
+    # which is outside the network. What a pod can reach with no way out is
+    # the node's instance metadata service, which hands out the node's
+    # managed identity: the kubelet's, AcrPull and nothing else. Kyverno's
+    # Azure provider asks it for that identity's token when AZURE_CLIENT_ID
+    # names it and no secret or federated token is set. Neither value is a
+    # credential. The agent's namespaces cannot reach the service
+    # (tests/e2e/aks.sh tries it).
+    : "${KUBELET_CLIENT_ID:?}" "${ARM_TENANT_ID:?}"
+    out="$ROOT/.cache/airgap/kyverno-azure.yaml"
+    mkdir -p "$(dirname "$out")"
+    printf 'admissionController:\n  container:\n    extraEnvVars:\n      - {name: AZURE_CLIENT_ID, value: "%s"}\n      - {name: AZURE_TENANT_ID, value: "%s"}\n' \
+      "$KUBELET_CLIENT_ID" "$ARM_TENANT_ID" >"$out"
+    printf '%s\n' "$out"
     ;;
   images)
     : "${REGISTRY:?}" "${INSIDE:?}"
@@ -419,5 +442,5 @@ if short:
     sys.exit("%s does not fit the quota of %s" % (size, ", ".join(short)))
 ' "${NODE_SIZE:-Standard_D4as_v7}" "$AZURE_REGION"
     ;;
-  *) echo "usage: aks.sh <login|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard|quota>" >&2; exit 2 ;;
+  *) echo "usage: aks.sh <login|kyverno|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard|quota>" >&2; exit 2 ;;
 esac
