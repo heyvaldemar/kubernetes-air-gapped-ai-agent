@@ -63,7 +63,7 @@ The schedule runs phase 2 from here (`AWS_AGENT_ENABLED`). Its first run, [39744
 
 ## Consequences
 
-- About $0.11 a passing run of the boundary alone, measured (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, five interface endpoints in two zones for under an hour, and the DNS Firewall's queries. With the agent, about $0.30 (0.72 h): an m7i.xlarge, a sixth endpoint, and the evals and the game day. Weekly, about $1.30 a month, under the $5 the maintainer set.
+- About $0.11 a passing run of the boundary alone by its cost table, which is list prices for the run's whole length and not a bill (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, five interface endpoints in two zones for under an hour, and the DNS Firewall's queries. With the agent, about $0.30 by the same table (0.72 h): an m7i.xlarge, a sixth endpoint, and the evals and the game day. Weekly, about $1.30 a month, under the $5 the maintainer set.
 - The account's ID is in the run's ECR path, so it is in the run's public log. AWS does not treat an account ID as a secret; nothing here relies on it being unknown.
 - No KMS key for Secrets here: a key cannot be deleted sooner than seven days, so a weekly run would keep paying for keys it no longer uses, and envelope encryption is shown in `aws-eks-reference-platform`.
 - The operator's public endpoint is a way in, from one address, for the length of a run. A site whose operator sits inside would turn public access off and reach the API from the VPC.
