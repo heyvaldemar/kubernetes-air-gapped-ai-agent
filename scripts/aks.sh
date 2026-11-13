@@ -422,25 +422,54 @@ if spent + one > cap:
     # subscription's total in the region and the node's family. The Free
     # Trial held both to 4 (ADR 23); a node that does not fit fails here, in
     # a second, not after the network and the registry are made.
+    # The size's family and vCPUs come from Azure's own list of the sizes
+    # the region offers, not from a name written here: run 43453166590
+    # looked for standardDASv7Family, which the region does not call it.
     : "${AZURE_SUBSCRIPTION_ID:?}" "${AZURE_REGION:?}"
+    size="${NODE_SIZE:-Standard_D4as_v7}" skus="$(mktemp)" usages="$(mktemp)"
     az rest --method get -o json --only-show-errors \
-      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Compute/locations/$AZURE_REGION/usages?api-version=2024-07-01" \
-      | python3 -c '
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Compute/skus?api-version=2021-07-01&%24filter=location%20eq%20%27$AZURE_REGION%27" >"$skus"
+    az rest --method get -o json --only-show-errors \
+      --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers/Microsoft.Compute/locations/$AZURE_REGION/usages?api-version=2024-07-01" >"$usages"
+    rc=0
+    python3 - "$size" "$AZURE_REGION" "$skus" "$usages" <<'PY' || rc=$?
 import json, sys
-size = sys.argv[1]
-family, need = {"Standard_D2as_v7": ("standardDASv7Family", 2), "Standard_D4as_v7": ("standardDASv7Family", 4)}[size]
-use = {u["name"]["value"]: u for u in json.load(sys.stdin)["value"]}
+size, region = sys.argv[1], sys.argv[2]
+sku = next((s for s in json.load(open(sys.argv[3]))["value"]
+            if s.get("resourceType") == "virtualMachines" and s["name"].lower() == size.lower()), None)
+if sku is None:
+    sys.exit("the region lists no size %s" % size)
+need = int(next(c["value"] for c in sku["capabilities"] if c["name"] == "vCPUs"))
+family = sku["family"]
+# A restriction by zone leaves the size to the others, and the run names no
+# zone; one by location means the subscription may not have it here.
+blocked = [r for r in sku.get("restrictions") or [] if r.get("type") == "Location"]
+for r in sku.get("restrictions") or []:
+    print("%s is restricted in %s: %s, %s, zones %s" % (size, region, r.get("type"), r.get("reasonCode"),
+          ",".join((r.get("restrictionInfo") or {}).get("zones") or []) or "-"))
+use = {u["name"]["value"].lower(): u for u in json.load(open(sys.argv[4]))["value"]}
 short = []
 for name in ("cores", family):
-    u = use.get(name)
+    u = use.get(name.lower())
+    if u is None and name == "cores":
+        sys.exit("the region lists no total vCPU quota (cores)")
     if u is None:
-        sys.exit("the region lists no quota named %s" % name)
-    print("quota %s (%s) in %s: %d of %d vCPUs in use; %s needs %d" % (name, u["name"]["localizedValue"], sys.argv[2], u["currentValue"], u["limit"], size, need))
+        # Not a reason to stop: AKS would refuse a node past a quota anyway,
+        # only later. Said, so the next look finds the name.
+        key = family.lower().removeprefix("standard").removesuffix("family")[:3]
+        like = sorted(v["name"]["value"] for v in use.values() if key and key in v["name"]["value"].lower())
+        print("::warning::the region lists no quota named %s, %s's family, so only the total is held to here; like it: %s" % (name, size, ", ".join(like) or "none"))
+        continue
+    print("quota %s (%s) in %s: %d of %d vCPUs in use; %s needs %d" % (u["name"]["value"], u["name"]["localizedValue"], region, u["currentValue"], u["limit"], size, need))
     if u["currentValue"] + need > u["limit"]:
-        short.append(name)
+        short.append(u["name"]["value"])
+if blocked:
+    short.append("the subscription may not have it in %s (%s)" % (region, blocked[0].get("reasonCode")))
 if short:
-    sys.exit("%s does not fit the quota of %s" % (size, ", ".join(short)))
-' "${NODE_SIZE:-Standard_D4as_v7}" "$AZURE_REGION"
+    sys.exit("%s does not fit: %s" % (size, ", ".join(short)))
+PY
+    rm -f "$skus" "$usages"
+    exit "$rc"
     ;;
   *) echo "usage: aks.sh <login|kyverno|images|sweep|delete|residue|leftovers|cost|spend|budget|ceiling|guard|quota>" >&2; exit 2 ;;
 esac
