@@ -114,15 +114,16 @@ resource "azurerm_kubernetes_cluster" "this" {
 # pods, alone, on kind, AWS and GKE alike (GKE's NodeLocal DNSCache is off for
 # the same reason, ADR 22), so here it is turned off. azurerm has no setting
 # for it; this changes the one node pool AKS made, which reimages the node,
-# and the apply waits for that. tests/e2e/aks.sh checks which resolver a pod
-# asks.
-resource "azapi_update_resource" "local_dns_off" {
-  count       = var.local_dns ? 0 : 1
+# and the apply waits for that. Said explicitly, it stays so: AKS keeps a
+# profile a node pool was given. tests/e2e/aks.sh checks which resolver a pod
+# asks; var.local_dns turns LocalDNS on instead (Required), to show that
+# check its violation.
+resource "azapi_update_resource" "local_dns" {
   type        = "Microsoft.ContainerService/managedClusters/agentPools@2025-10-01"
   resource_id = "${azurerm_kubernetes_cluster.this.id}/agentPools/nodes"
   body = {
     properties = {
-      localDNSProfile = { mode = "Disabled" }
+      localDNSProfile = { mode = var.local_dns ? "Required" : "Disabled" }
     }
   }
 }

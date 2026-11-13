@@ -80,8 +80,8 @@ variable "local_dns" {
   description = <<-EOT
     Whether AKS's LocalDNS answers the node's pods. Off: the pods ask
     CoreDNS, the kube-dns Service, the one resolver the agent's
-    NetworkPolicies let them reach, as on kind, AWS and GKE. On only to show
-    the resolver check its violation (ADR 23).
+    NetworkPolicies let them reach, as on kind, AWS and GKE. On (Required)
+    only to show the resolver check its violation (ADR 23).
   EOT
   type        = bool
   default     = false

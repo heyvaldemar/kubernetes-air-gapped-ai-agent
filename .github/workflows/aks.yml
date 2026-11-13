@@ -57,7 +57,7 @@ on:
         options: ["true", "false"]
         default: "true"
       local_dns:
-        description: "true only to show the resolver check its violation: AKS's LocalDNS left on (ADR 23)"
+        description: "true only to show the resolver check its violation: AKS's LocalDNS turned on (ADR 23)"
         required: false
         type: choice
         options: ["false", "true"]

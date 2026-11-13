@@ -226,11 +226,11 @@ run "the_pods_ask_coredns" {
   command = plan
 
   assert {
-    condition     = length(azapi_update_resource.local_dns_off) == 1 && azapi_update_resource.local_dns_off[0].body.properties.localDNSProfile.mode == "Disabled"
+    condition     = azapi_update_resource.local_dns.body.properties.localDNSProfile.mode == "Disabled"
     error_message = "AKS's LocalDNS is turned off, so the pods ask kube-dns, the one resolver the agent's NetworkPolicies let them reach"
   }
   assert {
-    condition     = azapi_update_resource.local_dns_off[0].resource_id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.ContainerService/managedClusters/airgap-12345678901/agentPools/nodes"
+    condition     = azapi_update_resource.local_dns.resource_id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.ContainerService/managedClusters/airgap-12345678901/agentPools/nodes"
     error_message = "on the cluster's one node pool"
   }
 }
@@ -243,7 +243,7 @@ run "local_dns_on_is_the_violation" {
   }
 
   assert {
-    condition     = length(azapi_update_resource.local_dns_off) == 0
-    error_message = "local_dns = true leaves AKS's LocalDNS as AKS sets it"
+    condition     = azapi_update_resource.local_dns.body.properties.localDNSProfile.mode == "Required"
+    error_message = "local_dns = true turns AKS's LocalDNS on, as AKS 1.37 may by itself"
   }
 }

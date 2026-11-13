@@ -713,8 +713,10 @@ check_aks() {
   grep -qE '^    outbound_type[[:space:]]+= "none"$' aks/cluster.tf || { echo "the AKS cluster's outbound type is not none"; ok=1; }
   # AKS's LocalDNS answers pods from the node, past the agent's DNS rule,
   # which names kube-dns: off, unless a run asks for the violation.
-  grep -qE '^      localDNSProfile = \{ mode = "Disabled" \}$' aks/cluster.tf || { echo "AKS's LocalDNS is not turned off on the node pool"; ok=1; }
-  grep -qE '^  count[[:space:]]+= var\.local_dns \? 0 : 1$' aks/cluster.tf || { echo "AKS's LocalDNS is left on other than by var.local_dns"; ok=1; }
+  grep -qE '^      localDNSProfile = \{ mode = var\.local_dns \? "Required" : "Disabled" \}$' aks/cluster.tf \
+    || { echo "AKS's LocalDNS is not turned off on the node pool, but by var.local_dns"; ok=1; }
+  grep -qE '^resource "azapi_update_resource" "local_dns" \{$' aks/cluster.tf && ! grep -qE '^  count ' <(sed -n '/^resource "azapi_update_resource" "local_dns"/,/^}/p' aks/cluster.tf) \
+    || { echo "the node pool's LocalDNS setting is not made on every run"; ok=1; }
   grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.AZURE_VALIDATION_ENABLED == 'true'))" .github/workflows/aks.yml \
     || { echo "the AKS run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
   # The federation's subjects name an environment; a cloud job outside it is
