@@ -147,7 +147,8 @@ spec:
 EOF
   if kubectl -n agents wait pod/imds-probe --for=condition=Ready --timeout=180s >/dev/null; then
     inagents() { kubectl -n agents exec imds-probe -- sh -c "$*" 2>&1; }
-    if [ -n "$(inagents "nslookup kubernetes.default.svc.cluster.local" | sed -n 's/^Address:[[:space:]]*//p' | grep -v ':53$')" ]; then
+    # awk reads its input to the end, so no stage dies of a closed pipe.
+    if inagents "nslookup kubernetes.default.svc.cluster.local" | sed -n 's/^Address:[[:space:]]*//p' | awk '!/:53$/ {n++} END {exit n == 0}'; then
       pass "control: a pod in the agent's namespace resolves the cluster's own services (its NetworkPolicies let DNS out)"
     else fail "control: a pod in the agent's namespace resolves nothing, so the refusal below says nothing"; fi
     got="$(inagents "$imds" | head -c 100)"
