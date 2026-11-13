@@ -482,5 +482,16 @@
   "event": "schedule",
   "path": "aws/43199517532-1",
   "run": 43199517532
+ },
+ {
+  "artifact_sha256": "5b8ce7e0776305f70272cafec764325fd98b0ae3961eab6ad479f571253b8a5b",
+  "attempt": 1,
+  "cloud": "gke",
+  "commit": "bc583c1286e3ed00f8cda4b588bb32a454da1d1e",
+  "conclusion": "success",
+  "created_at": "2026-11-13T11:08:04Z",
+  "event": "schedule",
+  "path": "gke/43414580093-1",
+  "run": 43414580093
  }
 ]
