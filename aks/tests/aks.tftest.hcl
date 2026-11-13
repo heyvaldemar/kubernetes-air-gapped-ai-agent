@@ -21,6 +21,9 @@ mock_provider "azurerm" {
   mock_resource "azurerm_virtual_network" {
     defaults = { id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.Network/virtualNetworks/airgap-12345678901" }
   }
+  mock_resource "azurerm_kubernetes_cluster" {
+    defaults = { id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.ContainerService/managedClusters/airgap-12345678901" }
+  }
   mock_resource "azurerm_container_registry" {
     defaults = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.ContainerRegistry/registries/airgap12345678901"
@@ -216,5 +219,31 @@ run "the_registry_inside" {
   assert {
     condition     = azurerm_private_dns_zone.registry.name == "privatelink.azurecr.io" && azurerm_private_dns_zone_virtual_network_link.registry.virtual_network_id == azurerm_virtual_network.this.id
     error_message = "and resolves its names in the network's own private zone"
+  }
+}
+
+run "the_pods_ask_coredns" {
+  command = plan
+
+  assert {
+    condition     = length(azapi_update_resource.local_dns_off) == 1 && azapi_update_resource.local_dns_off[0].body.properties.localDNSProfile.mode == "Disabled"
+    error_message = "AKS's LocalDNS is turned off, so the pods ask kube-dns, the one resolver the agent's NetworkPolicies let them reach"
+  }
+  assert {
+    condition     = azapi_update_resource.local_dns_off[0].resource_id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/airgap-12345678901/providers/Microsoft.ContainerService/managedClusters/airgap-12345678901/agentPools/nodes"
+    error_message = "on the cluster's one node pool"
+  }
+}
+
+run "local_dns_on_is_the_violation" {
+  command = plan
+
+  variables {
+    local_dns = true
+  }
+
+  assert {
+    condition     = length(azapi_update_resource.local_dns_off) == 0
+    error_message = "local_dns = true leaves AKS's LocalDNS as AKS sets it"
   }
 }

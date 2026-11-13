@@ -3,7 +3,8 @@
 # aks/ made: a pod, and a pod on the node's own network, each try the ways
 # out, beside a control that must work from the same place.
 #
-#   1. names: the cluster's own services resolve; the registry's name
+#   1. names: the cluster's own services resolve, and a pod asks kube-dns
+#      for them, not AKS's LocalDNS on the node; the registry's name
 #      resolves, to its private endpoint's addresses, from the network's own
 #      zone; a public name does not, and a public resolver cannot be asked
 #      directly
@@ -88,6 +89,13 @@ for pod in probe probe-node; do
   if [ "$pod" = probe ]; then
     if resolves "$pod" kubernetes.default.svc.cluster.local; then pass "control: $where resolves the cluster's own services"
     else fail "control: $where does not resolve kubernetes.default.svc.cluster.local, so nothing below says anything"; fi
+    # The resolver it asks: kube-dns, the one the agent's NetworkPolicies let
+    # out, not AKS's LocalDNS on the node (aks/cluster.tf turns it off).
+    dns="$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}' 2>/dev/null)"
+    asks="$(inpod "$pod" "sed -n 's/^nameserver[[:space:]]*//p' /etc/resolv.conf" | head -n 1)"
+    if [ -n "$dns" ] && [ "$asks" = "$dns" ]; then
+      pass "$where asks the cluster's DNS Service, kube-dns at $dns, the one resolver the agent's NetworkPolicies let it reach (AKS's LocalDNS is off)"
+    else fail "$where asks ${asks:-nothing} for names, not the kube-dns Service (${dns:-not found}): with the agent's NetworkPolicies, which let DNS out to kube-dns alone, it would have no resolver"; fi
   fi
   got="$(addresses "$pod" "$REGISTRY" | sort -u | tr '\n' ' ')"
   # shellcheck disable=SC2086  # one argument per address

@@ -36,6 +36,10 @@ output "registry_cidr" {
   value       = local.registry_cidr
 }
 
+output "local_dns" {
+  value = var.local_dns
+}
+
 output "dns_firewall" {
   value = var.dns_firewall
 }

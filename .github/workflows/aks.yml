@@ -56,6 +56,12 @@ on:
         type: choice
         options: ["true", "false"]
         default: "true"
+      local_dns:
+        description: "true only to show the resolver check its violation: AKS's LocalDNS left on (ADR 23)"
+        required: false
+        type: choice
+        options: ["false", "true"]
+        default: "false"
       dns_firewall:
         description: "false only to show the DNS check its violation (ADR 23)"
         required: false
@@ -250,6 +256,7 @@ jobs:
       - name: The run's variables
         env:
           DNS_FIREWALL: ${{ inputs.dns_firewall != 'false' }}
+          LOCAL_DNS: ${{ inputs.local_dns == 'true' }}
         run: |
           ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '\n')"
           python3 - "$ip" > run.tfvars.json <<'PY'
@@ -261,11 +268,12 @@ jobs:
               "operator_cidrs": [sys.argv[1] + "/32"],
               "node_vm_size": os.environ["NODE_SIZE"],
               "dns_firewall": os.environ["DNS_FIREWALL"] == "true",
+              "local_dns": os.environ["LOCAL_DNS"] == "true",
           }, indent=1))
           PY
           az storage blob upload --auth-mode login --account-name "$AZURE_STATE_ACCOUNT" --container-name airgap-runs \
             --name "$RUN_ID/run.tfvars.json" --file run.tfvars.json --overwrite -o none
-          echo "agent: $AGENT, dns_firewall: $DNS_FIREWALL, node: $NODE_SIZE"
+          echo "agent: $AGENT, dns_firewall: $DNS_FIREWALL, local_dns: $LOCAL_DNS, node: $NODE_SIZE"
 
       - name: Terraform init, one state per run
         run: |

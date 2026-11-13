@@ -99,6 +99,8 @@
 "aks/cluster.tf"	"    artifact_source       = \"Cache\"\n"	"    artifact_source       = \"Direct\"\n"	"aks"	"a cluster that pulls AKS's images from mcr.microsoft.com"
 "aks/cluster.tf"	"    network_policy      = \"cilium\"\n"	""	"aks"	"NetworkPolicies AKS accepts and does not enforce"
 "aks/cluster.tf"	"  run_command_enabled     = false\n"	"  run_command_enabled     = true\n"	"aks"	"a run command, a way in past the authorized ranges"
+"aks/cluster.tf"	"      localDNSProfile = { mode = \"Disabled\" }\n"	"      localDNSProfile = { mode = \"Preferred\" }\n"	"aks"	"a node pool whose pods ask AKS's LocalDNS, past the agent's DNS rule"
+"aks/cluster.tf"	"  count       = var.local_dns ? 0 : 1\n"	"  count       = 0\n"	"aks"	"AKS's LocalDNS left on for every run"
 "aks/dns.tf"	"  refused_names = [\".\"]\n"	"  refused_names = [\"com.\"]\n"	"aks"	"a resolver policy that refuses .com and lets every other name out"
 "aks/dns.tf"	"  allowed_names = [\"azurecr.io.\", \"internal.cloudapp.net.\"]\n"	"  allowed_names = [\"azurecr.io.\", \"internal.cloudapp.net.\", \"microsoft.com.\"]\n"	"aks"	"a resolver policy that lets a public domain through"
 "aks/dns.tf"	"  count     = var.dns_firewall ? 1 : 0\n"	"  count     = 0\n"	"aks"	"a resolver policy never put on the network"

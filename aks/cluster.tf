@@ -106,3 +106,23 @@ resource "azurerm_kubernetes_cluster" "this" {
     azapi_resource.dns_policy_link,
   ]
 }
+
+# From Kubernetes 1.37 AKS turns LocalDNS on by itself, on a node pool made
+# while the cluster holds no NetworkPolicy, which every run's does: a DNS
+# proxy on the node, at 169.254.10.10 and .11, that the pods then ask instead
+# of CoreDNS. The agent's NetworkPolicies let DNS out to kube-dns, CoreDNS's
+# pods, alone, on kind, AWS and GKE alike (GKE's NodeLocal DNSCache is off for
+# the same reason, ADR 22), so here it is turned off. azurerm has no setting
+# for it; this changes the one node pool AKS made, which reimages the node,
+# and the apply waits for that. tests/e2e/aks.sh checks which resolver a pod
+# asks.
+resource "azapi_update_resource" "local_dns_off" {
+  count       = var.local_dns ? 0 : 1
+  type        = "Microsoft.ContainerService/managedClusters/agentPools@2025-10-01"
+  resource_id = "${azurerm_kubernetes_cluster.this.id}/agentPools/nodes"
+  body = {
+    properties = {
+      localDNSProfile = { mode = "Disabled" }
+    }
+  }
+}
