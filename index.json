@@ -493,5 +493,16 @@
   "event": "schedule",
   "path": "gke/43414580093-1",
   "run": 43414580093
+ },
+ {
+  "artifact_sha256": null,
+  "attempt": 1,
+  "cloud": "aks",
+  "commit": "95b5e0e516843c784a094f4fd5f8f2baa83fb239",
+  "conclusion": "failure",
+  "created_at": "2026-11-13T15:29:49Z",
+  "event": "workflow_dispatch",
+  "path": "aks/43453166590-1",
+  "run": 43453166590
  }
 ]
