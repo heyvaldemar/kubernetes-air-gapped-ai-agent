@@ -1,6 +1,6 @@
 # 22. The boundary on GKE: no route out but to Google's own front doors, and no name lookup out
 
-- Status: accepted for phase 1 and phase 2, 2026-10-27, by hand; scheduled weekly, first scheduled pass 2026-11-06 (42206932411), after the first scheduled run (41038578800, 2026-10-30) failed before it made anything
+- Status: accepted for phase 1 and phase 2, 2026-10-27, by hand; scheduled weekly, first scheduled pass 2026-11-06 (42206932411), after the first scheduled run (41038578800, 2026-10-30) failed before it made anything; the second in a row 2026-11-13 (43414580093), the first scheduled run on GKE with Vault
 - Date: 2026-10-27
 
 ## Context
@@ -91,6 +91,12 @@ What changed:
 [42206932411](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42206932411), on the schedule, on 473fa4a, created at 11:00 UTC for the 03:23 cron: all 63 checks passed, nothing was left of it or of any earlier run, and its teardown removed its own state. Its sweep found no earlier state to clear. The evals at the release gates: 18 of 18 tasks, no email delivered outside acme.example, no record deleted, 206 model requests asked by the agent and 206 answered by the gateway. About $0.18 for 0.63 h on one c3d-standard-4; the node's processor was an AMD EPYC 9B14 again, and the model's p50 was 6.2 s a task.
 
 The README says scheduled weekly from this run, with the run named. One scheduled run has passed, after one that failed, so it does not yet say that every week passes.
+
+## The second scheduled pass, 2026-11-13
+
+[43414580093](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43414580093), on the schedule, on bc583c1, created at 11:08 UTC for the 03:23 cron: the second scheduled pass in a row, and the first scheduled run on GKE with Vault in it ([ADR 24](0024-a-one-minute-records-credential-from-vault.md)). All 99 checks in its job passed, the 35 of `tests/e2e/vault.sh` among them (`scripts/release-numbers.py 43414580093 vault gke`), and nothing was left of it or of any earlier run. The records tool's credential lived 60 s, and a credential copied just before its revocation got its first 401 after a median of 59.9 s over 3 rounds. The evals at the release gates: 18 of 18 tasks, no email delivered outside acme.example, no record deleted, 206 model requests asked by the agent and 206 answered by the gateway. About $0.21 for 0.74 h on one c3d-standard-4, an AMD EPYC 9B14 again; the model's p50 was 6.3 s a task.
+
+The README names this run as the last scheduled pass beside the first. Two scheduled runs have passed in a row, after the first one failed.
 
 ## Consequences
 
