@@ -60,6 +60,12 @@ jobs:
       - name: Install the pinned tools
         run: ./scripts/install-tools.sh >> "$GITHUB_PATH"
 
+      # Two kind nodes draw on one user's inotify instances on the host, and
+      # ubuntu-26.04 leaves the kernel's 128 (scripts/kind-host.sh, ADR 20).
+      # The run of 2026-11-07 was the last on ubuntu-24.04.
+      - name: The host's inotify limits, as kind needs them
+        run: ./scripts/kind-host.sh
+
       - name: Create the cluster, with an egress node
         run: kind create cluster --config kind/frontier.yaml --wait 120s
 
