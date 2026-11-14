@@ -60,7 +60,10 @@ jobs:
 
   # Every row of tests/static/plants.tsv, a quarter to a job: the rows whose
   # place in the file leaves the shard's remainder, so each check's plants
-  # are spread over the four (tests/static/plant_violations.py).
+  # are spread over the four (tests/static/plant_violations.py). At 4c97850
+  # (run 43632098881) the shards took 5 min 19 s, 4 min 44 s, 4 min 52 s and
+  # 6 min 6 s, and the whole of Verify 6 min 13 s where it had taken 19 min
+  # 26 s.
   plants:
     name: Each check, shown its planted violation (${{ matrix.shard }} of 4)
     runs-on: ubuntu-latest
@@ -113,7 +116,9 @@ jobs:
     needs: plants
     # Whatever became of the shards. Left to the default, this job would be
     # skipped with them if they were ever skipped, and the run would end
-    # green with no plant shown.
+    # green with no plant shown. Shown both on branches made for it: a
+    # shard that showed nothing and ended green (run 43631791484), and
+    # shards that were skipped (run 43632101182). It ended red each time.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
