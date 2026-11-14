@@ -81,7 +81,9 @@
 #                 read by the nodes and Kyverno alone), and so do the
 #                 bootstrap's (one immutable subject, each service account
 #                 from its own workflow, a sweep that creates nothing, the
-#                 budget); no service account key anywhere; both workflows
+#                 run's grant on the state bucket held to airgap-runs/ by
+#                 its whole condition, the budget); that grant the only one
+#                 on a bucket; no service account key anywhere; both workflows
 #                 run on main only, outside any environment, and read no
 #                 stored secret; the run's teardown removes its own state;
 #                 and scripts/gke.sh's sweep and leftovers pass
@@ -635,7 +637,7 @@ PY
 }
 
 check_gke() {
-  local ok=0 out dir routes
+  local ok=0 out dir routes grants
   if grep -nE 'resource "google_compute_(router|router_nat|address|global_address|network_peering|vpn_gateway|ha_vpn_gateway|vpn_tunnel|external_vpn_gateway|interconnect_attachment|instance)"' gke/*.tf; then
     echo "gke/ declares a way out of the network"; ok=1
   fi
@@ -648,6 +650,10 @@ check_gke() {
     echo "a route goes somewhere other than restricted.googleapis.com and private.googleapis.com"; ok=1
   fi
   if grep -rn --include='*.tf' 'google_service_account_key' gke/; then echo "gke/ makes a service account key; every credential is federated"; ok=1; fi
+  # The Terraform test reads the run's grant on the state bucket by its
+  # address, so a second grant under another name is one it cannot see.
+  grants="$(cat gke/*.tf gke/bootstrap/*.tf | grep -cE '^resource "google_storage_(bucket|object|default_object)_(iam_(member|binding|policy)|acl|access_control)"' || true)"
+  [ "$grants" = 1 ] || { echo "gke/ declares $grants grants on a bucket or its objects; there is one, the run's under airgap-runs/"; ok=1; }
   grep -qF "if: github.ref == 'refs/heads/main' && (inputs.confirm == 'SPEND' || (github.event_name == 'schedule' && vars.GKE_VALIDATION_ENABLED == 'true'))" .github/workflows/gke.yml \
     || { echo "the GKE run is not held to main, a typed SPEND, or the schedule behind its variable"; ok=1; }
   # A job in an environment carries that environment in its subject, which

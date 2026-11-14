@@ -90,9 +90,16 @@ run "the_runs_state_and_the_bootstrap_apart" {
     condition     = google_storage_bucket.state[0].public_access_prevention == "enforced" && google_storage_bucket.state[0].uniform_bucket_level_access && one(google_storage_bucket.state[0].versioning).enabled
     error_message = "the state bucket is never public, has no per-object ACLs, and keeps versions"
   }
+  # The whole expression, not a piece of it: a condition that keeps the
+  # airgap-runs/ clause and adds "|| something wider" would hold that piece
+  # and still let a run write the bootstrap's own state.
   assert {
-    condition     = strcontains(one(google_storage_bucket_iam_member.create_state[0].condition).expression, "/objects/airgap-runs/\")")
-    error_message = "a run reads and writes under airgap-runs/ only, never the bootstrap's own state"
+    condition     = one(google_storage_bucket_iam_member.create_state[0].condition).expression == "resource.name == \"projects/_/buckets/validation-project-airgap-tfstate\" || resource.name.startsWith(\"projects/_/buckets/validation-project-airgap-tfstate/objects/airgap-runs/\")"
+    error_message = "a run reads and writes under airgap-runs/ only, never the bootstrap's own state: the condition is the bucket itself or a name under airgap-runs/, and nothing more"
+  }
+  assert {
+    condition     = length(google_storage_bucket_iam_member.create_state) == 1 && google_storage_bucket_iam_member.create_state[0].bucket == "validation-project-airgap-tfstate" && google_storage_bucket_iam_member.create_state[0].role == "roles/storage.objectUser" && google_storage_bucket_iam_member.create_state[0].member == google_service_account.create.member
+    error_message = "the grant on the state bucket is one: the run's account as objectUser, under that condition"
   }
 }
 
