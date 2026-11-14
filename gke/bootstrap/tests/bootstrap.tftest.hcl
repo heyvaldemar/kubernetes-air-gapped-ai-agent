@@ -64,14 +64,18 @@ run "the_sweep_creates_nothing" {
     ])
     error_message = "the sweep lists, reads and deletes; the only exceptions are taking a response policy off its network, the DNS change a record's delete goes through, and the network permission a rule's or route's delete asks for"
   }
+  assert {
+    condition     = alltrue([for p in google_project_iam_custom_role.sweep.permissions : !startswith(p, "storage.")])
+    error_message = "the sweep's role holds nothing in Cloud Storage: with a get or a delete there it could read or remove the bootstrap's own state"
+  }
 }
 
 run "the_run_cannot_reach_past_its_project" {
   command = apply
 
   assert {
-    condition     = alltrue([for p in google_project_iam_custom_role.create.permissions : !startswith(p, "iam.") && !startswith(p, "resourcemanager.projects.set") && !startswith(p, "orgpolicy.") && !startswith(p, "billing.")])
-    error_message = "the run's role grants no identity, no project policy, no organization policy and no billing"
+    condition     = alltrue([for p in google_project_iam_custom_role.create.permissions : !startswith(p, "iam.") && !startswith(p, "resourcemanager.projects.set") && !startswith(p, "orgpolicy.") && !startswith(p, "billing.") && !startswith(p, "storage.")])
+    error_message = "the run's role grants no identity, no project policy, no organization policy, no billing and nothing in Cloud Storage: its way to the state bucket is the one grant on that bucket, under its condition"
   }
   assert {
     condition     = toset(keys(google_project_iam_member.create)) == toset(["custom", "gke"]) && google_project_iam_member.create["gke"].role == "roles/container.admin" && google_project_iam_member.create["custom"].role == google_project_iam_custom_role.create.name

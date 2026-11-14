@@ -80,7 +80,8 @@
 #                 the operator's /32, NetworkPolicies enforced, the registry
 #                 read by the nodes and Kyverno alone), and so do the
 #                 bootstrap's (one immutable subject, each service account
-#                 from its own workflow, a sweep that creates nothing, the
+#                 from its own workflow, a sweep that creates nothing,
+#                 neither role with a Cloud Storage permission, the
 #                 run's grant on the state bucket held to airgap-runs/ by
 #                 its whole condition, the budget); that grant the only one
 #                 on a bucket; no service account key anywhere; both workflows
