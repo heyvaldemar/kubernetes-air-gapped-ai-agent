@@ -111,6 +111,10 @@ jobs:
   plants-total:
     name: Every plant shown once, and caught
     needs: plants
+    # Whatever became of the shards. Left to the default, this job would be
+    # skipped with them if they were ever skipped, and the run would end
+    # green with no plant shown.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
