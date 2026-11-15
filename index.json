@@ -548,5 +548,16 @@
   "event": "workflow_dispatch",
   "path": "aks/43482241992-1",
   "run": 43482241992
+ },
+ {
+  "artifact_sha256": "1c18c994686a869c804c17644d14cabcb76619a460dd09b59fb09e0d251a4749",
+  "attempt": 1,
+  "cloud": "aks",
+  "commit": "880d5712a8562ad50598f0c580c792762459e370",
+  "conclusion": "success",
+  "created_at": "2026-11-15T07:02:57Z",
+  "event": "workflow_dispatch",
+  "path": "aks/43688168138-1",
+  "run": 43688168138
  }
 ]
