@@ -25,7 +25,11 @@
 #      credential (no role issues records:delete), a credential signed by
 #      Vault's key for another audience (a role planted and removed), one
 #      minted while Vault's TTL was raised to an hour (planted and put
-#      back), and an expired one, read from its log with each reason
+#      back), and an expired one, read from its log with each reason; and
+#      in Vault, the planted role's path under an explicit deny beside a
+#      read on every role's, asked for as written and in capitals: Vault
+#      before 2.2.2 matched a deny case-sensitively and let the capitals
+#      past it
 #   6. a pod with a Vault image the bundle did not carry is refused at
 #      admission, and the one it carried is admitted (the control)
 #   7. revocation, ROUNDS times: the MCP server's identity disabled in
@@ -254,6 +258,22 @@ with forward("svc/mcp-server", "mcp", 18082, 8080), forward("svc/records-api", "
     check(other and claims(other).get("aud") == "reports-api" and header(other).get("kid") in [k["kid"] for k in V.call("GET", "identity/oidc/.well-known/keys")[1]["keys"]],
           "plant: Vault issued a credential for the audience reports-api, signed by the records key")
     check(other and records("/records/C1001", other) == 401, "a credential for another audience, signed by Vault's own key: 401")
+    # The same role's path under an explicit deny, beside a read on every
+    # role's path, planted in the same policy and put back with it. Vault
+    # before 2.2.2 matched an explicit deny case-sensitively: the path in
+    # capitals missed the deny, matched the read and reached the identity
+    # backend. Each call is a fresh login: the MCP server's Vault token
+    # serves once.
+    vault("PUT", "sys/policies/acl/records-caller", {"policy": pol0 + '\npath "identity/oidc/token/*" {\n  capabilities = ["read"]\n}\n'
+                                                     '\npath "identity/oidc/token/plant-wrong-audience" {\n  capabilities = ["deny"]\n}\n'})
+    def asked(path):
+        st, body = vault("POST", "auth/kubernetes/login", {"role": "mcp-server", "jwt": token("mcp", "mcp-server", VAULT_AUD)}, None)
+        return vault("GET", path, None, body["auth"]["client_token"])[0] if st == 200 else None
+    denied, control, capitals = (asked("identity/oidc/token/" + r) for r in ("plant-wrong-audience", "records-api", "PLANT-WRONG-AUDIENCE"))
+    check(denied == 403 and control == 200,
+          "plant: a deny on identity/oidc/token/plant-wrong-audience beside a read on identity/oidc/token/*: "
+          "Vault refuses that path (HTTP %s) and still issues records-api (HTTP %s)" % (denied, control))
+    check(capitals == 403, "the denied path in capitals, identity/oidc/token/PLANT-WRONG-AUDIENCE, is refused by the deny too: HTTP %s" % capitals)
     vault("DELETE", "identity/oidc/role/plant-wrong-audience")
     vault("POST", "identity/oidc/key/records", key0)
     vault("PUT", "sys/policies/acl/records-caller", {"policy": pol0})
