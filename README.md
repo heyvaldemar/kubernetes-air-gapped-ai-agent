@@ -267,4 +267,4 @@ One maintainer and an AI agent. The agent writes most of the code; the decisions
 
 ## License
 
-[MIT](LICENSE). One component the cluster runs is not: Vault Community 2.2.1, the records credential's issuer ([ADR 24](docs/decisions/0024-a-one-minute-records-credential-from-vault.md)), is under the Business Source License 1.1, as the `LICENSE.txt` in its image says (read 2026-11-04). Its Additional Use Grant allows any use but offering Vault to third parties in competition with IBM's paid versions.
+[MIT](LICENSE). One component the cluster runs is not: Vault Community 2.2.2, the records credential's issuer ([ADR 24](docs/decisions/0024-a-one-minute-records-credential-from-vault.md)), is under the Business Source License 1.1, as the `LICENSE.txt` in its image says (read 2026-11-04). Its Additional Use Grant allows any use but offering Vault to third parties in competition with IBM's paid versions.

@@ -222,7 +222,9 @@ def install():
     seconds = round(time.time() - start, 1)
     with open(os.path.join(STATE, "install.json"), "w") as f:
         json.dump({"seconds": seconds, "fresh": fresh}, f)
-    say("Vault 2.2.1 up, unsealed and configured in %.1f s; its key set (%d keys) written for the records service" % (seconds, n))
+    image = next(l for l in open(os.path.join(ROOT, "airgap", "images.txt")) if l.startswith("docker.io/hashicorp/vault:"))
+    say("Vault %s up, unsealed and configured in %.1f s; its key set (%d keys) written for the records service"
+        % (image.split("@")[0].rsplit(":", 1)[1], seconds, n))
 
 
 def main():

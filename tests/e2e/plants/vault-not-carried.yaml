@@ -1,4 +1,4 @@
-# a real Vault image, 2.2.0, that the bundle never carried: only 2.2.1 is in
+# a real Vault image, 2.2.0, that the bundle never carried: only 2.2.2 is in
 # airgap/images.txt (ADR 24)
 # expect: one the bundle carried
 apiVersion: v1
