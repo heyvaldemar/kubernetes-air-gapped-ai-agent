@@ -143,8 +143,9 @@ jobs:
   freshness:
     name: Pins that fell behind upstream
     # Scheduled and manual only: a new upstream release is not actionable in
-    # an unrelated pull request. A failure lands as a workflow-failure
-    # notification, which fleet triage reads. Dependabot here watches the
+    # an unrelated pull request. This repository is outside fleet triage:
+    # fleet heartbeat reports a workflow whose latest runs failed, and the pin
+    # is moved by hand. Dependabot here watches the
     # workflows' actions and nothing else; this watches the charts, images,
     # tools and runtimes the platform pins (scripts/check-freshness.py).
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -155,6 +156,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: The check shown its own cases first
+        # A registry that keeps answering 429, release candidates, and
+        # releases on both sides of the three-day grace, with no network: the
+        # violation this check ships with (AGENTS.md).
+        run: python3 scripts/check-freshness.py selftest
 
       - name: Compare every pin with what upstream has released
         env:
