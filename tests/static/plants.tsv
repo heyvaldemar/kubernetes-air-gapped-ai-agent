@@ -205,3 +205,8 @@
 "scripts/cloud-results.py"	"|\\btoken[\\\"']?\\s*:\\s*[\\\"']?[A-Za-z0-9._~+/=-]{40,}\","	"\","	"results"	"a script that does not know a kubeconfig's token"
 "scripts/cloud-results.py"	"    \"a login and password in an address\": rb\"://[^/\\s:@\\\"']+:[^/\\s@\\\"']+@\",\n"	""	"results"	"a script that does not know a login and password in an address"
 "scripts/aws.sh"	"    part=\"$(mktemp)\"\n"	"    part=\"$EC2/activities.part\"\n"	"gpu"	"an answer kept for the run's artifact under a name that is not .json, which the cloud-results archive refuses"
+"scripts/status.py"	"        if r[\"event\"] != \"schedule\" or r[\"status\"] != \"completed\":\n"	"        if r[\"status\"] != \"completed\":\n"	"status"	"a count that takes a run started by hand, or by a push, for the schedule's"
+"scripts/status.py"	"        if r[\"conclusion\"] != \"success\":\n            break\n        in_a_row.append(r)\n"	"        if r[\"conclusion\"] != \"success\":\n            continue\n        in_a_row.append(r)\n"	"status"	"a streak that steps over a scheduled run that failed"
+"scripts/status.py"	"        if r[\"event\"] != \"schedule\" or r[\"status\"] != \"completed\":\n"	"        if r[\"event\"] != \"schedule\" or r[\"conclusion\"] not in (\"success\", \"failure\"):\n"	"status"	"a scheduled run that was cancelled, timed out or skipped left out, so the streak steps over it"
+"scripts/status.py"	"        if r.get(\"run_attempt\", 1) > 1:\n"	"        if False:\n"	"status"	"a scheduled run read by its last attempt, which somebody started by hand"
+"scripts/status.py"	"        **scheduled_counts(repo, listed),\n"	"        **{k: v for k, v in scheduled_counts(repo, listed).items() if k != \"scheduled_streak\"},\n"	"status"	"a record that does not carry the streak a page reads"

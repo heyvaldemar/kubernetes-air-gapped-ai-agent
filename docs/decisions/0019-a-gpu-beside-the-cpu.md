@@ -120,6 +120,14 @@ By hand from main at 1798284, run [43101489006](https://github.com/heyvaldemar/k
 
 **Found by the run.** Its artifact held `ec2/activities.part`, the Auto Scaling group's answer before it was merged, and the cloud-results archive (ADR 25), on main since the same evening, keeps an artifact only when every file in it is .json or .jsonl: it refused this run's ([43118867857](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43118867857)). `aws.sh launches` keeps nothing but .json now, GitHub's answers for the count among it cut down to the fields the rule reads, with case T and a plant.
 
+## A miss in the count of scheduled passes, 2026-11-15
+
+The status branch now counts the scheduled runs that passed in a row, and a page says "weekly" on that count (ADR 18, 2026-11-15). A scheduled run EC2 gave no GPU could be read there three ways: as a failure, as a week left out, or as a pass.
+
+It is a pass, counted as GitHub concluded it. The word on the page is said of the run on the AWS account: the boundary, the agent's evals, Vault's credential and the game day, and a miss has run and checked all of them before it asks for the GPU. Counting it red would call a week failed in which every check passed, as the scheduled run of 2026-11-05 was until this record changed that on 2026-11-11. Leaving it out would let the count step over a week in which the run was there to read. `scripts/status.py` reads the run's conclusion and nothing in its results, so the rule of two misses has no second copy to drift from: the second scheduled miss in a row is red here, and stops the count like any other failure.
+
+What the count does not say is that a GPU was measured that week. No page says "weekly" of the GPU's numbers on it: they name the run they came from, and the latest run's results carry `GPU node: none, EC2 had no capacity (...)` when it was given none. Held by case L of `tests/static/status-scheduled.py`, in static check `status`.
+
 ## Consequences
 
 - A g6.xlarge at $0.8048 an hour for the part of the run it exists: the second apply, the device plugin, the server, the checks and the measurement, then the destroy. Weekly, within the $15 a month the maintainer set for GPU work.

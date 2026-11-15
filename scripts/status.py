@@ -10,8 +10,9 @@ daily schedule, manual runs; never pull requests, never cancelled runs) and
 the results the latest finished run uploaded (tests/e2e/run.sh writes them
 when E2E_RESULTS is set). Writes:
 
-    status.json             the window, the streak, the latest run's checks
-                            and measurements
+    status.json             the window, the streak, how the schedule's own
+                            runs went, the latest run's checks and
+                            measurements
     badge-days.json         shields.io endpoint: green days in the window
     badge-checks.json       shields.io endpoint: the latest run's checks
     badge-<measure>.json    one per measurement the run printed; with one
@@ -21,6 +22,11 @@ A day counts as green when its last finished run passed; the run count beside
 it shows the failures that rule hides. The streak counts green days back from
 the latest day that had a run. Nothing here is typed
 by hand: every number is read from GitHub at the time it is written.
+
+A word like "weekly" or "daily" rests on none of those: a run somebody
+started by hand makes a day green. It rests on scheduled_streak, the runs
+the schedule itself started that passed, in a row, back from the latest
+scheduled run (scheduled_counts below; ADR 18, 2026-11-15).
 """
 import datetime
 import io
@@ -97,6 +103,42 @@ def results(repo, run_id):
                 # the second model's badges would overwrite the first's.
                 merged["measured"] += ["%s · %s" % (job, m) if job else m for m in part.get("measured", [])]
     return merged
+
+
+def scheduled_counts(repo, listed):
+    """How the schedule's own runs went, of every run GitHub listed for the
+    window: what a cadence word may rest on (ADR 18, 2026-11-15).
+
+    A scheduled run is one the schedule started and GitHub finished. It is
+    read by what its first attempt came to: a run somebody ran again is the
+    same run to GitHub, under the same id, and its second attempt is that
+    person's, not the schedule's. Only success is green. A scheduled run
+    that failed, was cancelled, timed out or was skipped by its own guard
+    did not pass, whatever the reason: it is counted as a run, not as a
+    pass, and the streak stops at it. A run started by hand or by a push is
+    not counted and stops nothing. A run EC2 gave no GPU is green by ADR 19
+    and is counted as GitHub concluded it, like any other.
+    """
+    ran = []
+    for r in sorted(listed, key=lambda r: r["created_at"]):
+        if r["event"] != "schedule" or r["status"] != "completed":
+            continue
+        conclusion = r["conclusion"]
+        if r.get("run_attempt", 1) > 1:
+            conclusion = get(f"/repos/{repo}/actions/runs/{r['id']}/attempts/1")["conclusion"]
+        ran.append(dict(r, conclusion=conclusion))
+    in_a_row = []
+    for r in reversed(ran):
+        if r["conclusion"] != "success":
+            break
+        in_a_row.append(r)
+    return {
+        "scheduled_runs": len(ran),
+        "scheduled_passed": sum(1 for r in ran if r["conclusion"] == "success"),
+        "scheduled_streak": len(in_a_row),
+        "scheduled_in_a_row": [{"id": r["id"], "at": r["created_at"], "url": r["html_url"],
+                                "commit": r["head_sha"][:7]} for r in in_a_row],
+    }
 
 
 def outcome(check):
@@ -184,7 +226,8 @@ def main(out):
     repo, workflow = os.environ["GITHUB_REPOSITORY"], os.environ["E2E_WORKFLOW"]
     now = datetime.datetime.now(datetime.timezone.utc)
     since = (now - datetime.timedelta(days=WINDOW_DAYS - 1)).date()
-    finished = [r for r in runs(repo, workflow, since)
+    listed = runs(repo, workflow, since)
+    finished = [r for r in listed
                 if r["event"] in ("push", "schedule", "workflow_dispatch")
                 and r["status"] == "completed" and r["conclusion"] in ("success", "failure")]
     finished.sort(key=lambda r: r["created_at"])
@@ -216,8 +259,10 @@ def main(out):
         "streak_days": streak,
         "runs": len(finished),
         "runs_passed": sum(1 for r in finished if r["conclusion"] == "success"),
+        **scheduled_counts(repo, listed),
         "latest": None if not latest else {
             "conclusion": latest["conclusion"],
+            "event": latest["event"],
             "at": latest["created_at"],
             "url": latest["html_url"],
             "commit": latest["head_sha"][:7],
@@ -259,6 +304,7 @@ def main(out):
     if latest and res:
         write_leaderboard(out, latest, res)
     print(f"{repo}: {len(green)} of {len(days)} days green, streak {streak}, "
+          f"scheduled {status['scheduled_passed']} of {status['scheduled_runs']} and {status['scheduled_streak']} in a row, "
           f"latest {latest['conclusion'] if latest else 'none'} with {passed} of {passed + failed} checks")
 
 

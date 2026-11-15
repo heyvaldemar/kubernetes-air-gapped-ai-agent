@@ -2,9 +2,10 @@ name: Status
 
 # Writes what the e2e workflow has shown lately (scripts/status.py) to the
 # branch `status`, where the README's badges and the fleet read it: green
-# days in the last 30, the streak, and the latest run's checks and
-# measurements, and the same for the runs on AWS in eks/ (ADR 18), where the
-# fleet's catalog reads a repository's AWS runs. After every e2e or AWS run
+# days in the last 30, the streak, how the schedule's own runs went (what
+# "weekly" or "daily" may be said on, ADR 18), and the latest run's checks
+# and measurements, and the same for the runs on AWS in eks/ (ADR 18), where
+# the fleet's catalog reads a repository's AWS runs. After every e2e or AWS run
 # on main, and daily in case one was missed. The branch holds one commit, replaced each time, so main's history
 # stays the code's and nothing here starts the e2e run again.
 on:

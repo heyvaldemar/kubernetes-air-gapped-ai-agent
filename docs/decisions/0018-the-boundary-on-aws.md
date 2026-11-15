@@ -61,6 +61,26 @@ One number moved, and the record says what changed: the same model on the same t
 
 The schedule runs phase 2 from here (`AWS_AGENT_ENABLED`). Its first run, [39744285464](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/39744285464), created at 07:58 UTC for the 02:47 cron, passed all 56 checks the same day, about $0.29 for 0.69 h, with nothing left behind. The node's processor was an Intel Xeon Platinum 8488C, and the model's p50 was 5.5 s a task: the half rate is the node's, not the run's. Weekly on AWS from 22 October 2026.
 
+## What "weekly" rests on, 2026-11-15
+
+"Weekly" was said here after one scheduled pass. The next two scheduled runs failed, [40845619217](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/40845619217) building the bundle and [42005832115](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/42005832115) with no g6.xlarge (ADR 19), and the status branch could not say so: it counted days and runs, 10 of 12 days green and 4 green days in a row on 2026-11-15, and a day is green when a run somebody started by hand passed on it. A page that reads the branch (the fleet's catalog, and from it heyvaldemar.com/evidence) had nothing to tell "weekly" from "scheduled weekly, and green when someone starts it".
+
+`scripts/status.py` now also writes how the schedule's own runs went in its window of 30 days, for the e2e runs (`status.json`) and for the runs on AWS (`eks/status.json`):
+
+- `scheduled_runs`: the runs the schedule started that GitHub finished, however they ended.
+- `scheduled_passed`: those that passed.
+- `scheduled_streak`: those that passed in a row, counted back from the latest scheduled run. `scheduled_in_a_row` names them, newest first.
+- `latest.event`: what started the latest run.
+
+The rules, each a case in `tests/static/status-scheduled.py`:
+
+- **Only the schedule's runs.** A run started by hand or by a push is not counted and stops nothing, green or red. Of the 23 runs on AWS in the window that day, 19 were started by hand, ten of them green.
+- **Only success is green.** A scheduled run that failed, was cancelled, timed out or was skipped by its guard (`AWS_VALIDATION_ENABLED` off) is a run that did not pass, and the count stops at it. The count of days leaves cancelled runs out; this one does not, since a week in which the schedule showed nothing is not a week it passed.
+- **By its first attempt.** A run somebody ran again keeps its id and its event, and GitHub lists what its last attempt came to. The schedule's attempt is the first, so that is the one read: one more question to GitHub for such a run, none otherwise.
+- **A run EC2 gave no GPU is a pass**, as GitHub concluded it (ADR 19, 2026-11-15).
+
+A page may say "weekly" while `scheduled_streak` is two or more, and "scheduled weekly" otherwise. Read with this rule on 2026-11-15, GitHub's list for AWS gives 2 of 4 scheduled runs passed and 1 in a row, [43199517532](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43199517532) of 2026-11-12: not weekly yet. The README's two rows already say "scheduled weekly" and name each scheduled run. Held by static check `status`, five plants.
+
 ## Consequences
 
 - About $0.11 a passing run of the boundary alone by its cost table, which is list prices for the run's whole length and not a bill (0.37 h); the estimate was $0.30 to $0.50: the EKS control plane, one node, five interface endpoints in two zones for under an hour, and the DNS Firewall's queries. With the agent, about $0.30 by the same table (0.72 h): an m7i.xlarge, a sixth endpoint, and the evals and the game day. Weekly, about $1.30 a month, under the $5 the maintainer set.

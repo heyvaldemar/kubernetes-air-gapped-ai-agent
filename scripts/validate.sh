@@ -120,6 +120,13 @@
 #                 against a GitHub made of files (a run on a branch, a fork's
 #                 run, another workflow's, one a pull request started, a file
 #                 that is not the one GitHub reports, a record already kept)
+#   status        what a page may say "weekly" or "daily" on (ADR 18,
+#                 2026-11-15): scripts/status.py's count of the schedule's
+#                 own runs passes tests/static/status-scheduled.py against
+#                 a GitHub made of lists (a scheduled run that failed, was
+#                 cancelled, timed out or was skipped stops the streak; a
+#                 run by hand or a push's changes nothing; a scheduled run
+#                 somebody ran again is read by its first attempt)
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -983,8 +990,20 @@ PY
   return "$ok"
 }
 
+check_status() {
+  local ok=0 out
+  # A cadence word on a page rests on scheduled_streak (ADR 18, 2026-11-15):
+  # the runs the schedule itself started that passed, in a row. A run by hand
+  # must not make it, and a scheduled run that did not pass must stop it.
+  if ! out="$(python3 tests/static/status-scheduled.py 2>&1)"; then
+    echo "scripts/status.py's count of scheduled runs failed: $(grep '^FAIL' <<<"$out" | head -3 | tr '\n' ' ')$(grep -q '^FAIL' <<<"$out" || tail -n 2 <<<"$out" | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "the status branch counts in a row only the runs the schedule started and passed, each by its first attempt, and $(grep -c '^PASS' <<<"$out") cases hold"
+  return "$ok"
+}
+
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom results)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom results status)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"
