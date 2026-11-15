@@ -1,0 +1,5 @@
+{
+  "checks": ["charts", "charts_lock", "images", "tools", "ci_images"],
+  "skip_dirs": ["tests/e2e/plants/", "tests/e2e/plants-frontier/"],
+  "skip_suffixes": [".cast"]
+}
