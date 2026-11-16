@@ -32,7 +32,7 @@ spec:
         - name: llama-server
           image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11429@sha256:a863a2d1dc2cbc5326c995ae380eec9c57f37a7e1cac944f0c6f43e4e9afff23
           # 8192 tokens a slot, as the CPU server has for its one.
-          args: ["-m", "/models/model.gguf", "--alias", "@ALIAS@", "--jinja", "-c", "65536", "-np", "8", "-ngl", "99",
+          args: ["-m", "/models/model.gguf", "--alias", "@ALIAS@", "--jinja", "-c", "@CONTEXT@", "-np", "@SLOTS@", "-ngl", "99",
                  "--metrics", "--cache-ram", "512", "--reasoning", "off", "--host", "0.0.0.0", "--port", "8080"]
           ports: [{name: http, containerPort: 8080}]
           lifecycle:

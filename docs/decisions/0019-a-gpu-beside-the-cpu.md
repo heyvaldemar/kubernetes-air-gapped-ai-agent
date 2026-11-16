@@ -128,6 +128,15 @@ It is a pass, counted as GitHub concluded it. The word on the page is said of th
 
 What the count does not say is that a GPU was measured that week. No page says "weekly" of the GPU's numbers on it: they name the run they came from, and the latest run's results carry `GPU node: none, EC2 had no capacity (...)` when it was given none. Held by case L of `tests/static/status-scheduled.py`, in static check `status`.
 
+## The slots and the lock as numbers of the run, 2026-11-16
+
+Two things about the GPU server were fixed in files, and a run on a GPU other than this one could change them only by editing what a release has fixed.
+
+- **`GPU_SLOTS`, eight unless a run says otherwise.** The server's manifest held `-c 65536 -np 8`: eight slots of 8192 tokens, which the 8B model fills to 15,460 MiB of the L4's 23,034. A larger model has no room for eight contexts beside its weights, and the evals ask one call at a time. `scripts/serve.sh` now fills the slots and the context, 8192 tokens a slot as the CPU server has for its one, and `scripts/gpu.sh` measures and labels with the same number. With nothing set the manifest handed to the cluster is byte for byte what it was, so the scheduled run on AWS serves and measures as before.
+- **`MODELS_LOCK`, this repository's file unless a run says otherwise.** `scripts/model.sh`, `scripts/serve.sh` and `scripts/gpu.sh` each opened `models/models.lock` by its path. A run that serves models this repository does not pin can now name a lock of its own, in the same format, and leave this one as released. The lock a run names is the lock for everything that run serves, the embedding model of the document search included (`scripts/tools.sh` serves it through `scripts/serve.sh`), so such a lock holds this repository's lines and adds its own after them. The models of a size curve do not go into this repository's lock: every line of it is rebuilt in CI and fails on another digest, and a runner cannot build a 20 GB file. A line marked `unpinned` is served by the digest the run built, as before; what such a lock must hold is the business of the repository that keeps it.
+
+Neither changes what CI runs: the workflows set neither, and the README's numbers are eight slots and this lock. Held by static check `params`: `tests/static/params.py` runs `scripts/serve.sh` and `scripts/evals.sh` against a kubectl that is a file, twelve cases, twelve plants.
+
 ## Consequences
 
 - A g6.xlarge at $0.8048 an hour for the part of the run it exists: the second apply, the device plugin, the server, the checks and the measurement, then the destroy. Weekly, within the $15 a month the maintainer set for GPU work.

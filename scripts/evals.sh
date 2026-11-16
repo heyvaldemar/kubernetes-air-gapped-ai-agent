@@ -22,20 +22,40 @@ STATE="$ROOT/.cache/airgap"
 . "$ROOT/scripts/inside.sh"
 OUT="${EVALS_OUT:-$STATE}"
 mkdir -p "$STATE" "$OUT"
+# ATTEMPTS: how many times each task is asked. EVALS_DEADLINE_SECONDS: how
+# long the Job may run. The defaults are what every run has used; a larger
+# model on other hardware may need more of both (ADR 7, 2026-11-16). The Job,
+# the wait below, the people's tokens and the count of attempts the verdict
+# asks for all read these two, and nothing else.
+ATTEMPTS="${ATTEMPTS:-3}"
+EVALS_DEADLINE_SECONDS="${EVALS_DEADLINE_SECONDS:-3600}"
+for number in "$ATTEMPTS" "$EVALS_DEADLINE_SECONDS"; do
+  case "$number" in
+    ''|0*|*[!0-9]*) echo "  FAIL  ATTEMPTS and EVALS_DEADLINE_SECONDS are whole numbers above zero, not '$number'"; exit 1 ;;
+  esac
+done
+# Six hours at most, the longest a hosted job runs: the people's tokens below
+# are minted to outlive the Job, and no number of the run makes them last days.
+if [ "$EVALS_DEADLINE_SECONDS" -gt 21600 ]; then
+  echo "  FAIL  EVALS_DEADLINE_SECONDS is at most 21600, six hours, not $EVALS_DEADLINE_SECONDS"; exit 1
+fi
+export ATTEMPTS
 
 kubectl -n agents create configmap evals --from-file="$ROOT/evals/harness.py" --from-file="$ROOT/evals/tasks.json" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 # The people the tasks are asked for (ADR 15): a token each, for the people
 # audience, minted here as a front end would at sign-in and handed to the
-# Job through kubectl's stdin. Two hours: longer than any run's evals.
-python3 - "$ROOT/manifests/mcp/policy.json" <<'PY' | kubectl apply -f - >/dev/null
+# Job through kubectl's stdin. An hour longer than the Job may run, two hours
+# by default: the Job cannot outlive its deadline, so the tokens do, by that
+# hour and no more.
+python3 - "$ROOT/manifests/mcp/policy.json" "$((EVALS_DEADLINE_SECONDS + 3600))" <<'PY' | kubectl apply -f - >/dev/null
 import json, subprocess, sys
 policy = json.load(open(sys.argv[1]))
 tokens = {}
 for sub in policy["people"]:
     ns, name = sub.split(":")[2:4]
     tokens[name] = subprocess.run(["kubectl", "-n", ns, "create", "token", name, "--audience", policy["people_audience"],
-                                   "--duration", "2h"], check=True, capture_output=True, text=True).stdout.strip()
+                                   "--duration", sys.argv[2] + "s"], check=True, capture_output=True, text=True).stdout.strip()
 print(json.dumps({"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
                   "metadata": {"name": "people-tokens", "namespace": "agents"}, "stringData": tokens}))
 PY
@@ -48,9 +68,11 @@ gw_svc="$(kubectl -n gateway get svc -o jsonpath='{.items[0].metadata.name}' 2>/
 sed -e "s#@MODEL_URL@#http://$gw_svc.gateway.svc.cluster.local:8080#" -e "s#@MODEL_NAME@#${MODEL:?MODEL names the model this run serves}#" \
   -e "s#@OFFER_PATTERNS@#${OFFER_PATTERNS:-on}#" -e "s#@MAX_TOKENS@#${MAX_TOKENS:-400}#" \
   -e "s#@TEMPERATURE@#${TEMPERATURE:-0.6}#" \
+  -e "s#@ATTEMPTS@#$ATTEMPTS#" -e "s#@DEADLINE_SECONDS@#$EVALS_DEADLINE_SECONDS#" \
   "$ROOT/manifests/agents/evals.yaml" | relocate | kubectl apply -f - >/dev/null
 printf '== the agent is running the evals\n'
-for _ in $(seq 1 720); do
+# As long as the Job's deadline, asked every five seconds.
+for _ in $(seq 1 $(( (EVALS_DEADLINE_SECONDS + 4) / 5 ))); do
   done_="$(kubectl -n agents get job evals -o jsonpath='{.status.succeeded}{.status.failed}' 2>/dev/null)"
   [ -n "$done_" ] && break
   sleep 5
@@ -212,10 +234,9 @@ def gate(ok, text):
 # the attempts it finished, and every rate below would be computed on those
 # alone: the first time a slow model hit the deadline, its run passed every
 # gate on 31 attempts of 45, with two categories never asked. The expected
-# count is read from the tasks and the Job itself.
+# count is the tasks times ATTEMPTS, the number the Job was given above.
 root = os.path.dirname(os.path.dirname(gates))
-want = len(json.load(open(os.path.join(root, "evals", "tasks.json")))) * int(
-    re.search(r"name: ATTEMPTS, value: \"(\d+)\"", open(os.path.join(root, "manifests", "agents", "evals.yaml")).read()).group(1))
+want = len(json.load(open(os.path.join(root, "evals", "tasks.json")))) * int(os.environ["ATTEMPTS"])
 gate(len(rows) == want, "the agent finished every attempt: %d of %d" % (len(rows), want))
 t_ok, t_n = rate("task")
 # The usefulness floor is for the models a release ships with. A model in the

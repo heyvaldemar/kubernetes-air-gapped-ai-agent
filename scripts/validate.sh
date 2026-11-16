@@ -127,6 +127,17 @@
 #                 cancelled, timed out or was skipped stops the streak; a
 #                 run by hand or a push's changes nothing; a scheduled run
 #                 somebody ran again is read by its first attempt)
+#   params        the four numbers a longer or larger run may turn (ADR 7 and
+#                 ADR 19, 2026-11-16): ATTEMPTS, EVALS_DEADLINE_SECONDS,
+#                 GPU_SLOTS and MODELS_LOCK. scripts/evals.sh and
+#                 scripts/serve.sh pass tests/static/params.py against a
+#                 kubectl that is a file: with nothing set the Job and the
+#                 GPU server are what they have always been; set, the Job,
+#                 the wait, the people's tokens and the count the verdict
+#                 asks for move together, the context follows the slots, and
+#                 every script opens the one lock; a value that is not a
+#                 whole number above zero is refused, and so is a deadline
+#                 above six hours, which the people's tokens outlive by one
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).
@@ -145,14 +156,17 @@ check_kubeconform() {
   mkdir -p .cache/kubeconform out
   kubectl kustomize manifests >out/manifests.yaml || return 1
   sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama#g" -e "s#@ALIAS@#m#g" manifests/inference/llama.yaml >out/llama.yaml
-  sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama-gpu#g" -e "s#@ALIAS@#m#g" manifests/inference/llama-gpu.yaml >out/llama-gpu.yaml
+  sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#llama-gpu#g" -e "s#@ALIAS@#m#g" \
+    -e "s#@SLOTS@#8#" -e "s#@CONTEXT@#65536#" manifests/inference/llama-gpu.yaml >out/llama-gpu.yaml
   sed -e "s#@MODEL@#registry.boundary.internal:5000/models/m@$DIGEST#" -e "s#@NAME@#embed#g" -e "s#@ALIAS@#m#g" manifests/inference/embed.yaml >out/embed.yaml
+  # The evals Job with the numbers scripts/evals.sh gives it when nothing is set.
+  sed -e "s#@ATTEMPTS@#3#" -e "s#@DEADLINE_SECONDS@#3600#" manifests/agents/evals.yaml >out/evals.yaml
   for f in tests/e2e/plants/*.yaml tests/e2e/plants-frontier/*.yaml; do
     sed -e "s#@[A-Z_]*@#registry.boundary.internal:5000/models/m@$DIGEST#" "$f" >"out/plant-$(basename "$f")"
   done
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
     -cache .cache/kubeconform -schema-location "$K8S_SCHEMAS" -skip ImageValidatingPolicy \
-    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml out/embed.yaml aws/storage-class.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/ha/disruption-budgets.yaml manifests/agents/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
+    out/manifests.yaml out/llama.yaml out/llama-gpu.yaml out/embed.yaml aws/storage-class.yaml manifests/gpu/device-plugin.yaml manifests/gpu/measure.yaml manifests/gpu/capacity.yaml manifests/ha/disruption-budgets.yaml out/evals.yaml admission/model-volumes.yaml admission/carried-images.yaml admission/egress-node.yaml out/plant-*.yaml || return 1
   # The gateway's own kinds are CRDs the pinned schemas do not carry; the rest
   # of the file, the namespace and the network policies, is checked.
   kubeconform -strict -summary -output text -kubernetes-version "$KUBE_VERSION" \
@@ -1002,8 +1016,20 @@ check_status() {
   return "$ok"
 }
 
+check_params() {
+  local ok=0 out
+  # ATTEMPTS and EVALS_DEADLINE_SECONDS (ADR 7), GPU_SLOTS and MODELS_LOCK
+  # (ADR 19), all of 2026-11-16: with nothing set, a run is what it was; set,
+  # everything that depends on one of them reads the same value.
+  if ! out="$(python3 tests/static/params.py 2>&1)"; then
+    echo "the run's parameters failed: $(grep '^FAIL' <<<"$out" | head -3 | tr '\n' ' ')$(grep -q '^FAIL' <<<"$out" || tail -n 2 <<<"$out" | tr '\n' ' ')"; ok=1
+  fi
+  [ "$ok" = 0 ] && echo "with nothing set the evals Job and the GPU server are what they were, and ATTEMPTS, the deadline, the slots and the lock each move everything that reads them: $(grep -c '^PASS' <<<"$out") cases hold"
+  return "$ok"
+}
+
 checks=("$@")
-[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom results status)
+[ "${#checks[@]}" -gt 0 ] || checks=(kubeconform images boundary mcp vault evals policies gateway docs frontier aws gpu gke aks mlbom results status params)
 failed=()
 for c in "${checks[@]}"; do
   echo "-- $c"
