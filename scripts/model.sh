@@ -31,7 +31,9 @@ say() { printf '== %s\n' "$*"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 # MODEL picks a line of models/models.lock; the first is the default. The
 # licence may be an SPDX expression, spaces and all; the digest is last.
-read -r MODEL URL SHA _rest < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
+# MODELS_LOCK: another file of the same lines (ADR 19, 2026-11-16).
+MODELS_LOCK="${MODELS_LOCK:-$ROOT/models/models.lock}"
+read -r MODEL URL SHA _rest < <(grep -vE '^\s*(#|$)' "$MODELS_LOCK" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
 PINNED="${_rest##* }" _license="${_rest% *}"
 
 # cosign and oras read the registry's CA from the bundle they are given.

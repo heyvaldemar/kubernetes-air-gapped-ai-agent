@@ -12,7 +12,7 @@ metadata:
   namespace: agents
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 3600
+  activeDeadlineSeconds: @DEADLINE_SECONDS@
   template:
     metadata:
       labels:
@@ -36,7 +36,7 @@ spec:
             - {name: MODEL_URL, value: "@MODEL_URL@"}
             - {name: MODEL_NAME, value: "@MODEL_NAME@"}
             - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
-            - {name: ATTEMPTS, value: "3"}
+            - {name: ATTEMPTS, value: "@ATTEMPTS@"}
             - {name: MODEL_THREADS, value: "2"}
             - {name: OFFER_PATTERNS, value: "@OFFER_PATTERNS@"}
             - {name: MAX_TOKENS, value: "@MAX_TOKENS@"}

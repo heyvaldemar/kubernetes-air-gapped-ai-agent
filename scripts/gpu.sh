@@ -41,7 +41,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$ROOT/.cache/airgap"
 # shellcheck source=scripts/inside.sh
 . "$ROOT/scripts/inside.sh"
-read -r MODEL _rest < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
+# MODELS_LOCK: another file of the same lines, and GPU_SLOTS: the GPU
+# server's slots, eight by default (scripts/serve.sh; ADR 19, 2026-11-16).
+MODELS_LOCK="${MODELS_LOCK:-$ROOT/models/models.lock}"
+GPU_SLOTS="${GPU_SLOTS:-8}"
+export MODELS_LOCK GPU_SLOTS
+read -r MODEL _rest < <(grep -vE '^\s*(#|$)' "$MODELS_LOCK" | awk -v m="${MODEL:-}" 'm == "" || $1 == m' | head -n 1)
 GPU_NODE_LABEL=boundary.heyvaldemar.com/accelerator=nvidia
 # The larger model the GPU serves once the first is measured (models.lock).
 LARGER=granite-4.1-8b
@@ -226,7 +231,7 @@ EOF
       gpu) ;;
       *) echo "usage: gpu.sh measure <cpu|gpu>" >&2; exit 2 ;;
     esac
-    in_cluster llama-gpu "$dir/gpu.json" "$MODEL" 8 0 "GPU, $CARD" \
+    in_cluster llama-gpu "$dir/gpu.json" "$MODEL" "$GPU_SLOTS" 0 "GPU, $CARD" \
       || { fail "the GPU server could not be measured from inside the cluster"; close_door; record; exit 1; }
     close_door; door_closed
     # The same server through a port-forward from the runner, as runs
@@ -235,7 +240,7 @@ EOF
     kubectl -n inference port-forward svc/llama-gpu 18081:8080 >/dev/null 2>&1 & pf=$!
     trap 'kill "$pf" 2>/dev/null; close_door' EXIT
     for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:18081/health" && break; sleep 1; done
-    MODEL="$MODEL" SLOTS=8 THREADS=0 ACCELERATOR="GPU, $CARD, through a port-forward" MIN_SECONDS="${MIN_SECONDS:-30}" \
+    MODEL="$MODEL" SLOTS="$GPU_SLOTS" THREADS=0 ACCELERATOR="GPU, $CARD, through a port-forward" MIN_SECONDS="${MIN_SECONDS:-30}" \
       python3 "$ROOT/scripts/capacity.py" run "http://127.0.0.1:18081" "$dir/port-forward/gpu.json" 1,2,4,8
     kill "$pf" 2>/dev/null
     rtt="$(api_rtt)"
@@ -282,7 +287,7 @@ PY
     kubectl -n inference wait --for=delete pod -l server=llama-gpu --timeout=300s >/dev/null 2>&1
     SERVE_NAME=llama-gpu-8b SERVE_MANIFEST="$ROOT/manifests/inference/llama-gpu.yaml" MODEL="$LARGER" "$ROOT/scripts/serve.sh" \
       || { fail "$LARGER did not come up on the GPU"; record; exit 1; }
-    read -r _ _ _ _rest < <(grep -vE '^\s*(#|$)' "$ROOT/models/models.lock" | awk -v m="$LARGER" '$1 == m')
+    read -r _ _ _ _rest < <(grep -vE '^\s*(#|$)' "$MODELS_LOCK" | awk -v m="$LARGER" '$1 == m')
     want="${_rest##* }"; [ "$want" = unpinned ] && want="$(cat "$STATE/$LARGER.digest")"
     ref="$(kubectl -n inference get deployment llama-gpu-8b -o jsonpath='{.spec.template.spec.volumes[0].image.reference}')"
     on="$(kubectl -n inference get pod -l server=llama-gpu-8b -o jsonpath='{.items[0].spec.nodeName}')"
@@ -300,7 +305,7 @@ PY
     else
       fail "$LARGER is not on the GPU: nvidia-smi in the server's container answered '${mem:-nothing}'"
     fi
-    if in_cluster llama-gpu-8b "$dir/gpu-8b.json" "$LARGER" 8 0 "GPU, $CARD"; then
+    if in_cluster llama-gpu-8b "$dir/gpu-8b.json" "$LARGER" "$GPU_SLOTS" 0 "GPU, $CARD"; then
       while IFS= read -r line; do
         case "$line" in PASS*) pass "${line#PASS  }" ;; FAIL*) fail "${line#FAIL  }" ;; M*) measure_line "${line#M  }" ;; esac
       done < <(python3 - "$dir/gpu-8b.json" "$(price "$GPU_NODE")" "$LARGER" <<'PY'
