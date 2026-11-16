@@ -34,15 +34,21 @@ for number in "$ATTEMPTS" "$EVALS_DEADLINE_SECONDS"; do
     ''|0*|*[!0-9]*) echo "  FAIL  ATTEMPTS and EVALS_DEADLINE_SECONDS are whole numbers above zero, not '$number'"; exit 1 ;;
   esac
 done
+# Six hours at most, the longest a hosted job runs: the people's tokens below
+# are minted to outlive the Job, and no number of the run makes them last days.
+if [ "$EVALS_DEADLINE_SECONDS" -gt 21600 ]; then
+  echo "  FAIL  EVALS_DEADLINE_SECONDS is at most 21600, six hours, not $EVALS_DEADLINE_SECONDS"; exit 1
+fi
 export ATTEMPTS
 
 kubectl -n agents create configmap evals --from-file="$ROOT/evals/harness.py" --from-file="$ROOT/evals/tasks.json" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 # The people the tasks are asked for (ADR 15): a token each, for the people
 # audience, minted here as a front end would at sign-in and handed to the
-# Job through kubectl's stdin. Twice the Job's deadline, two hours by default:
-# longer than any run's evals.
-python3 - "$ROOT/manifests/mcp/policy.json" "$((2 * EVALS_DEADLINE_SECONDS))" <<'PY' | kubectl apply -f - >/dev/null
+# Job through kubectl's stdin. An hour longer than the Job may run, two hours
+# by default: the Job cannot outlive its deadline, so the tokens do, by that
+# hour and no more.
+python3 - "$ROOT/manifests/mcp/policy.json" "$((EVALS_DEADLINE_SECONDS + 3600))" <<'PY' | kubectl apply -f - >/dev/null
 import json, subprocess, sys
 policy = json.load(open(sys.argv[1]))
 tokens = {}

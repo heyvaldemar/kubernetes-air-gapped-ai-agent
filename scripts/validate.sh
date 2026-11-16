@@ -136,7 +136,8 @@
 #                 the wait, the people's tokens and the count the verdict
 #                 asks for move together, the context follows the slots, and
 #                 every script opens the one lock; a value that is not a
-#                 whole number above zero is refused
+#                 whole number above zero is refused, and so is a deadline
+#                 above six hours, which the people's tokens outlive by one
 #
 # With no arguments every check runs. tests/static/plants.tsv shows each
 # check the violation it exists for (tests/static/plant_violations.py).

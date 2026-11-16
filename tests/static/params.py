@@ -14,7 +14,7 @@ With nothing set every one of them is the value the runs have always used.
   A  evals.sh, nothing set: three attempts and an hour in the Job, the
      people's tokens for two hours
   B  ATTEMPTS=10 and EVALS_DEADLINE_SECONDS=7200: the Job says both, and the
-     tokens last twice the deadline
+     tokens last an hour longer than the Job may run, three hours
   C  a Job that never ends is asked after for its deadline and no longer:
      twenty seconds, four times
   D  ATTEMPTS or the deadline that is not a whole number above zero: refused
@@ -31,6 +31,8 @@ With nothing set every one of them is the value the runs have always used.
      with nothing set, the repository's
   K  gpu.sh and model.sh open the same file, and gpu.sh measures with the
      slots the server was given
+  L  a deadline above six hours is refused before kubectl hears of it: no
+     number of the run mints the people's tokens for days; six hours is taken
 """
 import os
 import re
@@ -131,8 +133,8 @@ def main():
         case("A", "evals.sh with nothing set: three attempts and an hour in the Job, the people's tokens for two hours",
              lambda: job_says(a, 3, 3600) and token_durations(a) == ["7200s"] and not a.sleeps)
         b = evals(tmp, FAKE_JOB_DONE="1", ATTEMPTS="10", EVALS_DEADLINE_SECONDS="7200")
-        case("B", "ATTEMPTS=10 and EVALS_DEADLINE_SECONDS=7200: the Job says both, and the tokens last twice the deadline",
-             lambda: job_says(b, 10, 7200) and token_durations(b) == ["14400s"])
+        case("B", "ATTEMPTS=10 and EVALS_DEADLINE_SECONDS=7200: the Job says both, and the tokens last an hour longer, three hours",
+             lambda: job_says(b, 10, 7200) and token_durations(b) == ["10800s"])
         c = evals(tmp, EVALS_DEADLINE_SECONDS="20")
         case("C", "a Job that never ends is asked after for its deadline and no longer: twenty seconds, four times",
              lambda: c.sleeps == ["5"] * 4 and sum(" get job evals " in " %s " % x for x in c.calls) == 4)
@@ -174,6 +176,11 @@ def main():
              and "export MODELS_LOCK GPU_SLOTS\n" in gpu and 'GPU_SLOTS="${GPU_SLOTS:-8}"\n' in gpu
              and gpu.count('"$GPU_SLOTS" 0 "GPU, $CARD"') == 2 and 'SLOTS="$GPU_SLOTS" THREADS=0' in gpu
              and not re.search(r'in_cluster llama-gpu\S* \S+ \S+ \d', gpu) and "SLOTS=8" not in gpu)
+        over = evals(tmp, FAKE_JOB_DONE="1", EVALS_DEADLINE_SECONDS="21601")
+        most = evals(tmp, FAKE_JOB_DONE="1", EVALS_DEADLINE_SECONDS="21600")
+        case("L", "a deadline above six hours is refused before kubectl hears of it, and six hours is taken",
+             lambda: over.code == 1 and not over.calls and "at most 21600" in over.said
+             and job_says(most, 3, 21600) and token_durations(most) == ["25200s"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print("\n".join(results))
