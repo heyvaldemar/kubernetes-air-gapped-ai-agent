@@ -95,7 +95,7 @@ def run(tmp, script, **env):
         path = os.path.join(fake, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
-        os.chmod(path, 0o755)
+        os.chmod(path, 0o700)  # the stand-ins are this run's alone
     clean = {k: v for k, v in os.environ.items()
              if k not in ("ATTEMPTS", "EVALS_DEADLINE_SECONDS", "GPU_SLOTS", "MODELS_LOCK", "MODEL", "INSIDE",
                           "EVALS_RESULTS", "E2E_RESULTS", "SERVE_NAME", "SERVE_MANIFEST", "SERVE_REPLICAS")}
