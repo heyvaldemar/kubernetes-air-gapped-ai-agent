@@ -581,5 +581,16 @@
   "event": "schedule",
   "path": "aks/44082616399-1",
   "run": 44082616399
+ },
+ {
+  "artifact_sha256": "e980d51bd2159d555bc2f111d89234e7f85016857055f2793026d5bc4cb43460",
+  "attempt": 1,
+  "cloud": "aws",
+  "commit": "91a08fb17ea803bfaefa05be5471a0e300c1d75f",
+  "conclusion": "success",
+  "created_at": "2026-11-19T10:45:43Z",
+  "event": "schedule",
+  "path": "aws/44508640877-1",
+  "run": 44508640877
  }
 ]
