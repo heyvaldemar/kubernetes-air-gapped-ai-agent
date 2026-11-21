@@ -1,0 +1,1 @@
+{"schemaVersion": 1, "label": "aws \u00b7 the port-forward at concurrency 1", "message": "167.3 calls a minute, p50 0.36 s, against 476.2 and 0.13 s from inside the cluster", "color": "blue"}
