@@ -9,14 +9,14 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 5.13.0"
+      version = "~> 5.14.0"
     }
     # A DNS resolver policy, and a registry's cache rule under the name AKS
     # requires (aks-managed-mcr, which azurerm's name check refuses), are
     # Azure API resources azurerm does not model.
     azapi = {
       source  = "Azure/azapi"
-      version = "~> 2.13.0"
+      version = "~> 2.14.0"
     }
   }
 }
