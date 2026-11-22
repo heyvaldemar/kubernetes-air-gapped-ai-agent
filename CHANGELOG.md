@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-22
+
 ### Added
 
 - Four numbers of a run that were constants in files (ADR 7 and ADR 19, 2026-11-16), each with today's value when nothing is set: `ATTEMPTS` (3) and `EVALS_DEADLINE_SECONDS` (3600) in `scripts/evals.sh`, `GPU_SLOTS` (8) in `scripts/serve.sh` and `scripts/gpu.sh`, and `MODELS_LOCK` (`models/models.lock`) in `scripts/model.sh`, `scripts/serve.sh` and `scripts/gpu.sh`. A run on other hardware can ask each task more often, give a slow model more than an hour, give a large model fewer slots, and serve models from a lock of its own, without editing a released file. The Job, the script's wait, the people's tokens and the count the verdict asks for read the same two values; the tokens last an hour longer than the Job may run, two hours as before when nothing is set, and the deadline is six hours at most; the GPU server's context is 8192 tokens a slot; a value that is not a whole number above zero is refused. With nothing set, `manifests/agents/evals.yaml` and `manifests/inference/llama-gpu.yaml` reach the cluster byte for byte as before, and no workflow sets any of the four. New static check `params`: twelve cases in `tests/static/params.py` against a kubectl that is a file, twelve plants.
@@ -300,7 +302,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A daily run of the whole thing from nothing, and a `status` branch with the last 30 days and the latest run's checks and numbers, per model, which the README's badges read.
 - Each release carries an archive of its tag, signed keyless, with SLSA provenance.
 
-[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/compare/v1.6.0...v1.7.0
