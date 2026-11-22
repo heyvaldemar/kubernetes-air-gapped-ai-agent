@@ -1,6 +1,6 @@
 # 23. The boundary on AKS: a network isolated cluster, no name lookup out, and one delete
 
-- Status: accepted for phase 1, 2026-10-30; weekly from 3 November 2026; on Pay-As-You-Go from 10 November 2026; phase 2, the agent, accepted by hand on 13 November 2026 and put on the schedule on 14 November 2026, its first scheduled run due 17 November 2026
+- Status: accepted for phase 1, 2026-10-30; weekly from 3 November 2026; on Pay-As-You-Go from 10 November 2026; phase 2, the agent, accepted by hand on 13 November 2026 and put on the schedule on 14 November 2026, its first scheduled run passed on 17 November 2026
 - Date: 2026-10-30
 
 ## Context
@@ -82,6 +82,10 @@ The maintainer decided on 2026-11-13: the agent goes on the subscription, on Pay
 ### On Azure, 2026-11-15
 
 - [43688168138](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/43688168138), the boundary alone at 880d571, the first run with azurerm 5.13.0 (5.10.0 before): all 22 checks passed, a pod asked kube-dns at 10.245.0.10, and the teardown found nothing left of it or of any earlier run. 0.48 h, about $0.11 at list prices.
+
+### On Azure, 2026-11-17, on the schedule
+
+- [44082616399](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/44082616399), the first scheduled run with the agent, on main at 91a08fb (Kyverno 1.20.0, Vault 2.2.2, azurerm 5.13.0): all 106 checks passed, and the teardown found nothing left of it or of any earlier run. GitHub started it at 12:23 UTC, 8 h 46 min after the cron's 03:37. 0.88 h, about $0.29 at list prices. Cost Management counted CA$0.33, read by the sweep [44916580202](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/44916580202) on 2026-11-21: CA$0.20 the node, CA$0.07 the registry, CA$0.05 the network, and under a cent DNS and the disk. The whole subscription's November stood at CA$1.11 that day, all of it runs. The quota step read 0 of 10 vCPUs in use in the region and in `StandardDasv7Family`. The evals passed their 12 release gates, 18 of 18 task attempts done and no email delivered outside acme.example, and a task's p50 was 4.5 s. Vault refused a new credential a median 0.5 s after the cut-off, and a copy made just before got its first 401 after a median 59.3 s.
 
 ## Consequences
 
