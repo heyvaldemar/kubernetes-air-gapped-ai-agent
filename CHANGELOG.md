@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/check-freshness.py` follows the fleet's canon again, fleet-ops `templates/check-freshness.py` at blob 238812399c70 (was da4ff49d): the Terraform registry's latest is read without taking a pre-release for it. The file is the canon byte for byte, which the fleet's conformance check holds it to.
 - Run [44982327300](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/44982327300), the boundary alone by hand from main at 4cf3fd7 on 2026-11-22, installed azurerm 5.14.0 and azapi 2.14.0 and passed 22 of 22 checks, with nothing left of it or of any earlier run; 0.47 h, about $0.11 at list prices (ADR 23). The agent's first run on them is the scheduled one of 2026-11-24.
 
+- The AWS run's provider, `hashicorp/aws`, moves from 6.69.1 to 6.73.0 in `aws/.terraform.lock.hcl` (the constraint `~> 6.68` is unchanged). 6.73.0 was published on 2026-11-11, eleven days before the bump. The lock was written for `linux_amd64` and `darwin_arm64`, the two platforms the old lock held (writing 6.69.1 again that way gives the old file's hashes exactly), and its 16 `zh:` hashes equal the 16 lines of the release's `SHA256SUMS`. The next scheduled AWS run is the first with this provider.
+
 ## [1.10.0] - 2026-11-22
 
 ### Added
