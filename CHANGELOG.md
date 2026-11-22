@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Run [44982327300](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/44982327300), the boundary alone by hand from main at 4cf3fd7 on 2026-11-22, installed azurerm 5.14.0 and azapi 2.14.0 and passed 22 of 22 checks, with nothing left of it or of any earlier run; 0.47 h, about $0.11 at list prices (ADR 23). The agent's first run on them is the scheduled one of 2026-11-24.
+
 ## [1.10.0] - 2026-11-22
 
 ### Added
