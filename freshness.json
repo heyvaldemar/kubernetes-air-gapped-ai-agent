@@ -2,5 +2,5 @@
   "checks": ["charts", "charts_lock", "images", "tools", "ci_images", "terraform_lock"],
   "skip_dirs": ["tests/e2e/plants/", "tests/e2e/plants-frontier/"],
   "skip_suffixes": [".cast"],
-  "terraform_locks": ["aks/.terraform.lock.hcl", "gke/.terraform.lock.hcl", "gke/bootstrap/.terraform.lock.hcl"]
+  "terraform_locks": ["aks/.terraform.lock.hcl", "aws/.terraform.lock.hcl", "gke/.terraform.lock.hcl", "gke/bootstrap/.terraform.lock.hcl"]
 }

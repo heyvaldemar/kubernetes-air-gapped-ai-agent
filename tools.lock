@@ -9,8 +9,8 @@ kind v0.33.0 linux-amd64 https://github.com/kubernetes-sigs/kind/releases/downlo
 kind v0.33.0 darwin-arm64 https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-darwin-arm64 kind 0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f
 kubectl v1.37.2 linux-amd64 https://dl.k8s.io/release/v1.37.2/bin/linux/amd64/kubectl kubectl c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
 kubectl v1.37.2 darwin-arm64 https://dl.k8s.io/release/v1.37.2/bin/darwin/arm64/kubectl kubectl 55701af0d51815ee335f240e48acf0959c3c23017ed3fa816e880c4a92bae581
-oras v1.3.6 linux-amd64 https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_linux_amd64.tar.gz oras 66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0
-oras v1.3.6 darwin-arm64 https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_darwin_arm64.tar.gz oras e2b25a53234e2471c5fc81936f957fa612065ab559c21834c02d8bfbc2f62b30
+oras v1.4.0 linux-amd64 https://github.com/oras-project/oras/releases/download/v1.4.0/oras_1.4.0_linux_amd64.tar.gz oras d8e1dce2fd8ce996f1d901845b688eb0cf505a6082897606f053825bb47935d1
+oras v1.4.0 darwin-arm64 https://github.com/oras-project/oras/releases/download/v1.4.0/oras_1.4.0_darwin_arm64.tar.gz oras 0a7f499bb28793a97bd0939de8654607e753ff6082fd72697a700868b9cdab53
 helm v4.3.2 linux-amd64 https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz linux-amd64/helm d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983
 helm v4.3.2 darwin-arm64 https://get.helm.sh/helm-v4.3.2-darwin-arm64.tar.gz darwin-arm64/helm 6f3421de3a8cc2ac578c8cfb33b8edde290dde2871bc1bab12e24f2e5caeaa90
 cosign v3.1.4 linux-amd64 https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64 cosign 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa

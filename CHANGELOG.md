@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The AWS run's provider, `hashicorp/aws`, moves from 6.69.1 to 6.73.0 in `aws/.terraform.lock.hcl` (the constraint `~> 6.68` is unchanged). 6.73.0 was published on 2026-11-11, eleven days before the bump. The lock was written for `linux_amd64` and `darwin_arm64`, the two platforms the old lock held (writing 6.69.1 again that way gives the old file's hashes exactly), and its 16 `zh:` hashes equal the 16 lines of the release's `SHA256SUMS`. The next scheduled AWS run is the first with this provider.
 
+- `oras` moves from v1.3.6 to v1.4.0 in `tools.lock` (released 2026-11-17): the sha256 of the `linux-amd64` and `darwin-arm64` archives are the ones in the release's `oras_1.4.0_checksums.txt`, and the downloaded archives hash to the same values.
+- The GKE run's Google providers, `hashicorp/google` and `hashicorp/google-beta`, move from 8.11.0 to 8.12.0 (released 2026-11-17) in `gke/.terraform.lock.hcl` and `gke/bootstrap/.terraform.lock.hcl`. The locks were written for `linux_amd64` and `darwin_arm64`, the platforms the old ones held (writing 8.11.0 again that way gives the old files' hashes exactly), each provider's 12 `zh:` hashes equal the lines of its release's `SHA256SUMS`, and `terraform init` and `validate` pass in both folders. The next scheduled GKE run is the first with these providers.
+- `freshness.json` reads `aws/.terraform.lock.hcl` too (`terraform_locks`), now that the AWS provider is bumped, so a pin that falls behind there fails Verify like the AKS and GKE ones.
+
 ## [1.10.0] - 2026-11-22
 
 ### Added
