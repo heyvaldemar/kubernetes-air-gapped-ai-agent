@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `scripts/check-freshness.py` follows the fleet's canon again, fleet-ops `templates/check-freshness.py` at blob 238812399c70 (was da4ff49d): the Terraform registry's latest is read without taking a pre-release for it. The file is the canon byte for byte, which the fleet's conformance check holds it to.
 - Run [44982327300](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/44982327300), the boundary alone by hand from main at 4cf3fd7 on 2026-11-22, installed azurerm 5.14.0 and azapi 2.14.0 and passed 22 of 22 checks, with nothing left of it or of any earlier run; 0.47 h, about $0.11 at list prices (ADR 23). The agent's first run on them is the scheduled one of 2026-11-24.
 
 ## [1.10.0] - 2026-11-22
