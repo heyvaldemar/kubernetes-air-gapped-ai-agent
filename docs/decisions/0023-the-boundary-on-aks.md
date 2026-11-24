@@ -1,6 +1,6 @@
 # 23. The boundary on AKS: a network isolated cluster, no name lookup out, and one delete
 
-- Status: accepted for phase 1, 2026-10-30; weekly from 3 November 2026; on Pay-As-You-Go from 10 November 2026; phase 2, the agent, accepted by hand on 13 November 2026 and put on the schedule on 14 November 2026, its first scheduled run passed on 17 November 2026
+- Status: accepted for phase 1, 2026-10-30; weekly from 3 November 2026; on Pay-As-You-Go from 10 November 2026; phase 2, the agent, accepted by hand on 13 November 2026 and put on the schedule on 14 November 2026, its first two scheduled runs passed, on 17 and 24 November 2026
 - Date: 2026-10-30
 
 ## Context
@@ -119,3 +119,7 @@ The maintainer decided on 2026-11-13: the agent goes on the subscription, on Pay
 In your Azure subscription, the cluster runs in a network with no way out: no public address anywhere, no NAT, and AKS told to make none. AKS normally downloads its own parts from Microsoft's public registry; here it takes them from your own registry inside the network, which fetches them from Microsoft and nothing else. We also close the door most designs leave open: even with no way out, Azure's DNS answers questions about any name on the internet, and data can leave inside those questions. A DNS policy on the network refuses every name but your registry's and the network's own, and a test on a real subscription shows both, that nothing gets out and that it would have, without that policy.
 
 Nothing in it holds a password or a key. The test proves to Azure who it is with a token from GitHub that only this repository's main branch can get, for an identity that can build and tear down this test and grant nothing; a second identity can only delete, and it sweeps up after a run that did not finish. Everything a run makes is in one resource group, so tearing it down is one delete, and the test checks afterwards that nothing is left.
+
+### On Azure, 2026-11-24, on the schedule
+
+- [45411463107](https://github.com/heyvaldemar/kubernetes-air-gapped-ai-agent/actions/runs/45411463107), the second scheduled run with the agent, on main at ff00561 and the first of them with azurerm 5.14.0 and azapi 2.14.0: all 106 checks passed, and the teardown found nothing left of it or of any earlier run. GitHub started it at 14:12 UTC, 10 h 35 min after the cron's 03:37. 0.87 h, about $0.28 at list prices. Cost Management counts it a day later, so its figure is read by the next sweep. The month stood at $1.21 across the runs and the whole subscription, by the report's own table.
